@@ -1,0 +1,58 @@
+package com.zlt.aps.lh.service;
+
+import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+
+import java.util.Date;
+import java.util.List;
+
+/**
+ * 硫化排程结果服务接口
+ *
+ * @author APS
+ */
+public interface ILhScheduleResultService {
+
+    /**
+     * 根据排程日期和工厂查询排程结果
+     *
+     * @param scheduleDate 排程日期
+     * @param factoryCode  分厂编号
+     * @return 排程结果列表
+     */
+    List<LhScheduleResult> selectByDateAndFactory(Date scheduleDate, String factoryCode);
+
+    /**
+     * 查询前日排程结果
+     *
+     * @param scheduleDate 排程日期
+     * @param factoryCode  分厂编号
+     * @return 前日排程结果列表
+     */
+    List<LhScheduleResult> selectPreviousSchedule(Date scheduleDate, String factoryCode);
+
+    /**
+     * 根据排程日期和工厂删除排程结果
+     *
+     * @param scheduleDate 排程日期
+     * @param factoryCode  分厂编号
+     * @return 删除记录数
+     */
+    int deleteByDateAndFactory(Date scheduleDate, String factoryCode);
+
+    /**
+     * 批量插入排程结果
+     *
+     * @param list 排程结果列表
+     * @return 插入记录数
+     */
+    int insertBatch(List<LhScheduleResult> list);
+
+    /**
+     * 检查排程日期是否已下发MES
+     *
+     * @param scheduleDate 排程日期
+     * @param factoryCode  分厂编号
+     * @return 已下发记录数
+     */
+    int countReleasedByDate(Date scheduleDate, String factoryCode);
+}

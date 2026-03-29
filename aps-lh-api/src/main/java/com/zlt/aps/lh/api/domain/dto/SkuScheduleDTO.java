@@ -1,0 +1,111 @@
+package com.zlt.aps.lh.api.domain.dto;
+
+import lombok.Data;
+
+import java.util.Date;
+import java.util.List;
+
+/**
+ * SKU排程数据传输对象
+ * <p>在排程过程中携带SKU的计算中间数据</p>
+ *
+ * @author APS
+ */
+@Data
+public class SkuScheduleDTO {
+
+    /** 物料编码(SKU唯一标识) */
+    private String materialCode;
+    /** 物料描述 */
+    private String materialDesc;
+    /** 产品结构 */
+    private String structureName;
+    /** 胎胚代码 */
+    private String embryoCode;
+    /** 主物料(胎胚描述) */
+    private String mainMaterialDesc;
+    /** 规格代码 */
+    private String specCode;
+    /** 规格描述 */
+    private String specDesc;
+    /** 英寸 */
+    private String proSize;
+    /** 花纹 */
+    private String pattern;
+    /** 主花纹 */
+    private String mainPattern;
+    /** 品牌 */
+    private String brand;
+
+    // ========== 计划量信息 ==========
+    /** 月度计划总量 */
+    private int monthPlanQty;
+    /** 已完成合格量 */
+    private int finishedQty;
+    /** 硫化余量 = 月度计划量 - 已完成合格量 */
+    private int surplusQty;
+    /** T日计划量 */
+    private int dailyPlanQty;
+    /** 待排产量(排程过程中动态递减) */
+    private int pendingQty;
+
+    // ========== 产能信息 ==========
+    /** 硫化时间(秒) */
+    private int lhTimeSeconds;
+    /** 硫化班产(标准) */
+    private int shiftCapacity;
+    /** 日硫化量 */
+    private int dailyCapacity;
+    /** 使用模数 */
+    private int mouldQty;
+
+    // ========== 状态标记 ==========
+    /** SKU标记: 01-常规, 02-收尾 */
+    private String skuTag;
+    /** 排程类型: 01-续作, 02-新增 */
+    private String scheduleType;
+    /** 是否试制量试 */
+    private boolean trial;
+    /** 施工阶段 */
+    private String constructionStage;
+
+    // ========== 优先级信息 ==========
+    /** 排产优先级代码 */
+    private String priorityCode;
+    /** 排产顺序 */
+    private int scheduleOrder;
+    /** 是否有发货要求(锁定交期) */
+    private boolean deliveryLocked;
+    /** 延误天数 */
+    private int delayDays;
+    /** 供应链优先级 */
+    private String supplyChainPriority;
+
+    // ========== 机台信息(续作时使用) ==========
+    /** 续作机台编号 */
+    private String continuousMachineCode;
+    /** 续作机台上的模具号列表 */
+    private List<String> mouldCodeList;
+    /** 预计收尾时间 */
+    private Date estimatedEndTime;
+    /** 收尾日(距离当前天数) */
+    private int endingDaysRemaining;
+
+    // ========== 胎胚相关 ==========
+    /** 胎胚库存 */
+    private int embryoStock;
+    /** 胎胚可供硫化时长(小时) */
+    private double embryoSupplyHours;
+
+    // ========== 月计划版本信息 ==========
+    /** 月计划需求版本 */
+    private String monthPlanVersion;
+    /** 月计划排产版本 */
+    private String productionVersion;
+    /** 制造示方书号 */
+    private String embryoNo;
+    /** 文字示方书号 */
+    private String textNo;
+    /** 硫化示方书号 */
+    private String lhNo;
+}

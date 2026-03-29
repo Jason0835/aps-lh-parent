@@ -1,0 +1,112 @@
+/**
+ * Copyright (c) 2008, 智立通（厦门）科技有限公司 All rights reserved。
+ */
+package com.zlt.aps.lh.engine.strategy.impl;
+
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+/**
+ * 默认首检均衡策略实现
+ * <p>将需首检任务均衡分配到早/中班, 每班不超过5台, 避免单班组过载</p>
+ *
+ * @author APS
+ */
+@Slf4j
+@Component
+public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBalanceStrategy {
+
+    /** dailyFirstInspectionCountMap value数组下标：[0]=早班首检数, [1]=中班首检数 */
+    private static final int IDX_MORNING = 0;
+    private static final int IDX_AFTERNOON = 1;
+    private static final String DATE_KEY_FORMAT = "yyyy-MM-dd";
+
+    @Override
+    public Date allocateInspection(LhScheduleContext context, String machineCode, Date mouldChangeTime) {
+        if (mouldChangeTime == null) {
+            return null;
+        }
+
+        int maxPerShift = context.getParamIntValue("MAX_FIRST_INSPECTION_PER_SHIFT", LhScheduleConstant.MAX_FIRST_INSPECTION_PER_SHIFT);
+
+        // 首检时间 = 换模完成时间（上机后的首检）
+        Date inspectionTime = mouldChangeTime;
+
+        // 最多向后探索5天
+        for (int dayOffset = 0; dayOffset < 5; dayOffset++) {
+            String dateKey = formatDateKey(inspectionTime);
+            int[] counts = context.getDailyFirstInspectionCountMap().computeIfAbsent(dateKey, k -> new int[]{0, 0});
+
+            if (LhScheduleTimeUtil.isMorningShift(context, inspectionTime)) {
+                if (counts[IDX_MORNING] < maxPerShift) {
+                    counts[IDX_MORNING]++;
+                    log.debug("首检分配到早班, 机台: {}, 日期: {}, 早班已用: {}/{}", machineCode, dateKey, counts[IDX_MORNING], maxPerShift);
+                    return inspectionTime;
+                }
+                // 早班已满：判断中班是否有空间且时间窗口满足
+                Date afternoonStart = LhScheduleTimeUtil.getAfternoonShiftStart(context, inspectionTime);
+                if (counts[IDX_AFTERNOON] < maxPerShift && isAfternoonWindowValid(context, afternoonStart)) {
+                    counts[IDX_AFTERNOON]++;
+                    log.debug("首检移至中班, 机台: {}, 日期: {}, 中班已用: {}/{}", machineCode, dateKey, counts[IDX_AFTERNOON], maxPerShift);
+                    return afternoonStart;
+                }
+                // 两班都满，延后到次日早班
+                inspectionTime = getNextDayMorningStart(context, inspectionTime);
+                continue;
+            }
+
+            if (LhScheduleTimeUtil.isAfternoonShift(context, inspectionTime)) {
+                // 检查中班时间窗口是否足够（14:00-20:00之内可以首检）
+                if (counts[IDX_AFTERNOON] < maxPerShift && isAfternoonWindowValid(context, inspectionTime)) {
+                    counts[IDX_AFTERNOON]++;
+                    log.debug("首检分配到中班, 机台: {}, 日期: {}, 中班已用: {}/{}", machineCode, dateKey, counts[IDX_AFTERNOON], maxPerShift);
+                    return inspectionTime;
+                }
+                // 中班已满或时间窗口不足，换到次日早班
+                inspectionTime = getNextDayMorningStart(context, inspectionTime);
+                continue;
+            }
+
+            // 夜班不做首检，延后到次日早班
+            inspectionTime = getNextDayMorningStart(context, inspectionTime);
+        }
+
+        log.warn("首检均衡分配失败，无可用班次, 机台: {}, 换模时间: {}", machineCode, mouldChangeTime);
+        return null;
+    }
+
+    /**
+     * 中班时间窗口有效性检查
+     * <p>中班可安排首检的时间窗口：14:00-20:00（禁止换模开始时间之前），需能完成换模+首检</p>
+     */
+    private boolean isAfternoonWindowValid(LhScheduleContext context, Date inspectionTime) {
+        int noMouldChangeStartHour = LhScheduleConstant.NO_MOULD_CHANGE_START_HOUR;
+        // 首检需在20:00前开始
+        java.util.Calendar cal = java.util.Calendar.getInstance();
+        cal.setTime(inspectionTime);
+        int hour = cal.get(java.util.Calendar.HOUR_OF_DAY);
+        int minute = cal.get(java.util.Calendar.MINUTE);
+        // 首检时间必须在20:00之前，且首检耗时1小时内能完成
+        return hour < noMouldChangeStartHour
+                || (hour == noMouldChangeStartHour - 1 && minute == 0);
+    }
+
+    /**
+     * 获取次日早班开始时间
+     */
+    private Date getNextDayMorningStart(LhScheduleContext context, Date currentTime) {
+        Date nextDay = LhScheduleTimeUtil.addDays(LhScheduleTimeUtil.clearTime(currentTime), 1);
+        return LhScheduleTimeUtil.buildTime(nextDay, LhScheduleTimeUtil.getMorningStartHour(context), 0, 0);
+    }
+
+    private String formatDateKey(Date date) {
+        return new SimpleDateFormat(DATE_KEY_FORMAT).format(date);
+    }
+}

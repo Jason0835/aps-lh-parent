@@ -1,0 +1,208 @@
+/**
+ * Copyright (c) 2008, 智立通（厦门）科技有限公司 All rights reserved。
+ */
+package com.zlt.aps.lh.api.constant;
+
+import java.math.BigDecimal;
+
+/**
+ * 硫化排程常量类
+ *
+ * @author zlt
+ */
+public final class LhScheduleConstant {
+
+    private LhScheduleConstant() {
+    }
+
+    // ======================== 批次号前缀 ========================
+
+    /** 排程批次号前缀 */
+    public static final String BATCH_NO_PREFIX = "LHPC";
+
+    /** 工单号前缀 */
+    public static final String ORDER_NO_PREFIX = "LHGD";
+
+    /** 换模工单前缀 */
+    public static final String MOULD_CHANGE_ORDER_PREFIX = "CHG";
+
+    // ======================== 班次时间相关（小时） ========================
+
+    /** 每班时长（小时） */
+    public static final int SHIFT_DURATION_HOURS = 8;
+
+    /** 夜班开始小时 */
+    public static final int NIGHT_SHIFT_START_HOUR = 22;
+
+    /** 早班开始小时 */
+    public static final int MORNING_SHIFT_START_HOUR = 6;
+
+    /** 中班开始小时 */
+    public static final int AFTERNOON_SHIFT_START_HOUR = 14;
+
+    /** 禁止换模开始小时 */
+    public static final int NO_MOULD_CHANGE_START_HOUR = 20;
+
+    /** 禁止换模结束小时 */
+    public static final int NO_MOULD_CHANGE_END_HOUR = 6;
+
+    // ======================== 换模相关 ========================
+
+    /** 每日默认换模上限 */
+    public static final int DEFAULT_DAILY_MOULD_CHANGE_LIMIT = 15;
+
+    /** 早班默认换模上限 */
+    public static final int DEFAULT_MORNING_MOULD_CHANGE_LIMIT = 8;
+
+    /** 中班默认换模上限 */
+    public static final int DEFAULT_AFTERNOON_MOULD_CHANGE_LIMIT = 7;
+
+    /** 夜班默认换模上限 */
+    public static final int DEFAULT_NIGHT_MOULD_CHANGE_LIMIT = 0;
+
+    /** 换模预热时间（小时） */
+    public static final int MOULD_CHANGE_PREHEAT_HOURS = 4;
+
+    /** 换模其他作业时间（小时） */
+    public static final int MOULD_CHANGE_OTHER_HOURS = 4;
+
+    /** 换模总耗时（小时） */
+    public static final int MOULD_CHANGE_TOTAL_HOURS = 8;
+
+    // ======================== 首检相关 ========================
+
+    /** 首检时间（小时） */
+    public static final int FIRST_INSPECTION_HOURS = 1;
+
+    /** 首检数量 */
+    public static final int FIRST_INSPECTION_QTY = 2;
+
+    /** 每班最大首检次数 */
+    public static final int MAX_FIRST_INSPECTION_PER_SHIFT = 5;
+
+    // ======================== 收尾判定 ========================
+
+    /** 收尾判定天数 */
+    public static final int DEFAULT_ENDING_DAYS = 3;
+
+    /** 降模排产：结构收尾判定天数 */
+    public static final int DEFAULT_STRUCTURE_ENDING_DAYS = 5;
+
+    /** 机台收尾时间容差（分钟） */
+    public static final int DEFAULT_ENDING_TIME_TOLERANCE_MINUTES = 20;
+
+    // ======================== 干冰清洗相关 ========================
+
+    /** 干冰清洗间隔天数 */
+    public static final int DRY_ICE_INTERVAL_DAYS = 25;
+
+    /** 干冰清洗预警天数 */
+    public static final int DRY_ICE_WARNING_DAYS = 20;
+
+    /** 干冰清洗提前天数 */
+    public static final int DRY_ICE_ADVANCE_DAYS = 7;
+
+    /** 干冰清洗耗时（小时） */
+    public static final int DRY_ICE_DURATION_HOURS = 3;
+
+    /** 干冰清洗损失数量 */
+    public static final int DRY_ICE_LOSS_QTY = 6;
+
+    /** 每日干冰清洗上限 */
+    public static final int DRY_ICE_DAILY_LIMIT = 3;
+
+    // ======================== 喷砂清洗相关 ========================
+
+    /** 喷砂清洗耗时（小时） */
+    public static final int SAND_BLAST_DURATION_HOURS = 10;
+
+    /** 喷砂清洗含首检耗时（小时） */
+    public static final int SAND_BLAST_WITH_INSPECTION_HOURS = 12;
+
+    /** 每日喷砂清洗上限 */
+    public static final int SAND_BLAST_DAILY_LIMIT = 1;
+
+    /** 喷砂保养日-月中 */
+    public static final int SAND_BLAST_MAINTENANCE_DAY_MID = 15;
+
+    /** 喷砂保养日-月末 */
+    public static final int SAND_BLAST_MAINTENANCE_DAY_END = 28;
+
+    // ======================== 设备保养相关 ========================
+
+    /** 保养耗时（小时） */
+    public static final int MAINTENANCE_DURATION_HOURS = 7;
+
+    /** 保养开始小时 */
+    public static final int MAINTENANCE_START_HOUR = 8;
+
+    /** 保养预警天数 */
+    public static final int MAINTENANCE_WARNING_DAYS = 30;
+
+    /** 胶囊预热时间（小时） */
+    public static final BigDecimal CAPSULE_PREHEAT_HOURS = new BigDecimal("2.5");
+
+    // ======================== 停机超时阈值 ========================
+
+    /** 停机超时阈值（小时） */
+    public static final int MACHINE_STOP_TIMEOUT_HOURS = 24;
+
+    // ======================== 胶囊相关 ========================
+
+    /** 胶囊预警次数 */
+    public static final int CAPSULE_WARNING_COUNT = 430;
+
+    /** 胶囊强制下机次数 */
+    public static final int CAPSULE_FORCE_DOWN_COUNT = 450;
+
+    /** 胶囊更换损失数量 */
+    public static final int CAPSULE_CHANGE_LOSS_QTY = 2;
+
+    // ======================== 工作日历工序代码 ========================
+
+    /** 硫化工序代码 */
+    public static final String PROC_CODE_LH = "02";
+
+    // ======================== 开停产比例 ========================
+
+    /** 停产前第3天产能比例(%) */
+    public static final int SHUTDOWN_DAY_MINUS_3_RATE = 90;
+
+    /** 停产前第2天产能比例(%) */
+    public static final int SHUTDOWN_DAY_MINUS_2_RATE = 80;
+
+    /** 停产前第1天产能比例(%) */
+    public static final int SHUTDOWN_DAY_MINUS_1_RATE = 70;
+
+    /** 开产首日产能比例(%) */
+    public static final int STARTUP_FIRST_DAY_RATE = 50;
+
+    // ======================== 试制量试 ========================
+
+    /** 试制量试每日上限 */
+    public static final int TRIAL_DAILY_LIMIT = 2;
+
+    // ======================== 模具交替计划天数 ========================
+
+    /** 模具交替计划天数 */
+    public static final int MOULD_CHANGE_PLAN_DAYS = 2;
+
+    // ======================== 排程天数 ========================
+
+    /** 排程天数 */
+    public static final int SCHEDULE_DAYS = 3;
+
+    /** 总班次数（3天 * 3班） */
+    public static final int TOTAL_SHIFTS = 9;
+
+    // ======================== 左右模 ========================
+
+    /** 左模标识 */
+    public static final String LEFT_MOULD = "L";
+
+    /** 右模标识 */
+    public static final String RIGHT_MOULD = "R";
+
+    /** 左右模标识 */
+    public static final String LEFT_RIGHT_MOULD = "LR";
+}

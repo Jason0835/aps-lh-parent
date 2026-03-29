@@ -1,0 +1,558 @@
+/**
+ * Copyright (c) 2008, 智立通（厦门）科技有限公司 All rights reserved。
+ */
+package com.zlt.aps.lh.engine.strategy.impl;
+
+import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.enums.SkuTagEnum;
+import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
+import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
+import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
+import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * 续作排产策略实现
+ * <p>处理续作场景下的排产逻辑, 包括换活字块、收尾判定、班次分配、库存调整、降模等</p>
+ *
+ * @author APS
+ */
+@Slf4j
+@Component("continuousProductionStrategy")
+public class ContinuousProductionStrategy implements IProductionStrategy {
+
+    @Override
+    public void scheduleTypeBlockChange(LhScheduleContext context) {
+        log.info("续作排产 - 换活字块排产, 机台数: {}", context.getMachineScheduleMap().size());
+
+        List<LhScheduleTimeUtil.ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+
+        // 按收尾时间升序处理每个在产机台
+        List<MachineScheduleDTO> endingMachines = context.getMachineScheduleMap().values().stream()
+                .filter(m -> m.isEnding() && m.getEstimatedEndTime() != null)
+                .sorted(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime))
+                .collect(Collectors.toList());
+
+        for (MachineScheduleDTO machine : endingMachines) {
+            // 在newSpecSkuList中查找同胎胚同模具（换活字块）的SKU
+            SkuScheduleDTO typeBlockSku = findTypeBlockChangeSku(context, machine);
+            if (typeBlockSku == null) {
+                continue;
+            }
+            // 计算开产时间（同模具换活字块，无需换模，但需首检）
+            Date startTime = calcTypeBlockStartTime(context, machine);
+            if (startTime == null) {
+                continue;
+            }
+            // 创建排程结果并分配到各班次
+            LhScheduleResult result = buildScheduleResult(context, machine, typeBlockSku, startTime, shifts, false);
+            if (result != null) {
+                context.getScheduleResultList().add(result);
+                registerMachineAssignment(context, machine.getMachineCode(), result);
+                // 从新增SKU列表中移除已排产的SKU
+                context.getNewSpecSkuList().remove(typeBlockSku);
+                log.debug("换活字块排产完成, 机台: {}, SKU: {}", machine.getMachineCode(), typeBlockSku.getMaterialCode());
+            }
+        }
+    }
+
+    @Override
+    public void scheduleContinuousEnding(LhScheduleContext context) {
+        log.info("续作排产 - 续作收尾判定, 续作SKU数: {}", context.getContinuousSkuList().size());
+
+        List<LhScheduleTimeUtil.ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+
+        for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
+            String machineCode = sku.getContinuousMachineCode();
+            MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
+            if (machine == null) {
+                continue;
+            }
+
+            int dailyCapacity = sku.getDailyCapacity();
+            int pendingQty = sku.getPendingQty();
+
+            // 收尾判定：待排量 < 日产则为收尾，否则满产
+            boolean isEnding = SkuTagEnum.ENDING.getCode().equals(sku.getSkuTag())
+                    || (dailyCapacity > 0 && pendingQty < dailyCapacity);
+
+            // 创建排程结果（续作从班次1开始）
+            Date startTime = shifts.isEmpty() ? new Date() : shifts.get(0).getStartTime();
+            LhScheduleResult result = buildScheduleResult(context, machine, sku, startTime, shifts, isEnding);
+            if (result != null) {
+                result.setScheduleType("01");
+                result.setIsEnd(isEnding ? "1" : "0");
+                context.getScheduleResultList().add(result);
+                registerMachineAssignment(context, machineCode, result);
+
+                // 如果是收尾，更新机台收尾信息
+                if (isEnding && result.getSpecEndTime() != null) {
+                    machine.setEnding(true);
+                    machine.setEstimatedEndTime(result.getSpecEndTime());
+                }
+            }
+        }
+    }
+
+    @Override
+    public void allocateShiftPlanQty(LhScheduleContext context) {
+        log.info("续作排产 - 班次计划量分配");
+
+        List<LhScheduleTimeUtil.ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (!"01".equals(result.getScheduleType())) {
+                continue;
+            }
+            // 重新按班次分配（夜->早->中顺序按可用量分配）
+            redistributeShiftQty(result, shifts);
+        }
+    }
+
+    @Override
+    public void adjustEmbryoStock(LhScheduleContext context) {
+        log.info("续作排产 - 胎胚库存调整");
+
+        // 收尾SKU优先占用胎胚库存，普通SKU再按顺序扣减
+        Map<String, Integer> embryoStockMap = buildEmbryoStockMap(context);
+
+        // 先处理收尾SKU
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if ("1".equals(result.getIsEnd())) {
+                adjustResultByEmbryoStock(result, embryoStockMap);
+            }
+        }
+        // 再处理普通SKU
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (!"1".equals(result.getIsEnd())) {
+                adjustResultByEmbryoStock(result, embryoStockMap);
+            }
+        }
+    }
+
+    @Override
+    public void scheduleReduceMould(LhScheduleContext context) {
+        log.info("续作排产 - 降模排产");
+
+        // 按materialCode分组找出同SKU多机台情况
+        Map<String, List<LhScheduleResult>> skuResultMap = new HashMap<>();
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if ("01".equals(result.getScheduleType())) {
+                skuResultMap.computeIfAbsent(result.getMaterialCode(), k -> new ArrayList<>()).add(result);
+            }
+        }
+
+        for (Map.Entry<String, List<LhScheduleResult>> entry : skuResultMap.entrySet()) {
+            List<LhScheduleResult> skuResults = entry.getValue();
+            if (skuResults.size() <= 1) {
+                continue;
+            }
+
+            int surplusQty = 0;
+            SkuScheduleDTO skuDto = findSkuDto(context, entry.getKey());
+            if (skuDto != null) {
+                surplusQty = skuDto.getSurplusQty();
+            }
+
+            // 总计划量超过余量时才降模
+            int totalPlanQty = skuResults.stream().mapToInt(r -> r.getTotalDailyPlanQty() != null ? r.getTotalDailyPlanQty() : 0).sum();
+            if (totalPlanQty <= surplusQty) {
+                continue;
+            }
+
+            // 按胶囊使用次数升序，减少胶囊使用次数少的机台的计划（胶囊已使用次数少的优先下机）
+            skuResults.sort(Comparator.comparingInt(r -> {
+                MachineScheduleDTO m = context.getMachineScheduleMap().get(r.getLhMachineCode());
+                return m != null ? m.getCapsuleUsageCount() : 0;
+            }));
+
+            int remaining = surplusQty;
+            for (LhScheduleResult result : skuResults) {
+                int allocation = Math.min(remaining, result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0);
+                result.setTotalDailyPlanQty(allocation);
+                remaining -= allocation;
+                if (remaining <= 0) {
+                    // 该机台降为0：标记为收尾并更新结束时间
+                    result.setIsEnd("1");
+                }
+            }
+        }
+    }
+
+    @Override
+    public void scheduleNewSpecs(LhScheduleContext context,
+                                 IMachineMatchStrategy machineMatch,
+                                 IMouldChangeBalanceStrategy mouldChangeBalance,
+                                 IFirstInspectionBalanceStrategy inspectionBalance,
+                                 ICapacityCalculateStrategy capacityCalculate) {
+        // 续作策略不处理新增规格排产，空实现
+    }
+
+    // ==================== 私有辅助方法 ====================
+
+    /**
+     * 在新增SKU列表中查找可以换活字块的SKU（同胎胚同模具）
+     */
+    private SkuScheduleDTO findTypeBlockChangeSku(LhScheduleContext context, MachineScheduleDTO machine) {
+        String machineEmbryoCode = machine.getCurrentMaterialCode();
+        if (machineEmbryoCode == null) {
+            return null;
+        }
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            // 同胎胚代码判定（活字块通过胎胚代码识别）
+            if (machineEmbryoCode.equals(sku.getEmbryoCode())) {
+                // 验证模具兼容：SKU的模具在机台现有模具集合内
+                if (isMouldCompatible(context, sku, machine)) {
+                    return sku;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 验证SKU模具与机台当前模具是否兼容（同模具换活字块）
+     */
+    private boolean isMouldCompatible(LhScheduleContext context, SkuScheduleDTO sku, MachineScheduleDTO machine) {
+        List<MdmSkuMouldRel> mouldRels = context.getSkuMouldRelMap().get(sku.getMaterialCode());
+        if (mouldRels == null || mouldRels.isEmpty()) {
+            return false;
+        }
+        List<MdmSkuMouldRel> machineMoulds = context.getSkuMouldRelMap().get(machine.getCurrentMaterialCode());
+        if (machineMoulds == null || machineMoulds.isEmpty()) {
+            return false;
+        }
+        // 检查是否有相同的模具号
+        for (MdmSkuMouldRel rel : mouldRels) {
+            for (MdmSkuMouldRel machineRel : machineMoulds) {
+                if (rel.getMouldCode() != null && rel.getMouldCode().equals(machineRel.getMouldCode())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 计算换活字块开产时间（无需换模，但需首检时间）
+     */
+    private Date calcTypeBlockStartTime(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (machine.getEstimatedEndTime() == null) {
+            return null;
+        }
+        // 换活字块：收尾时间 + 首检时间（1小时）
+        return LhScheduleTimeUtil.addHours(machine.getEstimatedEndTime(),
+                LhScheduleTimeUtil.getFirstInspectionHours(context));
+    }
+
+    /**
+     * 构建排程结果，分配各班次计划量
+     */
+    private LhScheduleResult buildScheduleResult(LhScheduleContext context,
+                                                  MachineScheduleDTO machine,
+                                                  SkuScheduleDTO sku,
+                                                  Date startTime,
+                                                  List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                                  boolean isEnding) {
+        LhScheduleResult result = new LhScheduleResult();
+        result.setFactoryCode(context.getFactoryCode());
+        result.setBatchNo(context.getBatchNo());
+        result.setLhMachineCode(machine.getMachineCode());
+        result.setLhMachineName(machine.getMachineName());
+        result.setMaterialCode(sku.getMaterialCode());
+        result.setMaterialDesc(sku.getMaterialDesc());
+        result.setSpecCode(sku.getSpecCode());
+        result.setSpecDesc(sku.getSpecDesc());
+        result.setEmbryoCode(sku.getEmbryoCode());
+        result.setMainMaterialDesc(sku.getMainMaterialDesc());
+        result.setStructureName(sku.getStructureName());
+        result.setScheduleDate(context.getScheduleDate());
+        result.setLhTime(sku.getLhTimeSeconds());
+        result.setMouldQty(sku.getMouldQty());
+        result.setDailyPlanQty(sku.getDailyPlanQty());
+        result.setMouldSurplusQty(sku.getSurplusQty());
+        result.setIsEnd(isEnding ? "1" : "0");
+        result.setIsDelivery(sku.isDeliveryLocked() ? "1" : "0");
+        result.setIsRelease("0");
+        result.setDataSource("0");
+        result.setIsDelete(0);
+        result.setScheduleType(sku.getScheduleType() != null ? sku.getScheduleType() : "01");
+        result.setConstructionStage(sku.getConstructionStage());
+        result.setEmbryoNo(sku.getEmbryoNo());
+        result.setTextNo(sku.getTextNo());
+        result.setLhNo(sku.getLhNo());
+        result.setMonthPlanVersion(sku.getMonthPlanVersion());
+        result.setProductionVersion(sku.getProductionVersion());
+        result.setIsTrial(sku.isTrial() ? "1" : "0");
+        result.setMachineOrder(machine.getMachineOrder());
+
+        // 生成工单号
+        String orderNo = generateOrderNo(context);
+        result.setOrderNo(orderNo);
+
+        // 按班次分配计划量
+        int remaining = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
+        remaining = distributeToShifts(result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), remaining);
+
+        // 设置收尾时间（最后一个有计划量班次的结束时间）
+        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), sku.getMouldQty(), remaining, isEnding);
+        result.setSpecEndTime(specEndTime);
+        result.setTdaySpecEndTime(specEndTime);
+
+        int totalQty = calcTotalPlanQty(result);
+        result.setTotalDailyPlanQty(totalQty);
+        result.setRealScheduleDate(context.getScheduleDate());
+        result.setProductionStatus("0");
+
+        return result;
+    }
+
+    /**
+     * 向各班次分配计划量（从startTime所在班次开始，按夜->早->中次序填满）
+     *
+     * @return 未能排产的剩余量
+     */
+    private int distributeToShifts(LhScheduleResult result,
+                                   List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                   Date startTime,
+                                   int lhTimeSeconds,
+                                   int mouldQty,
+                                   int remaining) {
+        if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0) {
+            return remaining;
+        }
+
+        boolean started = false;
+        for (LhScheduleTimeUtil.ShiftInfo shift : shifts) {
+            if (remaining <= 0) {
+                break;
+            }
+            // 找到开始班次：startTime在该班次的时间范围内，或者已经开始
+            if (!started) {
+                if (startTime != null && !startTime.before(shift.getEndTime()) && shift != shifts.get(shifts.size() - 1)) {
+                    continue;
+                }
+                started = true;
+            }
+
+            // 计算该班次可用时间
+            Date effectiveStart = (startTime != null && startTime.after(shift.getStartTime()))
+                    ? startTime : shift.getStartTime();
+            if (effectiveStart.after(shift.getEndTime())) {
+                continue;
+            }
+
+            long availableSeconds = (shift.getEndTime().getTime() - effectiveStart.getTime()) / 1000L;
+            if (availableSeconds <= 0) {
+                continue;
+            }
+
+            int shiftMaxQty = (int) (availableSeconds / lhTimeSeconds) * mouldQty;
+            int shiftQty = Math.min(remaining, shiftMaxQty);
+
+            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getEndTime());
+            remaining -= shiftQty;
+            startTime = null;
+        }
+        return remaining;
+    }
+
+    /**
+     * 按班次索引设置计划量和开始/结束时间
+     */
+    private void setShiftPlanQty(LhScheduleResult result, int shiftIndex, int qty, Date startTime, Date endTime) {
+        switch (shiftIndex) {
+            case 1: result.setClass1PlanQty(qty); result.setClass1StartTime(startTime); result.setClass1EndTime(endTime); break;
+            case 2: result.setClass2PlanQty(qty); result.setClass2StartTime(startTime); result.setClass2EndTime(endTime); break;
+            case 3: result.setClass3PlanQty(qty); result.setClass3StartTime(startTime); result.setClass3EndTime(endTime); break;
+            case 4: result.setClass4PlanQty(qty); result.setClass4StartTime(startTime); result.setClass4EndTime(endTime); break;
+            case 5: result.setClass5PlanQty(qty); result.setClass5StartTime(startTime); result.setClass5EndTime(endTime); break;
+            case 6: result.setClass6PlanQty(qty); result.setClass6StartTime(startTime); result.setClass6EndTime(endTime); break;
+            case 7: result.setClass7PlanQty(qty); result.setClass7StartTime(startTime); result.setClass7EndTime(endTime); break;
+            case 8: result.setClass8PlanQty(qty); result.setClass8StartTime(startTime); result.setClass8EndTime(endTime); break;
+            default: log.warn("未知班次索引: {}", shiftIndex); break;
+        }
+    }
+
+    /**
+     * 计算规格收尾时间（最后一个有计划量班次中，完成剩余量所需的时间点）
+     */
+    private Date calcSpecEndTime(LhScheduleResult result,
+                                 List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                 int lhTimeSeconds,
+                                 int mouldQty,
+                                 int remainingUnscheduled,
+                                 boolean isEnding) {
+        if (!isEnding) {
+            return null;
+        }
+        // 找到最后一个有计划量的班次
+        for (int i = shifts.size() - 1; i >= 0; i--) {
+            LhScheduleTimeUtil.ShiftInfo shift = shifts.get(i);
+            Integer planQty = getShiftPlanQty(result, shift.getShiftIndex());
+            if (planQty != null && planQty > 0 && lhTimeSeconds > 0 && mouldQty > 0) {
+                // 收尾时间 = 该班次开始时间 + (计划量/模数) * 硫化时间
+                long secondsNeeded = (long) (planQty / mouldQty) * lhTimeSeconds;
+                Date shiftStart = getShiftStartTime(result, shift.getShiftIndex());
+                if (shiftStart != null) {
+                    return new Date(shiftStart.getTime() + secondsNeeded * 1000L);
+                }
+                return shift.getEndTime();
+            }
+        }
+        return null;
+    }
+
+    private Integer getShiftPlanQty(LhScheduleResult result, int shiftIndex) {
+        switch (shiftIndex) {
+            case 1: return result.getClass1PlanQty();
+            case 2: return result.getClass2PlanQty();
+            case 3: return result.getClass3PlanQty();
+            case 4: return result.getClass4PlanQty();
+            case 5: return result.getClass5PlanQty();
+            case 6: return result.getClass6PlanQty();
+            case 7: return result.getClass7PlanQty();
+            case 8: return result.getClass8PlanQty();
+            default: return null;
+        }
+    }
+
+    private Date getShiftStartTime(LhScheduleResult result, int shiftIndex) {
+        switch (shiftIndex) {
+            case 1: return result.getClass1StartTime();
+            case 2: return result.getClass2StartTime();
+            case 3: return result.getClass3StartTime();
+            case 4: return result.getClass4StartTime();
+            case 5: return result.getClass5StartTime();
+            case 6: return result.getClass6StartTime();
+            case 7: return result.getClass7StartTime();
+            case 8: return result.getClass8StartTime();
+            default: return null;
+        }
+    }
+
+    private int calcTotalPlanQty(LhScheduleResult result) {
+        int total = 0;
+        for (int i = 1; i <= 8; i++) {
+            Integer qty = getShiftPlanQty(result, i);
+            total += (qty != null ? qty : 0);
+        }
+        return total;
+    }
+
+    /**
+     * 重新在班次间均衡分配计划量（用于allocateShiftPlanQty后续调整）
+     */
+    private void redistributeShiftQty(LhScheduleResult result, List<LhScheduleTimeUtil.ShiftInfo> shifts) {
+        if (result.getLhTime() == null || result.getLhTime() <= 0 || result.getMouldQty() == null) {
+            return;
+        }
+        int shiftSeconds = 8 * 3600;
+        int shiftCapacity = (shiftSeconds / result.getLhTime()) * result.getMouldQty();
+        int totalQty = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
+        int remaining = totalQty;
+
+        for (LhScheduleTimeUtil.ShiftInfo shift : shifts) {
+            if (remaining <= 0) {
+                setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
+                continue;
+            }
+            int shiftQty = Math.min(remaining, shiftCapacity);
+            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, shift.getStartTime(), shift.getEndTime());
+            remaining -= shiftQty;
+        }
+    }
+
+    /**
+     * 构建胎胚库存Map（基于context中现有的skuLhCapacityMap，用materialCode的embryoCode分组统计）
+     */
+    private Map<String, Integer> buildEmbryoStockMap(LhScheduleContext context) {
+        Map<String, Integer> stockMap = new HashMap<>();
+        for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
+            if (sku.getEmbryoCode() != null) {
+                stockMap.put(sku.getEmbryoCode(), sku.getEmbryoStock());
+            }
+        }
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (sku.getEmbryoCode() != null && !stockMap.containsKey(sku.getEmbryoCode())) {
+                stockMap.put(sku.getEmbryoCode(), sku.getEmbryoStock());
+            }
+        }
+        return stockMap;
+    }
+
+    /**
+     * 根据胎胚库存调整排程结果的计划量
+     */
+    private void adjustResultByEmbryoStock(LhScheduleResult result, Map<String, Integer> embryoStockMap) {
+        String embryoCode = result.getEmbryoCode();
+        if (embryoCode == null) {
+            return;
+        }
+        Integer stock = embryoStockMap.get(embryoCode);
+        if (stock == null || stock <= 0) {
+            return;
+        }
+        int totalPlan = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
+        if (totalPlan <= stock) {
+            embryoStockMap.put(embryoCode, stock - totalPlan);
+        } else {
+            // 库存不足，削减计划量
+            result.setTotalDailyPlanQty(stock);
+            embryoStockMap.put(embryoCode, 0);
+        }
+    }
+
+    /**
+     * 注册机台排程分配记录
+     */
+    private void registerMachineAssignment(LhScheduleContext context, String machineCode, LhScheduleResult result) {
+        context.getMachineAssignmentMap()
+                .computeIfAbsent(machineCode, k -> new ArrayList<>())
+                .add(result);
+    }
+
+    /**
+     * 在所有SKU列表中查找指定materialCode的SKU
+     */
+    private SkuScheduleDTO findSkuDto(LhScheduleContext context, String materialCode) {
+        for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
+            if (materialCode.equals(sku.getMaterialCode())) {
+                return sku;
+            }
+        }
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (materialCode.equals(sku.getMaterialCode())) {
+                return sku;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 生成工单号：LHGD + 年月日 + 3位序号
+     */
+    private static int orderSeq = 0;
+
+    private String generateOrderNo(LhScheduleContext context) {
+        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd");
+        String dateStr = sdf.format(context.getScheduleDate());
+        int seq = (++orderSeq) % 1000;
+        return String.format("%s%s%03d", "LHGD", dateStr, seq);
+    }
+}

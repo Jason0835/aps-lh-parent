@@ -16,11 +16,4 @@ public interface ILhBaseDataService {
      * @param context 排程上下文
      */
     void loadAllBaseData(LhScheduleContext context);
-
-    /**
-     * 加载硫化参数
-     *
-     * @param context 排程上下文
-     */
-    void loadLhParams(LhScheduleContext context);
 }

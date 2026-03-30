@@ -1,10 +1,14 @@
 package com.zlt.aps.lh.handle;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhParams;
+import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.engine.chain.DataValidationChain;
+import com.zlt.aps.lh.mapper.LhParamsMapper;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
@@ -15,6 +19,7 @@ import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -33,10 +38,13 @@ public class DataInitHandler extends AbsScheduleStepHandler {
     @Resource
     private ILhBaseDataService baseDataService;
 
+    @Resource
+    private LhParamsMapper lhParamsMapper;
+
     @Override
     protected void doHandle(LhScheduleContext context) {
         // S4.2.1 先加载硫化参数
-        baseDataService.loadLhParams(context);
+        loadLhParams(context);
 
         // S4.2.2 加载所有基础数据
         loadBaseData(context);
@@ -53,6 +61,24 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
         log.info("基础数据初始化完成, 机台数量: {}, 月计划SKU数: {}",
                 context.getMachineInfoMap().size(), context.getMonthPlanList().size());
+    }
+
+    /**
+     * 使用 MyBatis-Plus 按分厂加载硫化参数到上下文
+     */
+    private void loadLhParams(LhScheduleContext context) {
+        List<LhParams> paramsList = lhParamsMapper.selectList(
+                new LambdaQueryWrapper<LhParams>()
+                        .eq(LhParams::getFactoryCode, context.getFactoryCode())
+                        .eq(LhParams::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        if (paramsList != null) {
+            for (LhParams param : paramsList) {
+                if (param.getParamCode() != null && param.getParamValue() != null) {
+                    context.getLhParamsMap().put(param.getParamCode(), param.getParamValue());
+                }
+            }
+        }
+        log.info("硫化参数加载完成, 参数数量: {}", context.getLhParamsMap().size());
     }
 
     /**

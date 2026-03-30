@@ -1,13 +1,26 @@
 package com.zlt.aps.lh.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
-import com.zlt.aps.lh.api.domain.entity.LhParams;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
-import com.zlt.aps.lh.mapper.LhBaseDataMapper;
-import com.zlt.aps.lh.mapper.LhParamsMapper;
+import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
+import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
+import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
+import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
+import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
+import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
+import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
+import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
+import com.zlt.aps.lh.mapper.MdmLhMachineOnlineInfoMapper;
+import com.zlt.aps.lh.mapper.MdmLhRepairCapsuleMapper;
+import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
+import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
+import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
+import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
+import com.zlt.aps.lh.mapper.MdmWorkCalendarMapper;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
@@ -42,11 +55,50 @@ import java.util.Map;
 @Service
 public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
-    @Resource
-    private LhBaseDataMapper baseDataMapper;
+    /** 机台启用状态，对应字典 sys_enable_disable */
+    private static final String MACHINE_STATUS_ENABLED = "0";
 
     @Resource
-    private LhParamsMapper lhParamsMapper;
+    private FactoryMonthPlanProductionFinalResultMapper monthPlanMapper;
+
+    @Resource
+    private MdmWorkCalendarMapper workCalendarMapper;
+
+    @Resource
+    private MdmSkuLhCapacityMapper skuLhCapacityMapper;
+
+    @Resource
+    private MdmDevicePlanShutMapper devicePlanShutMapper;
+
+    @Resource
+    private MdmSkuMouldRelMapper skuMouldRelMapper;
+
+    @Resource
+    private LhMachineInfoMapper lhMachineInfoMapper;
+
+    @Resource
+    private LhCleaningPlanMapper lhCleaningPlanMapper;
+
+    @Resource
+    private MdmMonthSurplusMapper monthSurplusMapper;
+
+    @Resource
+    private LhShiftFinishQtyMapper lhShiftFinishQtyMapper;
+
+    @Resource
+    private MdmMaterialInfoMapper mdmMaterialInfoMapper;
+
+    @Resource
+    private MdmLhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
+
+    @Resource
+    private LhSpecifyMachineMapper lhSpecifyMachineMapper;
+
+    @Resource
+    private MdmLhRepairCapsuleMapper lhRepairCapsuleMapper;
+
+    @Resource
+    private MdmDevMaintenancePlanMapper devMaintenancePlanMapper;
 
     @Override
     public void loadAllBaseData(LhScheduleContext context) {
@@ -110,18 +162,6 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         log.info("基础数据加载完成, 工厂: {}, 排程日期: {}", factoryCode, scheduleDate);
     }
 
-    @Override
-    public void loadLhParams(LhScheduleContext context) {
-        List<LhParams> paramsList = lhParamsMapper.selectByFactoryCode(context.getFactoryCode());
-        if (paramsList != null) {
-            for (LhParams param : paramsList) {
-                if (param.getParamCode() != null && param.getParamValue() != null) {
-                    context.getLhParamsMap().put(param.getParamCode(), param.getParamValue());
-                }
-            }
-        }
-        log.info("硫化参数加载完成, 参数数量: {}", context.getLhParamsMap().size());
-    }
 
     /**
      * 加载月生产计划
@@ -131,8 +171,15 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param yearMonth   年月（如202603）
      */
     private void loadMonthPlan(LhScheduleContext context, String factoryCode, int yearMonth) {
-        List<FactoryMonthPlanProductionFinalResult> monthPlanList =
-                baseDataMapper.selectMonthPlan(factoryCode, yearMonth, context.getProductionVersion());
+        LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult> w = new LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult>()
+                .eq(FactoryMonthPlanProductionFinalResult::getFactoryCode, factoryCode)
+                .eq(FactoryMonthPlanProductionFinalResult::getYearMonth, yearMonth)
+                .eq(FactoryMonthPlanProductionFinalResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
+        String productionVersion = context.getProductionVersion();
+        if (productionVersion != null && !productionVersion.isEmpty()) {
+            w.eq(FactoryMonthPlanProductionFinalResult::getProductionVersion, productionVersion);
+        }
+        List<FactoryMonthPlanProductionFinalResult> monthPlanList = monthPlanMapper.selectList(w);
         context.setMonthPlanList(monthPlanList != null ? monthPlanList : context.getMonthPlanList());
         log.debug("月生产计划加载完成, 数量: {}", context.getMonthPlanList().size());
     }
@@ -146,8 +193,13 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param endDate     结束日期
      */
     private void loadWorkCalendar(LhScheduleContext context, String factoryCode, Date startDate, Date endDate) {
-        List<MdmWorkCalendar> workCalendarList =
-                baseDataMapper.selectWorkCalendar(factoryCode, LhScheduleConstant.PROC_CODE_LH, startDate, endDate);
+        List<MdmWorkCalendar> workCalendarList = workCalendarMapper.selectList(
+                new LambdaQueryWrapper<MdmWorkCalendar>()
+                        .eq(MdmWorkCalendar::getFactoryCode, factoryCode)
+                        .eq(MdmWorkCalendar::getProcCode, LhScheduleConstant.PROC_CODE_LH)
+                        .ge(MdmWorkCalendar::getProductionDate, startDate)
+                        .lt(MdmWorkCalendar::getProductionDate, endDate)
+                        .eq(MdmWorkCalendar::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         context.setWorkCalendarList(workCalendarList != null ? workCalendarList : context.getWorkCalendarList());
         log.debug("工作日历加载完成, 数量: {}", context.getWorkCalendarList().size());
     }
@@ -159,7 +211,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadSkuLhCapacity(LhScheduleContext context, String factoryCode) {
-        List<MdmSkuLhCapacity> skuCapacityList = baseDataMapper.selectSkuLhCapacity(factoryCode);
+        List<MdmSkuLhCapacity> skuCapacityList = skuLhCapacityMapper.selectList(
+                new LambdaQueryWrapper<MdmSkuLhCapacity>()
+                        .eq(MdmSkuLhCapacity::getFactoryCode, factoryCode)
+                        .eq(MdmSkuLhCapacity::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmSkuLhCapacity> skuLhCapacityMap = new HashMap<>(64);
         if (skuCapacityList != null) {
             for (MdmSkuLhCapacity capacity : skuCapacityList) {
@@ -181,8 +236,12 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param endDate     结束日期
      */
     private void loadDevicePlanShut(LhScheduleContext context, String factoryCode, Date startDate, Date endDate) {
-        List<MdmDevicePlanShut> devicePlanShutList =
-                baseDataMapper.selectDevicePlanShut(factoryCode, startDate, endDate);
+        List<MdmDevicePlanShut> devicePlanShutList = devicePlanShutMapper.selectList(
+                new LambdaQueryWrapper<MdmDevicePlanShut>()
+                        .eq(MdmDevicePlanShut::getFactoryCode, factoryCode)
+                        .le(MdmDevicePlanShut::getBeginDate, endDate)
+                        .ge(MdmDevicePlanShut::getEndDate, startDate)
+                        .eq(MdmDevicePlanShut::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         context.setDevicePlanShutList(devicePlanShutList != null ? devicePlanShutList : context.getDevicePlanShutList());
         log.debug("设备停机计划加载完成, 数量: {}", context.getDevicePlanShutList().size());
     }
@@ -194,7 +253,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadSkuMouldRel(LhScheduleContext context, String factoryCode) {
-        List<MdmSkuMouldRel> skuMouldRelList = baseDataMapper.selectSkuMouldRel(factoryCode);
+        List<MdmSkuMouldRel> skuMouldRelList = skuMouldRelMapper.selectList(
+                new LambdaQueryWrapper<MdmSkuMouldRel>()
+                        .eq(MdmSkuMouldRel::getFactoryCode, factoryCode)
+                        .eq(MdmSkuMouldRel::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, List<MdmSkuMouldRel>> skuMouldRelMap = new HashMap<>(64);
         if (skuMouldRelList != null) {
             for (MdmSkuMouldRel rel : skuMouldRelList) {
@@ -214,13 +276,22 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadMachineInfo(LhScheduleContext context, String factoryCode) {
-        // 使用LhMachineInfoMapper查询，从baseDataMapper中获取
-        // 注：LhMachineInfo在T_LH_MACHINE_INFO表中
+        List<LhMachineInfo> list = lhMachineInfoMapper.selectList(
+                new LambdaQueryWrapper<LhMachineInfo>()
+                        .eq(LhMachineInfo::getFactoryCode, factoryCode)
+                        .eq(LhMachineInfo::getStatus, MACHINE_STATUS_ENABLED)
+                        .eq(LhMachineInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
+                        .orderByAsc(LhMachineInfo::getMachineOrder));
         Map<String, LhMachineInfo> machineInfoMap = new LinkedHashMap<>(32);
-        // 通过selectWorkCalendar参数可以获取机台信息，或通过专用方法
-        // 此处通过LhMachineInfoMapper获取（需注入）
-        log.debug("硫化机台信息加载完成, 数量: {}", machineInfoMap.size());
+        if (list != null) {
+            for (LhMachineInfo info : list) {
+                if (info.getMachineCode() != null) {
+                    machineInfoMap.put(info.getMachineCode(), info);
+                }
+            }
+        }
         context.setMachineInfoMap(machineInfoMap);
+        log.debug("硫化机台信息加载完成, 数量: {}", machineInfoMap.size());
     }
 
     /**
@@ -232,8 +303,20 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param endDate     结束日期
      */
     private void loadCleaningPlan(LhScheduleContext context, String factoryCode, Date startDate, Date endDate) {
-        List<LhCleaningPlan> cleaningPlanList =
-                baseDataMapper.selectCleaningPlan(factoryCode, startDate, endDate);
+        List<String> machineCodes = new java.util.ArrayList<>(context.getMachineInfoMap().keySet());
+        List<LhCleaningPlan> cleaningPlanList;
+        if (machineCodes.isEmpty()) {
+            cleaningPlanList = java.util.Collections.emptyList();
+        } else {
+            cleaningPlanList = lhCleaningPlanMapper.selectList(
+                    new LambdaQueryWrapper<LhCleaningPlan>()
+                            .in(LhCleaningPlan::getLhMachineCode, machineCodes)
+                            .ge(LhCleaningPlan::getPlanTime, startDate)
+                            .lt(LhCleaningPlan::getPlanTime, endDate)
+                            .and(w -> w.eq(LhCleaningPlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
+                                    .or()
+                                    .isNull(LhCleaningPlan::getIsDelete)));
+        }
         context.setCleaningPlanList(cleaningPlanList != null ? cleaningPlanList : context.getCleaningPlanList());
         log.debug("模具清洗计划加载完成, 数量: {}", context.getCleaningPlanList().size());
     }
@@ -247,8 +330,12 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param month       月份
      */
     private void loadMonthSurplus(LhScheduleContext context, String factoryCode, int year, int month) {
-        List<MdmMonthSurplus> monthSurplusList =
-                baseDataMapper.selectMonthSurplus(factoryCode, year, month);
+        List<MdmMonthSurplus> monthSurplusList = monthSurplusMapper.selectList(
+                new LambdaQueryWrapper<MdmMonthSurplus>()
+                        .eq(MdmMonthSurplus::getFactoryCode, factoryCode)
+                        .eq(MdmMonthSurplus::getYear, year)
+                        .eq(MdmMonthSurplus::getMonth, month)
+                        .eq(MdmMonthSurplus::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmMonthSurplus> monthSurplusMap = new HashMap<>(64);
         if (monthSurplusList != null) {
             for (MdmMonthSurplus surplus : monthSurplusList) {
@@ -267,8 +354,12 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param scheduleDate 排程日期
      */
     private void loadShiftFinishQty(LhScheduleContext context, String factoryCode, Date scheduleDate) {
-        List<LhShiftFinishQty> shiftFinishQtyList =
-                baseDataMapper.selectShiftFinishQty(factoryCode, scheduleDate);
+        Date day = LhScheduleTimeUtil.clearTime(scheduleDate);
+        List<LhShiftFinishQty> shiftFinishQtyList = lhShiftFinishQtyMapper.selectList(
+                new LambdaQueryWrapper<LhShiftFinishQty>()
+                        .eq(LhShiftFinishQty::getFactoryCode, factoryCode)
+                        .eq(LhShiftFinishQty::getScheduleDate, day)
+                        .eq(LhShiftFinishQty::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, LhShiftFinishQty> shiftFinishQtyMap = new HashMap<>(64);
         if (shiftFinishQtyList != null) {
             for (LhShiftFinishQty finishQty : shiftFinishQtyList) {
@@ -287,7 +378,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadMaterialInfo(LhScheduleContext context, String factoryCode) {
-        List<MdmMaterialInfo> materialInfoList = baseDataMapper.selectMaterialInfo(factoryCode);
+        List<MdmMaterialInfo> materialInfoList = mdmMaterialInfoMapper.selectList(
+                new LambdaQueryWrapper<MdmMaterialInfo>()
+                        .eq(MdmMaterialInfo::getFactoryCode, factoryCode)
+                        .eq(MdmMaterialInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmMaterialInfo> materialInfoMap = new HashMap<>(256);
         if (materialInfoList != null) {
             for (MdmMaterialInfo materialInfo : materialInfoList) {
@@ -308,8 +402,16 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param onlineDate  在机日期（T-1日）
      */
     private void loadMachineOnlineInfo(LhScheduleContext context, String factoryCode, Date onlineDate) {
-        List<MdmLhMachineOnlineInfo> machineOnlineInfoList =
-                baseDataMapper.selectMachineOnlineInfo(factoryCode, onlineDate);
+        Date onlineDay = LhScheduleTimeUtil.clearTime(onlineDate);
+        Date onlineDayNext = LhScheduleTimeUtil.addDays(onlineDay, 1);
+        List<MdmLhMachineOnlineInfo> machineOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
+                new LambdaQueryWrapper<MdmLhMachineOnlineInfo>()
+                        .eq(MdmLhMachineOnlineInfo::getFactoryCode, factoryCode)
+                        .ge(MdmLhMachineOnlineInfo::getOnlineDate, onlineDay)
+                        .lt(MdmLhMachineOnlineInfo::getOnlineDate, onlineDayNext)
+                        .and(w -> w.eq(MdmLhMachineOnlineInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
+                                .or()
+                                .isNull(MdmLhMachineOnlineInfo::getIsDelete)));
         Map<String, MdmLhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>(32);
         if (machineOnlineInfoList != null) {
             for (MdmLhMachineOnlineInfo onlineInfo : machineOnlineInfoList) {
@@ -329,7 +431,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadSpecifyMachine(LhScheduleContext context, String factoryCode) {
-        List<LhSpecifyMachine> specifyMachineList = baseDataMapper.selectSpecifyMachine(factoryCode);
+        List<LhSpecifyMachine> specifyMachineList = lhSpecifyMachineMapper.selectList(
+                new LambdaQueryWrapper<LhSpecifyMachine>()
+                        .eq(LhSpecifyMachine::getFactoryCode, factoryCode)
+                        .eq(LhSpecifyMachine::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, List<LhSpecifyMachine>> specifyMachineMap = new HashMap<>(32);
         if (specifyMachineList != null) {
             for (LhSpecifyMachine specifyMachine : specifyMachineList) {
@@ -350,7 +455,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadCapsuleUsage(LhScheduleContext context, String factoryCode) {
-        List<MdmLhRepairCapsule> capsuleUsageList = baseDataMapper.selectCapsuleUsage(factoryCode);
+        List<MdmLhRepairCapsule> capsuleUsageList = lhRepairCapsuleMapper.selectList(
+                new LambdaQueryWrapper<MdmLhRepairCapsule>()
+                        .eq(MdmLhRepairCapsule::getFactoryCode, factoryCode)
+                        .eq(MdmLhRepairCapsule::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmLhRepairCapsule> capsuleUsageMap = new HashMap<>(32);
         if (capsuleUsageList != null) {
             for (MdmLhRepairCapsule capsule : capsuleUsageList) {
@@ -370,7 +478,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadMaintenancePlan(LhScheduleContext context, String factoryCode) {
-        List<MdmDevMaintenancePlan> maintenancePlanList = baseDataMapper.selectMaintenancePlan(factoryCode);
+        List<MdmDevMaintenancePlan> maintenancePlanList = devMaintenancePlanMapper.selectList(
+                new LambdaQueryWrapper<MdmDevMaintenancePlan>()
+                        .eq(MdmDevMaintenancePlan::getFactoryCode, factoryCode)
+                        .eq(MdmDevMaintenancePlan::getDelFlag, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmDevMaintenancePlan> maintenancePlanMap = new HashMap<>(32);
         if (maintenancePlanList != null) {
             for (MdmDevMaintenancePlan plan : maintenancePlanList) {

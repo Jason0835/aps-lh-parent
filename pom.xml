@@ -16,6 +16,8 @@
         <spring-boot.version>2.7.18</spring-boot.version>
         <mybatis-plus.version>3.5.3</mybatis-plus.version>
         <mysql.version>8.0.33</mysql.version>
+        <!-- Redis 客户端（spring-boot-starter-data-redis 默认使用 Lettuce，此处显式锁定版本） -->
+        <lettuce.version>6.2.7.RELEASE</lettuce.version>
         <lombok.version>1.18.16</lombok.version>
         <swagger.version>2.9.2</swagger.version>
     </properties>
@@ -43,6 +45,11 @@
                 <groupId>mysql</groupId>
                 <artifactId>mysql-connector-java</artifactId>
                 <version>${mysql.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.lettuce</groupId>
+                <artifactId>lettuce-core</artifactId>
+                <version>${lettuce.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.projectlombok</groupId>

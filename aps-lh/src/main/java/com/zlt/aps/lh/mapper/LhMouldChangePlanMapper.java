@@ -1,5 +1,6 @@
 package com.zlt.aps.lh.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -13,7 +14,7 @@ import java.util.List;
  * @author APS
  */
 @Mapper
-public interface LhMouldChangePlanMapper {
+public interface LhMouldChangePlanMapper extends BaseMapper<LhMouldChangePlan> {
 
     /**
      * 根据排程日期和工厂删除

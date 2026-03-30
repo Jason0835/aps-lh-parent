@@ -1,5 +1,6 @@
 package com.zlt.aps.lh.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -13,7 +14,7 @@ import java.util.List;
  * @author APS
  */
 @Mapper
-public interface LhUnscheduledResultMapper {
+public interface LhUnscheduledResultMapper extends BaseMapper<LhUnscheduledResult> {
 
     /**
      * 根据排程日期和工厂删除

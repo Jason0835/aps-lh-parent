@@ -1,7 +1,11 @@
 package com.zlt.aps.lh.handle;
 
-import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
+import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
 import com.zlt.aps.lh.mapper.LhScheduleProcessLogMapper;
@@ -95,7 +99,7 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
 
     /**
      * 清理历史排程数据
-     * <p>删除该日期旧的排程结果、未排结果、模具交替计划及对应日志，以便重新生成</p>
+     * <p>删除该日期旧的排程结果、未排结果、模具交替计划（仅 {@code isDelete = 0} 未删除数据），以便重新生成</p>
      *
      * @param context 排程上下文
      */
@@ -103,14 +107,23 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
         Date scheduleDate = context.getScheduleDate();
         String factoryCode = context.getFactoryCode();
 
-        // 删除旧的排程结果（T_LH_SCHEDULE_RESULT）
-        int deleteResultCount = scheduleResultMapper.deleteByDateAndFactory(scheduleDate, factoryCode);
+        LambdaQueryWrapper<LhScheduleResult> resultWrapper = new LambdaQueryWrapper<>();
+        resultWrapper.eq(LhScheduleResult::getFactoryCode, factoryCode)
+                .eq(LhScheduleResult::getScheduleDate, scheduleDate)
+                .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
+        int deleteResultCount = scheduleResultMapper.delete(resultWrapper);
 
-        // 删除旧的未排产结果（T_LH_UNSCHEDULED_RESULT）
-        int deleteUnscheduledCount = unscheduledResultMapper.deleteByDateAndFactory(scheduleDate, factoryCode);
+        LambdaQueryWrapper<LhUnscheduledResult> unscheduledWrapper = new LambdaQueryWrapper<>();
+        unscheduledWrapper.eq(LhUnscheduledResult::getFactoryCode, factoryCode)
+                .eq(LhUnscheduledResult::getScheduleDate, scheduleDate)
+                .eq(LhUnscheduledResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
+        int deleteUnscheduledCount = unscheduledResultMapper.delete(unscheduledWrapper);
 
-        // 删除旧的模具交替计划（T_LH_MOULD_CHANGE_PLAN）
-        int deleteMouldChangeCount = mouldChangePlanMapper.deleteByDateAndFactory(scheduleDate, factoryCode);
+        LambdaQueryWrapper<LhMouldChangePlan> mouldWrapper = new LambdaQueryWrapper<>();
+        mouldWrapper.eq(LhMouldChangePlan::getFactoryCode, factoryCode)
+                .eq(LhMouldChangePlan::getScheduleDate, scheduleDate)
+                .eq(LhMouldChangePlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
+        int deleteMouldChangeCount = mouldChangePlanMapper.delete(mouldWrapper);
 
         log.info("清理历史排程数据完成, 工厂: {}, 日期: {}, 删除排程结果: {}条, 删除未排结果: {}条, 删除换模计划: {}条",
                 factoryCode, LhScheduleTimeUtil.getDateStr(scheduleDate),
@@ -118,16 +131,12 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 生成排程批次号
-     * <p>规则：LHPC+年月日+3位流水号，如 LHPC20260327001</p>
+     * 生成排程批次号（规则见 {@link ILhScheduleResultService#generateNextBatchNo}，由 Redis 自增分配流水）
      *
      * @param context 排程上下文
      */
     private void generateBatchNo(LhScheduleContext context) {
-        String dateStr = LhScheduleTimeUtil.getDateStr(context.getScheduleDate());
-        // 生成3位流水号（简单实现：基于时间戳取模，实际项目中应使用数据库序列或分布式ID）
-        String sequence = String.format("%03d", (System.currentTimeMillis() % 1000));
-        String batchNo = LhScheduleConstant.BATCH_NO_PREFIX + dateStr + sequence;
+        String batchNo = scheduleResultService.generateNextBatchNo(context.getScheduleDate(), context.getFactoryCode());
         context.setBatchNo(batchNo);
         log.info("生成排程批次号: {}", batchNo);
     }

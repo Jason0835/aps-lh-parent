@@ -31,7 +31,7 @@ public interface ILhScheduleResultService {
     List<LhScheduleResult> selectPreviousSchedule(Date scheduleDate, String factoryCode);
 
     /**
-     * 根据排程日期和工厂删除排程结果
+     * 根据排程日期和工厂删除排程结果（仅删除 {@code isDelete = 0} 的记录）
      *
      * @param scheduleDate 排程日期
      * @param factoryCode  分厂编号
@@ -55,4 +55,13 @@ public interface ILhScheduleResultService {
      * @return 已发布记录数，大于 0 表示该日该厂存在已下发 MES 的排程结果
      */
     int countReleasedByDate(Date scheduleDate, String factoryCode);
+
+    /**
+     * 生成下一个排程批次号（LHPC+yyyyMMdd+流水），流水由 Redis 原子自增分配（见 {@link com.zlt.aps.lh.component.LhBatchNoRedisGenerator}）
+     *
+     * @param scheduleDate 排程日期
+     * @param factoryCode  分厂编号
+     * @return 新批次号
+     */
+    String generateNextBatchNo(Date scheduleDate, String factoryCode);
 }

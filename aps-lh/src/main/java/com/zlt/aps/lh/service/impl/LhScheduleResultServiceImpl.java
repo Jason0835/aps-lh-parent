@@ -2,6 +2,7 @@ package com.zlt.aps.lh.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.component.LhBatchNoRedisGenerator;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
@@ -25,6 +26,9 @@ public class LhScheduleResultServiceImpl implements ILhScheduleResultService {
     @Resource
     private LhScheduleResultMapper mapper;
 
+    @Resource
+    private LhBatchNoRedisGenerator batchNoRedisGenerator;
+
     @Override
     public List<LhScheduleResult> selectByDateAndFactory(Date scheduleDate, String factoryCode) {
         return mapper.selectByDateAndFactory(scheduleDate, factoryCode);
@@ -37,7 +41,11 @@ public class LhScheduleResultServiceImpl implements ILhScheduleResultService {
 
     @Override
     public int deleteByDateAndFactory(Date scheduleDate, String factoryCode) {
-        return mapper.deleteByDateAndFactory(scheduleDate, factoryCode);
+        LambdaQueryWrapper<LhScheduleResult> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(LhScheduleResult::getFactoryCode, factoryCode)
+                .eq(LhScheduleResult::getScheduleDate, scheduleDate)
+                .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
+        return mapper.delete(wrapper);
     }
 
     @Override
@@ -56,5 +64,10 @@ public class LhScheduleResultServiceImpl implements ILhScheduleResultService {
                 .eq(LhScheduleResult::getIsRelease, ReleaseStatusEnum.RELEASED.getCode())
                 .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
         return mapper.selectCount(wrapper).intValue();
+    }
+
+    @Override
+    public String generateNextBatchNo(Date scheduleDate, String factoryCode) {
+        return batchNoRedisGenerator.nextBatchNo(scheduleDate, factoryCode);
     }
 }

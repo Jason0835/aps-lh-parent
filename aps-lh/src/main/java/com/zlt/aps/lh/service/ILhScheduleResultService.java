@@ -48,11 +48,11 @@ public interface ILhScheduleResultService {
     int insertBatch(List<LhScheduleResult> list);
 
     /**
-     * 检查排程日期是否已下发MES
+     * 检查排程日期是否已下发 MES：仅统计 {@code isRelease = 1}（已发布）且 {@code isDelete = 0}（{@link com.zlt.aps.lh.api.enums.DeleteFlagEnum#NORMAL}）的记录数
      *
      * @param scheduleDate 排程日期
      * @param factoryCode  分厂编号
-     * @return 已下发记录数
+     * @return 已发布记录数，大于 0 表示该日该厂存在已下发 MES 的排程结果
      */
     int countReleasedByDate(Date scheduleDate, String factoryCode);
 }

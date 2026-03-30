@@ -1,5 +1,6 @@
 package com.zlt.aps.lh.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -13,7 +14,7 @@ import java.util.List;
  * @author APS
  */
 @Mapper
-public interface LhScheduleResultMapper {
+public interface LhScheduleResultMapper extends BaseMapper<LhScheduleResult> {
 
     /**
      * 根据批次号删除排程结果
@@ -57,15 +58,6 @@ public interface LhScheduleResultMapper {
      * @return 前日排程结果列表
      */
     List<LhScheduleResult> selectPreviousSchedule(@Param("scheduleDate") Date scheduleDate, @Param("factoryCode") String factoryCode);
-
-    /**
-     * 检查是否已下发MES
-     *
-     * @param scheduleDate 排程日期
-     * @param factoryCode  分厂编号
-     * @return 已下发记录数
-     */
-    int countReleasedByDate(@Param("scheduleDate") Date scheduleDate, @Param("factoryCode") String factoryCode);
 
     /**
      * 根据批次号查询排程结果

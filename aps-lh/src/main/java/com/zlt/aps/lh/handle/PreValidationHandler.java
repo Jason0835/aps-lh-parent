@@ -7,6 +7,7 @@ import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
 import com.zlt.aps.lh.mapper.LhScheduleProcessLogMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhUnscheduledResultMapper;
+import com.zlt.aps.lh.service.ILhScheduleResultService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,9 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
 
     @Resource
     private LhScheduleResultMapper scheduleResultMapper;
+
+    @Resource
+    private ILhScheduleResultService scheduleResultService;
 
     @Resource
     private LhUnscheduledResultMapper unscheduledResultMapper;
@@ -59,14 +63,15 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
 
     /**
      * 校验MES下发状态
-     * <p>若该日期排程已下发MES（发布状态为已发布），则禁止重新排程，需先撤销再排程</p>
+     * <p>依据 {@code LhScheduleResult.isRelease}：仅当为 {@code 1}（已发布）时视为已下发 MES，
+     * 此时禁止重新排程，需先撤销发布再排程（统计逻辑见 {@link ILhScheduleResultService#countReleasedByDate}）。</p>
      *
      * @param context 排程上下文
      */
     private void checkMesReleaseStatus(LhScheduleContext context) {
         Date scheduleDate = context.getScheduleDate();
         String factoryCode = context.getFactoryCode();
-        int releasedCount = scheduleResultMapper.countReleasedByDate(scheduleDate, factoryCode);
+        int releasedCount = scheduleResultService.countReleasedByDate(scheduleDate, factoryCode);
         if (releasedCount > 0) {
             context.interruptSchedule("该日期排程已下发MES，请先撤销发布后再重新排程。排程日期: "
                     + LhScheduleTimeUtil.getDateStr(scheduleDate));

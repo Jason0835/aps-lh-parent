@@ -1,6 +1,9 @@
 package com.zlt.aps.lh.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
+import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.service.ILhScheduleResultService;
 import lombok.extern.slf4j.Slf4j;
@@ -47,6 +50,11 @@ public class LhScheduleResultServiceImpl implements ILhScheduleResultService {
 
     @Override
     public int countReleasedByDate(Date scheduleDate, String factoryCode) {
-        return mapper.countReleasedByDate(scheduleDate, factoryCode);
+        LambdaQueryWrapper<LhScheduleResult> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(LhScheduleResult::getFactoryCode, factoryCode)
+                .eq(LhScheduleResult::getScheduleDate, scheduleDate)
+                .eq(LhScheduleResult::getIsRelease, ReleaseStatusEnum.RELEASED.getCode())
+                .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
+        return mapper.selectCount(wrapper).intValue();
     }
 }

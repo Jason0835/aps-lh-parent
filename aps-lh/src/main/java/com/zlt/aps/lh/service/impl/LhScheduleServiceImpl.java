@@ -1,8 +1,10 @@
 package com.zlt.aps.lh.service.impl;
 
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.engine.decorator.IScheduleExecutor;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
@@ -76,7 +78,12 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
     private LhScheduleContext buildContext(LhScheduleRequestDTO request) {
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode(request.getFactoryCode());
-        context.setScheduleDate(request.getScheduleDate() != null ? request.getScheduleDate() : new Date());
+        // 请求日期为排程目标日；引擎使用 T 日 = 目标日 − (连续排程日历跨度 − 1)
+        Date target = LhScheduleTimeUtil.clearTime(
+                request.getScheduleDate() != null ? request.getScheduleDate() : new Date());
+        context.setScheduleTargetDate(target);
+        int offsetDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
+        context.setScheduleDate(LhScheduleTimeUtil.addDays(target, -offsetDays));
         context.setScheduleStartTime(new Date());
         return context;
     }

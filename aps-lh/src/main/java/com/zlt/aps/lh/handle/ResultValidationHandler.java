@@ -130,8 +130,8 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             plan.setFactoryCode(context.getFactoryCode());
             plan.setLhResultBatchNo(context.getBatchNo());
             plan.setOrderNo(generateChangePlanOrderNo(context));
-            plan.setScheduleDate(context.getScheduleDate());
-            plan.setPlanDate(result.getClass1StartTime() != null ? result.getClass1StartTime() : context.getScheduleDate());
+            plan.setScheduleDate(context.getScheduleTargetDate());
+            plan.setPlanDate(result.getClass1StartTime() != null ? result.getClass1StartTime() : context.getScheduleTargetDate());
             plan.setPlanOrder(planOrder++);
             plan.setLhMachineCode(result.getLhMachineCode());
             plan.setLhMachineName(result.getLhMachineName());
@@ -179,7 +179,7 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
      */
     private void assignOrderNumbers(LhScheduleContext context) {
         log.info("补全工单号, 排程结果数: {}", context.getScheduleResultList().size());
-        String dateStr = new SimpleDateFormat("yyyyMMdd").format(context.getScheduleDate());
+        String dateStr = new SimpleDateFormat("yyyyMMdd").format(context.getScheduleTargetDate());
 
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if (result.getOrderNo() == null || result.getOrderNo().isEmpty()) {
@@ -257,7 +257,7 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
      * 生成模具交替计划工单号：CHG+yyyyMMdd+3位流水号
      */
     private String generateChangePlanOrderNo(LhScheduleContext context) {
-        String dateStr = new SimpleDateFormat("yyyyMMdd").format(context.getScheduleDate());
+        String dateStr = new SimpleDateFormat("yyyyMMdd").format(context.getScheduleTargetDate());
         int seq = CHG_SEQ.incrementAndGet() % 1000;
         return String.format("%s%s%03d", LhScheduleConstant.MOULD_CHANGE_ORDER_PREFIX, dateStr, seq);
     }

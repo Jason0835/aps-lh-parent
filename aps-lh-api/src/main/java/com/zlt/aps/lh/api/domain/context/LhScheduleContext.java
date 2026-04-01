@@ -37,7 +37,12 @@ public class LhScheduleContext {
 
     /** 分厂编号 */
     private String factoryCode;
-    /** 排程目标日期(T+2日) */
+    /** 排程目标日（与请求体日期一致，如业务上的 T+2） */
+    private Date scheduleTargetDate;
+    /**
+     * 排程窗口起点 T 日：由 {@link #scheduleTargetDate} 减去 ({@link com.zlt.aps.lh.api.constant.LhScheduleConstant#SCHEDULE_DAYS} - 1) 得到，
+     * 供班次计算、基础数据加载等引擎时间轴使用
+     */
     private Date scheduleDate;
     /** 批次号 */
     private String batchNo;

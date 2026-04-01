@@ -44,6 +44,20 @@ public class ScheduleEvent {
         RESULT_PUBLISHED
     }
 
+
+    /**
+     * 事件中的业务排程日：优先目标日；发布场景无目标日时从结果首条取 scheduleDate
+     */
+    private static Date resolveBusinessScheduleDate(LhScheduleContext context) {
+        if (context.getScheduleTargetDate() != null) {
+            return context.getScheduleTargetDate();
+        }
+        if (context.getScheduleResultList() != null && !context.getScheduleResultList().isEmpty()) {
+            return context.getScheduleResultList().get(0).getScheduleDate();
+        }
+        return context.getScheduleDate();
+    }
+
     /**
      * 构建排程完成事件
      *
@@ -55,7 +69,7 @@ public class ScheduleEvent {
         event.setEventType(EventType.SCHEDULE_COMPLETED);
         event.setBatchNo(context.getBatchNo());
         event.setFactoryCode(context.getFactoryCode());
-        event.setScheduleDate(context.getScheduleDate());
+        event.setScheduleDate(resolveBusinessScheduleDate(context));
         event.setEventTime(new Date());
         event.setMessage("硫化排程完成");
         event.setContext(context);
@@ -74,7 +88,7 @@ public class ScheduleEvent {
         event.setEventType(EventType.SCHEDULE_FAILED);
         event.setBatchNo(context.getBatchNo());
         event.setFactoryCode(context.getFactoryCode());
-        event.setScheduleDate(context.getScheduleDate());
+        event.setScheduleDate(resolveBusinessScheduleDate(context));
         event.setEventTime(new Date());
         event.setMessage(reason);
         event.setContext(context);
@@ -92,7 +106,7 @@ public class ScheduleEvent {
         event.setEventType(EventType.RESULT_PUBLISHED);
         event.setBatchNo(context.getBatchNo());
         event.setFactoryCode(context.getFactoryCode());
-        event.setScheduleDate(context.getScheduleDate());
+        event.setScheduleDate(resolveBusinessScheduleDate(context));
         event.setEventTime(new Date());
         event.setMessage("排程结果已发布");
         event.setContext(context);

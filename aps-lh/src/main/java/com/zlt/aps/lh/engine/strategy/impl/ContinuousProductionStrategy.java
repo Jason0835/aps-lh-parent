@@ -281,7 +281,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setEmbryoCode(sku.getEmbryoCode());
         result.setMainMaterialDesc(sku.getMainMaterialDesc());
         result.setStructureName(sku.getStructureName());
-        result.setScheduleDate(context.getScheduleDate());
+        result.setScheduleDate(context.getScheduleTargetDate());
         result.setLhTime(sku.getLhTimeSeconds());
         result.setMouldQty(sku.getMouldQty());
         result.setDailyPlanQty(sku.getDailyPlanQty());
@@ -551,7 +551,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
     private String generateOrderNo(LhScheduleContext context) {
         java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd");
-        String dateStr = sdf.format(context.getScheduleDate());
+        String dateStr = sdf.format(context.getScheduleTargetDate());
         int seq = (++orderSeq) % 1000;
         return String.format("%s%s%03d", "LHGD", dateStr, seq);
     }

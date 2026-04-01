@@ -38,7 +38,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -104,14 +106,15 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     public void loadAllBaseData(LhScheduleContext context) {
         String factoryCode = context.getFactoryCode();
         Date scheduleDate = context.getScheduleDate();
+        Date targetDate = context.getScheduleTargetDate();
 
-        // 加载排程时间范围（T日到T+3日）
+        // 加载排程时间范围 [T日-T+3日）左闭右开
         Date startDate = LhScheduleTimeUtil.clearTime(scheduleDate);
         Date endDate = LhScheduleTimeUtil.addDays(startDate, LhScheduleConstant.SCHEDULE_DAYS + 1);
 
-        // 获取年月信息
+        // 获取年月信息（按排程目标日取月计划所属年月）
         Calendar cal = Calendar.getInstance();
-        cal.setTime(scheduleDate);
+        cal.setTime(targetDate);
         int year = cal.get(Calendar.YEAR);
         int month = cal.get(Calendar.MONTH) + 1;
         int yearMonth = year * 100 + month;
@@ -141,7 +144,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         loadMonthSurplus(context, factoryCode, year, month);
 
         // 9. 加载各班次完成量
-        loadShiftFinishQty(context, factoryCode, scheduleDate);
+        loadShiftFinishQty(context, factoryCode, context.getScheduleDate());
 
         // 10. 加载物料信息
         loadMaterialInfo(context, factoryCode);
@@ -159,7 +162,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 14. 加载设备保养计划
         loadMaintenancePlan(context, factoryCode);
 
-        log.info("基础数据加载完成, 工厂: {}, 排程日期: {}", factoryCode, scheduleDate);
+        // 15. todo 加载前日硫化排程结果信息（前日日期=目标日 -1）
+
+        log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}", factoryCode, context.getScheduleTargetDate(), scheduleDate);
     }
 
 
@@ -303,10 +308,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param endDate     结束日期
      */
     private void loadCleaningPlan(LhScheduleContext context, String factoryCode, Date startDate, Date endDate) {
-        List<String> machineCodes = new java.util.ArrayList<>(context.getMachineInfoMap().keySet());
+        List<String> machineCodes = new ArrayList<>(context.getMachineInfoMap().keySet());
         List<LhCleaningPlan> cleaningPlanList;
         if (machineCodes.isEmpty()) {
-            cleaningPlanList = java.util.Collections.emptyList();
+            cleaningPlanList = Collections.emptyList();
         } else {
             cleaningPlanList = lhCleaningPlanMapper.selectList(
                     new LambdaQueryWrapper<LhCleaningPlan>()
@@ -440,7 +445,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
             for (LhSpecifyMachine specifyMachine : specifyMachineList) {
                 if (specifyMachine.getSpecCode() != null) {
                     specifyMachineMap.computeIfAbsent(specifyMachine.getSpecCode(),
-                            k -> new java.util.ArrayList<>()).add(specifyMachine);
+                            k -> new ArrayList<>()).add(specifyMachine);
                 }
             }
         }

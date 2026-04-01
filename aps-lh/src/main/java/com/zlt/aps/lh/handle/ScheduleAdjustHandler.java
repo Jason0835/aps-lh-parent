@@ -66,11 +66,11 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @param context 排程上下文
      */
     private void adjustPreviousSchedule(LhScheduleContext context) {
-        Date scheduleDate = context.getScheduleDate();
+        Date targetDate = context.getScheduleTargetDate();
         String factoryCode = context.getFactoryCode();
 
-        // 查询前日（T-1日）排程结果
-        Date previousDate = LhScheduleTimeUtil.addDays(scheduleDate, -1);
+        // 查询上一目标日的排程结果（库表 schedule_date 存排程目标日）
+        Date previousDate = LhScheduleTimeUtil.addDays(targetDate, -1);
         List<LhScheduleResult> previousScheduleList =
                 scheduleResultMapper.selectPreviousSchedule(previousDate, factoryCode);
 

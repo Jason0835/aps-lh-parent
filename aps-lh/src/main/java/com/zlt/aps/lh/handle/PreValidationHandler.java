@@ -73,13 +73,13 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
      * @param context 排程上下文
      */
     private void checkMesReleaseStatus(LhScheduleContext context) {
-        Date scheduleDate = context.getScheduleDate();
+        Date targetDate = context.getScheduleTargetDate();
         String factoryCode = context.getFactoryCode();
-        int releasedCount = scheduleResultService.countReleasedByDate(scheduleDate, factoryCode);
+        int releasedCount = scheduleResultService.countReleasedByDate(targetDate, factoryCode);
         if (releasedCount > 0) {
             context.interruptSchedule("该日期排程已下发MES，请先撤销发布后再重新排程。排程日期: "
-                    + LhScheduleTimeUtil.getDateStr(scheduleDate));
-            log.warn("排程被拒绝: 日期[{}]已有已发布排程, 数量: {}", LhScheduleTimeUtil.getDateStr(scheduleDate), releasedCount);
+                    + LhScheduleTimeUtil.getDateStr(targetDate));
+            log.warn("排程被拒绝: 日期[{}]已有已发布排程, 数量: {}", LhScheduleTimeUtil.getDateStr(targetDate), releasedCount);
         }
     }
 
@@ -104,29 +104,29 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
      * @param context 排程上下文
      */
     private void cleanHistoryData(LhScheduleContext context) {
-        Date scheduleDate = context.getScheduleDate();
+        Date targetDate = context.getScheduleTargetDate();
         String factoryCode = context.getFactoryCode();
 
         LambdaQueryWrapper<LhScheduleResult> resultWrapper = new LambdaQueryWrapper<>();
         resultWrapper.eq(LhScheduleResult::getFactoryCode, factoryCode)
-                .eq(LhScheduleResult::getScheduleDate, scheduleDate)
+                .eq(LhScheduleResult::getScheduleDate, targetDate)
                 .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
         int deleteResultCount = scheduleResultMapper.delete(resultWrapper);
 
         LambdaQueryWrapper<LhUnscheduledResult> unscheduledWrapper = new LambdaQueryWrapper<>();
         unscheduledWrapper.eq(LhUnscheduledResult::getFactoryCode, factoryCode)
-                .eq(LhUnscheduledResult::getScheduleDate, scheduleDate)
+                .eq(LhUnscheduledResult::getScheduleDate, targetDate)
                 .eq(LhUnscheduledResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
         int deleteUnscheduledCount = unscheduledResultMapper.delete(unscheduledWrapper);
 
         LambdaQueryWrapper<LhMouldChangePlan> mouldWrapper = new LambdaQueryWrapper<>();
         mouldWrapper.eq(LhMouldChangePlan::getFactoryCode, factoryCode)
-                .eq(LhMouldChangePlan::getScheduleDate, scheduleDate)
+                .eq(LhMouldChangePlan::getScheduleDate, targetDate)
                 .eq(LhMouldChangePlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
         int deleteMouldChangeCount = mouldChangePlanMapper.delete(mouldWrapper);
 
         log.info("清理历史排程数据完成, 工厂: {}, 日期: {}, 删除排程结果: {}条, 删除未排结果: {}条, 删除换模计划: {}条",
-                factoryCode, LhScheduleTimeUtil.getDateStr(scheduleDate),
+                factoryCode, LhScheduleTimeUtil.getDateStr(targetDate),
                 deleteResultCount, deleteUnscheduledCount, deleteMouldChangeCount);
     }
 
@@ -136,7 +136,7 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
      * @param context 排程上下文
      */
     private void generateBatchNo(LhScheduleContext context) {
-        String batchNo = scheduleResultService.generateNextBatchNo(context.getScheduleDate(), context.getFactoryCode());
+        String batchNo = scheduleResultService.generateNextBatchNo(context.getScheduleTargetDate(), context.getFactoryCode());
         context.setBatchNo(batchNo);
         log.info("生成排程批次号: {}", batchNo);
     }

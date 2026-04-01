@@ -84,7 +84,6 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
         context.setScheduleTargetDate(target);
         int offsetDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
         context.setScheduleDate(LhScheduleTimeUtil.addDays(target, -offsetDays));
-        context.setScheduleStartTime(new Date());
         return context;
     }
 }

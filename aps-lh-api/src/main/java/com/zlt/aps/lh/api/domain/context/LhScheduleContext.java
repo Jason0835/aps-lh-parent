@@ -46,8 +46,6 @@ public class LhScheduleContext {
     private Date scheduleDate;
     /** 批次号 */
     private String batchNo;
-    /** 排程开始时间 */
-    private Date scheduleStartTime;
     /** 月计划需求版本 */
     private String monthPlanVersion;
     /** 月计划排产版本 */

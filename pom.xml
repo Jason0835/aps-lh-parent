@@ -20,6 +20,7 @@
         <lettuce.version>6.2.7.RELEASE</lettuce.version>
         <lombok.version>1.18.16</lombok.version>
         <swagger.version>2.9.2</swagger.version>
+        <lang3.version>3.20.0</lang3.version>
     </properties>
 
     <modules>
@@ -70,6 +71,11 @@
                 <groupId>io.springfox</groupId>
                 <artifactId>springfox-swagger-ui</artifactId>
                 <version>${swagger.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.commons</groupId>
+                <artifactId>commons-lang3</artifactId>
+                <version>${lang3.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

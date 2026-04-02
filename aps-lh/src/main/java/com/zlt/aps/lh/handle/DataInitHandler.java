@@ -52,10 +52,14 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             return;
         }
 
-        // S4.2.3 执行数据校验链
+        // S4.2.3 执行数据校验链（组内聚合模式会收集全部错误后再失败）
         boolean valid = dataValidationChain.validate(context);
         if (!valid) {
-            context.interruptSchedule("基础数据校验未通过");
+            int errorCount = context.getValidationErrorList().size();
+            String reason = errorCount > 0
+                    ? "基础数据校验未通过，共 " + errorCount + " 条"
+                    : "基础数据校验未通过";
+            context.interruptSchedule(reason);
             return;
         }
 

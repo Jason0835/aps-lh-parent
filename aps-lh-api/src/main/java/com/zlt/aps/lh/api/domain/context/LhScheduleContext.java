@@ -21,6 +21,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mps.domain.LhShiftFinishQty;
 import lombok.Data;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.*;
 
@@ -130,6 +131,20 @@ public class LhScheduleContext {
     private String interruptReason;
     /** 当前执行步骤 */
     private String currentStep;
+    /** 校验错误信息集合 */
+    private List<String> validationErrorList = new ArrayList<>();
+
+    /**
+     * 追加一条校验错误信息（空串或 null 将被忽略）
+     *
+     * @param message 错误描述
+     */
+    public void addValidationError(String message) {
+        if (StringUtils.isEmpty(message)) {
+            return;
+        }
+        this.validationErrorList.add(message);
+    }
 
     /**
      * 获取硫化参数值

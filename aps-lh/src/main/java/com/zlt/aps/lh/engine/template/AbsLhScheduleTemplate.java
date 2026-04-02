@@ -5,6 +5,9 @@ import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 硫化排程模板方法抽象类
  * <p>定义排程的标准六步流程骨架，子类实现各步骤的具体逻辑</p>
@@ -111,7 +114,13 @@ public abstract class AbsLhScheduleTemplate {
      */
     private LhScheduleResponseDTO buildInterruptResponse(LhScheduleContext context) {
         log.warn("排程在步骤[{}]被中断, 原因: {}", context.getCurrentStep(), context.getInterruptReason());
-        return LhScheduleResponseDTO.fail("排程中断[" + context.getCurrentStep() + "]: " + context.getInterruptReason());
+        String message = "排程中断[" + context.getCurrentStep() + "]: " + context.getInterruptReason();
+        LhScheduleResponseDTO response = LhScheduleResponseDTO.fail(context.getBatchNo(), message);
+        List<String> validationErrors = context.getValidationErrorList();
+        if (validationErrors != null && !validationErrors.isEmpty()) {
+            response.setValidationErrors(new ArrayList<>(validationErrors));
+        }
+        return response;
     }
 
     /**

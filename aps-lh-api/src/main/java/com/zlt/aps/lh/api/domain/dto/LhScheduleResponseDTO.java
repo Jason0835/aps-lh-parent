@@ -27,6 +27,8 @@ public class LhScheduleResponseDTO {
     private int mouldChangePlanCount;
     /** 排程日志列表 */
     private List<String> logMessages = new ArrayList<>();
+    /** 校验错误明细（如基础数据校验未通过时的多条原因） */
+    private List<String> validationErrors = new ArrayList<>();
 
     /**
      * 构建成功响应

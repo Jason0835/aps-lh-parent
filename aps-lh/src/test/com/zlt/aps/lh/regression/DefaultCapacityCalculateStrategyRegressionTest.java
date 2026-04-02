@@ -22,7 +22,7 @@ class DefaultCapacityCalculateStrategyRegressionTest {
     private final DefaultCapacityCalculateStrategy strategy = new DefaultCapacityCalculateStrategy();
 
     @Test
-    void calculateStartTime_维修时长取自窗口内停机计划() {
+    void calculateStartTime_usesShutPlanDurationWithinScheduleWindow() {
         String machineCode = "M1";
         Date repairDay = date(2026, 4, 3);
         Date begin = LhScheduleTimeUtil.buildTime(repairDay, 8, 0, 0);

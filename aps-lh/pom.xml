@@ -63,6 +63,8 @@
     </dependencies>
 
     <build>
+        <!-- 测试源码在 src/test 下，需显式指定否则增量编译不更新用例 -->
+        <testSourceDirectory>src/test</testSourceDirectory>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

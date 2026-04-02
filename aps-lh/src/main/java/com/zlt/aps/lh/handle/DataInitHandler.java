@@ -48,6 +48,9 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
         // S4.2.2 加载所有基础数据
         loadBaseData(context);
+        if (context.isInterrupted()) {
+            return;
+        }
 
         // S4.2.3 执行数据校验链
         boolean valid = dataValidationChain.validate(context);

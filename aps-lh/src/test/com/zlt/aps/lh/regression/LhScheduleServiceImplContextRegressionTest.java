@@ -35,7 +35,7 @@ class LhScheduleServiceImplContextRegressionTest {
     private LhScheduleServiceImpl lhScheduleService;
 
     @Test
-    void executeSchedule_典型目标日传入执行器的T日与目标日正确() {
+    void executeSchedule_passesCorrectTargetDayAndTDayToExecutor() {
         when(scheduleExecutor.execute(any())).thenReturn(LhScheduleResponseDTO.success("B1", "ok"));
 
         Date target = date(2026, 4, 4);

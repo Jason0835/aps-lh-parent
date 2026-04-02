@@ -8,6 +8,7 @@ import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
+import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
@@ -33,6 +34,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
+import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
 import com.zlt.aps.mps.domain.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -60,8 +62,14 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     /** 机台启用状态，对应字典 sys_enable_disable */
     private static final String MACHINE_STATUS_ENABLED = "0";
 
+    /** 排产版本已定稿（与 MpFactoryProductionVersion.isFinal 一致） */
+    private static final String PRODUCTION_VERSION_IS_FINAL = "1";
+
     @Resource
     private FactoryMonthPlanProductionFinalResultMapper monthPlanMapper;
+
+    @Resource
+    private MpFactoryProductionVersionMapper mpFactoryProductionVersionMapper;
 
     @Resource
     private MdmWorkCalendarMapper workCalendarMapper;
@@ -119,54 +127,113 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         int month = cal.get(Calendar.MONTH) + 1;
         int yearMonth = year * 100 + month;
 
-        // 1. 加载月生产计划
+        // 1. 加载定稿排产版本（写入 context.productionVersion，供月计划过滤）
+        loadFinalProductionVersion(context, factoryCode, year, month);
+        if (context.isInterrupted()) {
+            return;
+        }
+
+        // 2. 加载月生产计划
         loadMonthPlan(context, factoryCode, yearMonth);
 
-        // 2. 加载工作日历
+        // 3. 加载工作日历
         loadWorkCalendar(context, factoryCode, startDate, endDate);
 
-        // 3. 加载SKU日硫化产能
+        // 4. 加载SKU日硫化产能
         loadSkuLhCapacity(context, factoryCode);
 
-        // 4. 加载设备停机计划
+        // 5. 加载设备停机计划
         loadDevicePlanShut(context, factoryCode, startDate, endDate);
 
-        // 5. 加载SKU与模具关系
+        // 6. 加载SKU与模具关系
         loadSkuMouldRel(context, factoryCode);
 
-        // 6. 加载硫化机台信息
+        // 7. 加载硫化机台信息
         loadMachineInfo(context, factoryCode);
 
-        // 7. 加载模具清洗计划
+        // 8. 加载模具清洗计划
         loadCleaningPlan(context, factoryCode, startDate, endDate);
 
-        // 8. 加载月底计划余量
+        // 9. 加载月底计划余量
         loadMonthSurplus(context, factoryCode, year, month);
 
-        // 9. 加载各班次完成量
-        loadShiftFinishQty(context, factoryCode, context.getScheduleDate());
+        // 10. 加载各班次完成量
+        loadShiftFinishQty(context, factoryCode, scheduleDate);
 
-        // 10. 加载物料信息
+        // 11. 加载物料信息
         loadMaterialInfo(context, factoryCode);
 
-        // 11. 加载MES硫化在机信息（取T-1日在机信息）
+        // 12. 加载MES硫化在机信息（取T-1日在机信息）
         Date previousDay = LhScheduleTimeUtil.addDays(startDate, -1);
         loadMachineOnlineInfo(context, factoryCode, previousDay);
 
-        // 12. 加载硫化定点机台
+        // 13. 加载硫化定点机台
         loadSpecifyMachine(context, factoryCode);
 
-        // 13. 加载硫化机胶囊已使用次数
+        // 14. 加载硫化机胶囊已使用次数
         loadCapsuleUsage(context, factoryCode);
 
-        // 14. 加载设备保养计划
+        // 15. 加载设备保养计划
         loadMaintenancePlan(context, factoryCode);
 
-        // 15. todo 加载前日硫化排程结果信息（前日日期=目标日 -1）
+        // 16. todo 加载前日硫化排程结果信息（前日日期=目标日 -1）
 
-        log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}", factoryCode, context.getScheduleTargetDate(), scheduleDate);
+        log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}", factoryCode, targetDate, scheduleDate);
     }
 
+
+    /**
+     * 加载定稿排产版本：工厂 + 年 + 月 + 已定稿且未删除；无数据则中断；多条时取更新时间最新一条（再按主键降序）
+     *
+     * @param context     排程上下文
+     * @param factoryCode 分厂编号
+     * @param year        年份
+     * @param month       月份（1-12）
+     */
+    private void loadFinalProductionVersion(LhScheduleContext context, String factoryCode, int year, int month) {
+        Long total = mpFactoryProductionVersionMapper.selectCount(wrapFinalProductionVersion(factoryCode, year, month));
+        if (total == null || total == 0) {
+            log.error("定稿排产版本无数据, 工厂: {}, 年: {}, 月: {}", factoryCode, year, month);
+            context.interruptSchedule(String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
+            return;
+        }
+        if (total > 1) {
+            log.warn("定稿排产版本多条(共{}条)，取更新时间最新一条, 工厂: {}, 年: {}, 月: {}",
+                    total, factoryCode, year, month);
+        }
+        List<MpFactoryProductionVersion> list = mpFactoryProductionVersionMapper.selectList(
+                wrapFinalProductionVersion(factoryCode, year, month)
+                        .orderByDesc(MpFactoryProductionVersion::getUpdateTime)
+                        .orderByDesc(MpFactoryProductionVersion::getId)
+                        .last("LIMIT 1"));
+        if (list == null || list.isEmpty()) {
+            log.error("定稿排产版本查询最新一条无结果, 工厂: {}, 年: {}, 月: {}", factoryCode, year, month);
+            context.interruptSchedule(String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
+            return;
+        }
+        MpFactoryProductionVersion row = list.get(0);
+        String pv = row.getProductionVersion();
+        if (pv == null || pv.isEmpty()) {
+            log.error("定稿排产版本号为空, 工厂: {}, 年: {}, 月: {}, id: {}",
+                    factoryCode, year, month, row.getId());
+            context.interruptSchedule(String.format(
+                    "定稿排产版本记录中排产版本号为空，工厂=%s 年=%d 月=%d", factoryCode, year, month));
+            return;
+        }
+        context.setProductionVersion(pv);
+        log.debug("定稿排产版本加载完成, productionVersion: {}", pv);
+    }
+
+    /** 定稿排产版本：工厂 + 年月 + 已定稿 + 未删除 */
+    private LambdaQueryWrapper<MpFactoryProductionVersion> wrapFinalProductionVersion(
+            String factoryCode, int year, int month) {
+        return new LambdaQueryWrapper<MpFactoryProductionVersion>()
+                .eq(MpFactoryProductionVersion::getFactoryCode, factoryCode)
+                .eq(MpFactoryProductionVersion::getYear, year)
+                .eq(MpFactoryProductionVersion::getMonth, month)
+                .eq(MpFactoryProductionVersion::getIsFinal, PRODUCTION_VERSION_IS_FINAL)
+                .eq(MpFactoryProductionVersion::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
+    }
 
     /**
      * 加载月生产计划

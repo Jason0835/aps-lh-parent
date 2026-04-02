@@ -18,7 +18,9 @@ import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
 import com.zlt.aps.lh.mapper.MdmWorkCalendarMapper;
+import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.service.impl.LhBaseDataServiceImpl;
+import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +46,8 @@ class ScheduleDataWindowRegressionTest {
 
     @Mock
     private FactoryMonthPlanProductionFinalResultMapper monthPlanMapper;
+    @Mock
+    private MpFactoryProductionVersionMapper mpFactoryProductionVersionMapper;
     @Mock
     private MdmWorkCalendarMapper workCalendarMapper;
     @Mock
@@ -74,9 +78,11 @@ class ScheduleDataWindowRegressionTest {
     @InjectMocks
     private LhBaseDataServiceImpl lhBaseDataService;
 
-    /** 计划中的典型例：目标日 2026-04-04 → T=2026-04-02，窗口覆盖 4/2～4/4 三个日历日 */
+    /**
+     * 典型例：目标日 2026-04-04 → T=2026-04-02，窗口覆盖 4/2～4/4 三个日历日；校验 T 日与 [start,end) 公式。
+     */
     @Test
-    void 典型目标日与T日及三日左闭右开上界一致() {
+    void scheduleWindow_targetDayTDayAndHalfOpenEndMatchFormula() {
         Date target = date(2026, 4, 4);
         Date targetClear = LhScheduleTimeUtil.clearTime(target);
         int offsetDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
@@ -95,11 +101,16 @@ class ScheduleDataWindowRegressionTest {
     }
 
     @Test
-    void loadAllBaseData_触发工作日历停机与清洗加载与窗口公式一致() {
+    void loadAllBaseData_invokesWorkCalendarShutAndCleaningWithScheduleWindow() {
         String factoryCode = "FC01";
         Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 4));
         int offsetDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
         Date scheduleDate = LhScheduleTimeUtil.addDays(target, -offsetDays);
+
+        MpFactoryProductionVersion finalVersion = new MpFactoryProductionVersion();
+        finalVersion.setProductionVersion("PV_REGRESSION_01");
+        when(mpFactoryProductionVersionMapper.selectCount(any())).thenReturn(1L);
+        when(mpFactoryProductionVersionMapper.selectList(any())).thenReturn(Collections.singletonList(finalVersion));
 
         when(monthPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(workCalendarMapper.selectList(any())).thenReturn(Collections.emptyList());
@@ -129,7 +140,7 @@ class ScheduleDataWindowRegressionTest {
 
         lhBaseDataService.loadAllBaseData(context);
 
-        // 具体 [startDate,endDate) 与 T～T+2 对齐关系见 典型目标日与T日及三日左闭右开上界一致；此处仅确认三类数据均按该窗口参与加载
+        // [startDate,endDate) 与 T～T+2 对齐见 scheduleWindow_targetDayTDayAndHalfOpenEndMatchFormula；此处仅确认三类数据按该窗口加载
         verify(workCalendarMapper).selectList(any());
         verify(devicePlanShutMapper).selectList(any());
         verify(lhCleaningPlanMapper).selectList(any());

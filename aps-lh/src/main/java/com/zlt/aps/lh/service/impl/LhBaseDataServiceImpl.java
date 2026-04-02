@@ -108,9 +108,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         Date scheduleDate = context.getScheduleDate();
         Date targetDate = context.getScheduleTargetDate();
 
-        // 加载排程时间范围
+        // 加载排程时间范围：[startDate, endDate) 覆盖 T～T+(SCHEDULE_DAYS-1)，与连续排程窗口日历日一致
         Date startDate = LhScheduleTimeUtil.clearTime(scheduleDate);
-        Date endDate = LhScheduleTimeUtil.addDays(startDate, LhScheduleConstant.SCHEDULE_DAYS + 1);
+        Date endDate = LhScheduleTimeUtil.addDays(startDate, LhScheduleConstant.SCHEDULE_DAYS);
 
         // 获取年月信息（按排程目标日取月计划所属年月）
         Calendar cal = Calendar.getInstance();

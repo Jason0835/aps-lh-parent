@@ -41,16 +41,19 @@ public class DefaultProductionShutdownStrategy implements IProductionShutdownStr
             return BigDecimal.ZERO;
         }
 
-        // 检查后续天是否有停产（T-3=90%, T-2=80%, T-1=70%）
-        for (int offset = 1; offset <= 3; offset++) {
+        // 仅依据上下文已加载的排程窗口日历（T～T+SCHEDULE_DAYS-1），向后最多看 SCHEDULE_DAYS-1 天停产（offset 与递减比例见常量注释）
+        int maxAheadDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
+        for (int offset = 1; offset <= maxAheadDays; offset++) {
             Date futureDate = LhScheduleTimeUtil.addDays(targetDate, offset);
             MdmWorkCalendar futureCalendar = findWorkCalendar(context, futureDate);
             if (futureCalendar != null && isShutdownByCalendar(futureCalendar)) {
                 switch (offset) {
-                    case 1: return BigDecimal.valueOf(LhScheduleConstant.SHUTDOWN_DAY_MINUS_1_RATE).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-                    case 2: return BigDecimal.valueOf(LhScheduleConstant.SHUTDOWN_DAY_MINUS_2_RATE).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-                    case 3: return BigDecimal.valueOf(LhScheduleConstant.SHUTDOWN_DAY_MINUS_3_RATE).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
-                    default: break;
+                    case 1:
+                        return BigDecimal.valueOf(LhScheduleConstant.SHUTDOWN_DAY_MINUS_1_RATE).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                    case 2:
+                        return BigDecimal.valueOf(LhScheduleConstant.SHUTDOWN_DAY_MINUS_2_RATE).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                    default:
+                        break;
                 }
             }
         }

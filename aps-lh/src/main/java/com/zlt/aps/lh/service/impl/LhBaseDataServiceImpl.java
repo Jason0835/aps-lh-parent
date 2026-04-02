@@ -127,7 +127,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         int month = cal.get(Calendar.MONTH) + 1;
         int yearMonth = year * 100 + month;
 
-        // 1. 加载定稿排产版本（写入 context.productionVersion，供月计划过滤）
+        // 1. 加载定稿排产版本
         loadFinalProductionVersion(context, factoryCode, year, month);
         if (context.isInterrupted()) {
             return;

@@ -19,6 +19,8 @@ public class LhBatchNoRedisGenerator {
 
     private static final String REDIS_KEY_PREFIX = "aps:lh:batch:seq:";
     private static final int TTL_HOURS = 24;
+    private static final int MAX_SEQ_NO = 999;
+
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
@@ -41,7 +43,7 @@ public class LhBatchNoRedisGenerator {
         if (seq == 1L) {
             stringRedisTemplate.expire(redisKey, TTL_HOURS, TimeUnit.HOURS);
         }
-        String tail = seq <= 999 ? String.format("%03d", seq) : String.valueOf(seq);
+        String tail = seq <= MAX_SEQ_NO ? String.format("%03d", seq) : String.valueOf(seq);
         return batchPrefix + tail;
     }
 }

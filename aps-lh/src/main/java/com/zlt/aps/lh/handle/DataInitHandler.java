@@ -64,7 +64,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 使用 MyBatis-Plus 按分厂加载硫化参数到上下文
+     * 按分厂加载硫化参数到上下文
      */
     private void loadLhParams(LhScheduleContext context) {
         List<LhParams> paramsList = lhParamsMapper.selectList(

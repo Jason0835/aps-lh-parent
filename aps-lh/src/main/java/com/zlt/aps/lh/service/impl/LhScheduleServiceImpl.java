@@ -4,6 +4,7 @@ import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
+import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.engine.decorator.IScheduleExecutor;
@@ -56,9 +57,9 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
 
             // 2. 更新发布状态为"已发布"（1）
             for (LhScheduleResult result : results) {
-                result.setIsRelease("1");
+                result.setIsRelease(ReleaseStatusEnum.RELEASED.getCode());
             }
-            scheduleResultMapper.updateReleaseStatus(batchNo, "1");
+            scheduleResultMapper.updateReleaseStatus(batchNo, ReleaseStatusEnum.RELEASED.getCode());
 
             // 3. 发布排程结果发布事件（通知MES系统）
             LhScheduleContext publishContext = new LhScheduleContext();
@@ -78,11 +79,12 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
     private LhScheduleContext buildContext(LhScheduleRequestDTO request) {
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode(request.getFactoryCode());
-        // 请求日期为排程目标日；引擎使用 T 日 = 目标日 − (连续排程日历跨度 − 1)
+        // 请求日期为排程目标日
         Date target = LhScheduleTimeUtil.clearTime(
                 request.getScheduleDate() != null ? request.getScheduleDate() : new Date());
         context.setScheduleTargetDate(target);
         int offsetDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
+        // 引擎使用 T 日 = 目标日 − (连续排程日历跨度 − 1)
         context.setScheduleDate(LhScheduleTimeUtil.addDays(target, -offsetDays));
         return context;
     }

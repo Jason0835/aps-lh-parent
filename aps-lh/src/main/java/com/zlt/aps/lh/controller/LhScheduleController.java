@@ -44,7 +44,7 @@ public class LhScheduleController {
     /**
      * 发布排程结果到MES
      *
-     * @param batchNo 批次号`
+     * @param batchNo 批次号
      * @return 发布响应结果
      */
     @PostMapping("/publish/{batchNo}")

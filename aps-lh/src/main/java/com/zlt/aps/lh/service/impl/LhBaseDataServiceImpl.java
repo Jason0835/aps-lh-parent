@@ -108,7 +108,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         Date scheduleDate = context.getScheduleDate();
         Date targetDate = context.getScheduleTargetDate();
 
-        // 加载排程时间范围 [T日-T+3日）左闭右开
+        // 加载排程时间范围
         Date startDate = LhScheduleTimeUtil.clearTime(scheduleDate);
         Date endDate = LhScheduleTimeUtil.addDays(startDate, LhScheduleConstant.SCHEDULE_DAYS + 1);
 
@@ -498,4 +498,5 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         context.setMaintenancePlanMap(maintenancePlanMap);
         log.debug("设备保养计划加载完成, 数量: {}", maintenancePlanMap.size());
     }
+
 }

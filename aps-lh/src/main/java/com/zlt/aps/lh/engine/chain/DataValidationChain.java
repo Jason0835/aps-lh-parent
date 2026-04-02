@@ -14,10 +14,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 数据校验链
- * <p>收集所有 {@link IDataValidator} 实现，按 (group, order) 排序后按组执行：
- * {@link ValidationPolicyEnum#COLLECT_ALL} 组内全量执行并聚合错误，若该组结束后存在错误则不再执行后续组；
- * {@link ValidationPolicyEnum#FAIL_FAST} 组内遇错即停并结束整条链。</p>
+ * 硫化排程基础数据校验链：注入全部 {@link IDataValidator}，启动时按 (group, order) 排序、按组切分并校验同组策略一致。
+ * <p>{@link ValidationPolicyEnum#COLLECT_ALL} 组内全量执行，组结束后若有错误则不再执行后续组；
+ * {@link ValidationPolicyEnum#FAIL_FAST} 组内遇错即停并结束整条链。{@link #validate(LhScheduleContext)} 会清空并重填上下文中的校验错误列表。</p>
  *
  * @author APS
  */
@@ -28,10 +27,20 @@ public class DataValidationChain {
     @Resource
     private List<IDataValidator> validators;
 
+    /**
+     * 全部校验器按 (group, order) 排序后的线性列表，在 {@link #init()} 中构建
+     */
     private final List<IDataValidator> orderedValidators = new ArrayList<>();
 
+    /**
+     * 按组切分后的执行段：每一段内 group 相同，且段内策略（COLLECT_ALL / FAIL_FAST）一致
+     */
     private List<List<IDataValidator>> groupSegments = new ArrayList<>();
 
+    /**
+     * 初始化校验链：排序、校验同组策略一致、预计算分组段
+     * <p>在 Spring 完成依赖注入后由容器回调；若同组策略不一致则抛异常，阻止应用带病启动。</p>
+     */
     @PostConstruct
     public void init() {
         orderedValidators.clear();
@@ -47,11 +56,15 @@ public class DataValidationChain {
     }
 
     /**
-     * 执行全部校验组
-     * <p>开始前会清空上下文中的 {@link LhScheduleContext#getValidationErrorList()}。</p>
+     * 按分组段依次执行全部校验逻辑
+     * <p>
+     * 执行前会清空 {@code context} 中的 {@link LhScheduleContext#getValidationErrorList()}，表示<strong>仅针对本轮链式校验</strong>收集错误，
+     * 避免与历史步骤残留混淆。各校验器失败时须向该列表追加说明；若返回 {@code false} 却未追加任何条目，则由
+     * {@link #runOneValidator(LhScheduleContext, IDataValidator)} 补一条默认文案，避免前端无明细。
+     * </p>
      *
-     * @param context 排程上下文
-     * @return true 表示全部通过且无校验错误信息
+     * @param context 排程上下文，用于读取基础数据并承载校验错误列表
+     * @return {@code true} 表示所有分组段均通过且错误列表为空；{@code false} 表示已在聚合或短路语义下终止
      */
     public boolean validate(LhScheduleContext context) {
         context.getValidationErrorList().clear();
@@ -79,11 +92,11 @@ public class DataValidationChain {
     }
 
     /**
-     * 执行单个校验器；失败时若未写入任何错误信息则补充一条默认说明
+     * 执行单个校验器，并在「校验失败但未写入错误文案」时兜底补充一条提示
      *
      * @param context   排程上下文
-     * @param validator 校验器
-     * @return true 表示该校验器通过
+     * @param validator 当前校验器实例
+     * @return {@code true} 表示该校验器声明通过；{@code false} 表示未通过
      */
     private boolean runOneValidator(LhScheduleContext context, IDataValidator validator) {
         log.info("执行校验器: {} (组:{}, 策略:{})", validator.getValidatorName(),
@@ -99,6 +112,10 @@ public class DataValidationChain {
         return passed;
     }
 
+    /**
+     * 断言：每个 group 对应的 {@link ValidationPolicyEnum} 在全部校验器中唯一
+     * <p>若同一 group 出现不同策略，说明配置错误，抛出 {@link IllegalStateException}。</p>
+     */
     private void assertConsistentPolicyPerGroup() {
         Map<Integer, ValidationPolicyEnum> groupPolicy = new LinkedHashMap<>();
         for (IDataValidator validator : orderedValidators) {
@@ -114,6 +131,12 @@ public class DataValidationChain {
         }
     }
 
+    /**
+     * 将已按 (group, order) 排好序的列表切分为连续「同组」段，供按组选择 COLLECT_ALL / FAIL_FAST 逻辑
+     *
+     * @param sorted 已排序的校验器列表，不得为 {@code null}（可为空列表）
+     * @return 分段结果，外层顺序与 group 升序一致；空输入返回空列表
+     */
     private static List<List<IDataValidator>> partitionByGroup(List<IDataValidator> sorted) {
         List<List<IDataValidator>> segments = new ArrayList<>();
         if (sorted.isEmpty()) {

@@ -12,7 +12,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
-import com.zlt.aps.mps.domain.LhShiftFinishQty;
+import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 

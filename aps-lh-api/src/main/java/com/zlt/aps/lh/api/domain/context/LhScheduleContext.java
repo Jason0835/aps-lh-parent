@@ -19,7 +19,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
-import com.zlt.aps.mps.domain.LhShiftFinishQty;
+import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
 

@@ -1,7 +1,7 @@
 package com.zlt.aps.lh.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
-import com.zlt.aps.mps.domain.LhShiftFinishQty;
+import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import org.apache.ibatis.annotations.Mapper;
 
 /**

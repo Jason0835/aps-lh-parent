@@ -18,74 +18,69 @@ import java.util.List;
 public final class LhScheduleTimeUtil {
 
     /**
-     * 参数代码 - 班次数量（每天3个班）
-     */
-    public static final String PARAM_SHIFTS_PER_DAY = "SHIFTS_PER_DAY";
-
-    /**
      * 参数代码 - 夜班开始小时
      */
     public static final String PARAM_NIGHT_START_HOUR = "NIGHT_START_HOUR";
-
+    
     /**
      * 参数代码 - 早班开始小时
      */
     public static final String PARAM_MORNING_START_HOUR = "MORNING_START_HOUR";
-
+    
     /**
      * 参数代码 - 中班开始小时
      */
     public static final String PARAM_AFTERNOON_START_HOUR = "AFTERNOON_START_HOUR";
-
+    
     /**
      * 参数代码 - 每班时长（小时）
      */
     public static final String PARAM_SHIFT_DURATION_HOURS = "SHIFT_DURATION_HOURS";
-
+    
     /**
      * 参数代码 - 禁止换模开始小时
      */
-    public static final String PARAM_NO_MOULD_CHANGE_START = "NO_MOULD_CHANGE_START";
-
+    public static final String PARAM_NO_MOULD_CHANGE_START = "NO_MOULD_CHANGE_START_HOUR";
+    
     /**
      * 参数代码 - 换模含预热时间（小时）
      */
     public static final String PARAM_MOULD_CHANGE_TOTAL_HOURS = "MOULD_CHANGE_TOTAL_HOURS";
-
+    
     /**
      * 参数代码 - 首检时间（小时）
      */
     public static final String PARAM_FIRST_INSPECTION_HOURS = "FIRST_INSPECTION_HOURS";
-
+    
     /**
      * 参数代码 - 每日换模上限
      */
     public static final String PARAM_DAILY_MOULD_CHANGE_LIMIT = "DAILY_MOULD_CHANGE_LIMIT";
-
+    
     /**
      * 参数代码 - 早班换模上限
      */
     public static final String PARAM_MORNING_MOULD_CHANGE_LIMIT = "MORNING_MOULD_CHANGE_LIMIT";
-
+    
     /**
      * 参数代码 - 中班换模上限
      */
     public static final String PARAM_AFTERNOON_MOULD_CHANGE_LIMIT = "AFTERNOON_MOULD_CHANGE_LIMIT";
-
+    
     /**
-     * 参数代码 - 收尾判定班次数（默认3天=9班，但触发收尾标注是3天内）
+     * 参数代码 - 收尾判定天数（默认 3 天=9 班，但触发收尾标注是 3 天内）
      */
     public static final String PARAM_ENDING_DETECT_DAYS = "ENDING_DETECT_DAYS";
-
+    
     /**
      * 参数代码 - 结构收尾预判天数
      */
     public static final String PARAM_STRUCTURE_ENDING_DAYS = "STRUCTURE_ENDING_DAYS";
-
+    
     /**
      * 参数代码 - 机台收尾时间容差（分钟）
      */
-    public static final String PARAM_ENDING_TOLERANCE_MINUTES = "ENDING_TOLERANCE_MINUTES";
+    public static final String PARAM_ENDING_TOLERANCE_MINUTES = "ENDING_TIME_TOLERANCE_MINUTES";
 
     /**
      * 参数代码 - 保养耗时（小时）

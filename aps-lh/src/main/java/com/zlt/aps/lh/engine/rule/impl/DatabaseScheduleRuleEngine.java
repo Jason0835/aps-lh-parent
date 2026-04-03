@@ -137,6 +137,189 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
                 LhScheduleConstant.DEFAULT_ENDING_TIME_TOLERANCE_MINUTES);
     }
 
+    // ======================== 干冰清洗规则 ========================
+
+    @Override
+    public int getDryIceIntervalDays(String factoryCode) {
+        return getIntValue(factoryCode, "DRY_ICE_INTERVAL_DAYS", 
+                LhScheduleConstant.DRY_ICE_INTERVAL_DAYS);
+    }
+
+    @Override
+    public int getDryIceWarningDays(String factoryCode) {
+        return getIntValue(factoryCode, "DRY_ICE_WARNING_DAYS", 
+                LhScheduleConstant.DRY_ICE_WARNING_DAYS);
+    }
+
+    @Override
+    public int getDryIceAdvanceDays(String factoryCode) {
+        return getIntValue(factoryCode, "DRY_ICE_ADVANCE_DAYS", 
+                LhScheduleConstant.DRY_ICE_ADVANCE_DAYS);
+    }
+
+    @Override
+    public int getDryIceDurationHours(String factoryCode) {
+        return getIntValue(factoryCode, "DRY_ICE_DURATION_HOURS", 
+                LhScheduleConstant.DRY_ICE_DURATION_HOURS);
+    }
+
+    @Override
+    public int getDryIceLossQty(String factoryCode) {
+        return getIntValue(factoryCode, "DRY_ICE_LOSS_QTY", 
+                LhScheduleConstant.DRY_ICE_LOSS_QTY);
+    }
+
+    @Override
+    public int getDryIceDailyLimit(String factoryCode) {
+        return getIntValue(factoryCode, "DRY_ICE_DAILY_LIMIT", 
+                LhScheduleConstant.DRY_ICE_DAILY_LIMIT);
+    }
+
+    // ======================== 喷砂清洗规则 ========================
+
+    @Override
+    public int getSandBlastDurationHours(String factoryCode) {
+        return getIntValue(factoryCode, "SAND_BLAST_DURATION_HOURS", 
+                LhScheduleConstant.SAND_BLAST_DURATION_HOURS);
+    }
+
+    @Override
+    public int getSandBlastWithInspectionHours(String factoryCode) {
+        return getIntValue(factoryCode, "SAND_BLAST_WITH_INSPECTION_HOURS", 
+                LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
+    }
+
+    @Override
+    public int getSandBlastDailyLimit(String factoryCode) {
+        return getIntValue(factoryCode, "SAND_BLAST_DAILY_LIMIT", 
+                LhScheduleConstant.SAND_BLAST_DAILY_LIMIT);
+    }
+
+    @Override
+    public int getSandBlastMaintenanceDayMid(String factoryCode) {
+        return getIntValue(factoryCode, "SAND_BLAST_MAINTENANCE_DAY_MID", 
+                LhScheduleConstant.SAND_BLAST_MAINTENANCE_DAY_MID);
+    }
+
+    @Override
+    public int getSandBlastMaintenanceDayEnd(String factoryCode) {
+        return getIntValue(factoryCode, "SAND_BLAST_MAINTENANCE_DAY_END", 
+                LhScheduleConstant.SAND_BLAST_MAINTENANCE_DAY_END);
+    }
+
+    // ======================== 设备保养规则 ========================
+
+    @Override
+    public int getMaintenanceDurationHours(String factoryCode) {
+        return getIntValue(factoryCode, "MAINTENANCE_DURATION_HOURS", 
+                LhScheduleConstant.MAINTENANCE_DURATION_HOURS);
+    }
+
+    @Override
+    public int getMaintenanceStartHour(String factoryCode) {
+        return getIntValue(factoryCode, "MAINTENANCE_START_HOUR", 
+                LhScheduleConstant.MAINTENANCE_START_HOUR);
+    }
+
+    @Override
+    public int getMaintenanceWarningDays(String factoryCode) {
+        return getIntValue(factoryCode, "MAINTENANCE_WARNING_DAYS", 
+                LhScheduleConstant.MAINTENANCE_WARNING_DAYS);
+    }
+
+    @Override
+    public double getCapsulePreheatHours(String factoryCode) {
+        String value = getParamValue(factoryCode, "CAPSULE_PREHEAT_HOURS");
+        if (value == null || value.trim().isEmpty()) {
+            return LhScheduleConstant.CAPSULE_PREHEAT_HOURS.doubleValue();
+        }
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException e) {
+            log.warn("参数解析失败，factoryCode={}, paramCode={}, value={}, 使用默认值：{}", 
+                    factoryCode, "CAPSULE_PREHEAT_HOURS", value, LhScheduleConstant.CAPSULE_PREHEAT_HOURS);
+            return LhScheduleConstant.CAPSULE_PREHEAT_HOURS.doubleValue();
+        }
+    }
+
+    // ======================== 停机超时阈值 ========================
+
+    @Override
+    public int getMachineStopTimeoutHours(String factoryCode) {
+        return getIntValue(factoryCode, "MACHINE_STOP_TIMEOUT_HOURS", 
+                LhScheduleConstant.MACHINE_STOP_TIMEOUT_HOURS);
+    }
+
+    // ======================== 胶囊相关规则 ========================
+
+    @Override
+    public int getCapsuleWarningCount(String factoryCode) {
+        return getIntValue(factoryCode, "CAPSULE_WARNING_COUNT", 
+                LhScheduleConstant.CAPSULE_WARNING_COUNT);
+    }
+
+    @Override
+    public int getCapsuleForceDownCount(String factoryCode) {
+        return getIntValue(factoryCode, "CAPSULE_FORCE_DOWN_COUNT", 
+                LhScheduleConstant.CAPSULE_FORCE_DOWN_COUNT);
+    }
+
+    @Override
+    public int getCapsuleChangeLossQty(String factoryCode) {
+        return getIntValue(factoryCode, "CAPSULE_CHANGE_LOSS_QTY", 
+                LhScheduleConstant.CAPSULE_CHANGE_LOSS_QTY);
+    }
+
+    // ======================== 开停产比例 ========================
+
+    @Override
+    public int getShutdownDayMinus3Rate(String factoryCode) {
+        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_3_RATE", 
+                LhScheduleConstant.SHUTDOWN_DAY_MINUS_3_RATE);
+    }
+
+    @Override
+    public int getShutdownDayMinus2Rate(String factoryCode) {
+        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_2_RATE", 
+                LhScheduleConstant.SHUTDOWN_DAY_MINUS_2_RATE);
+    }
+
+    @Override
+    public int getShutdownDayMinus1Rate(String factoryCode) {
+        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_1_RATE", 
+                LhScheduleConstant.SHUTDOWN_DAY_MINUS_1_RATE);
+    }
+
+    @Override
+    public int getStartupFirstDayRate(String factoryCode) {
+        return getIntValue(factoryCode, "STARTUP_FIRST_DAY_RATE", 
+                LhScheduleConstant.STARTUP_FIRST_DAY_RATE);
+    }
+
+    // ======================== 试制量试规则 ========================
+
+    @Override
+    public int getTrialDailyLimit(String factoryCode) {
+        return getIntValue(factoryCode, "TRIAL_DAILY_LIMIT", 
+                LhScheduleConstant.TRIAL_DAILY_LIMIT);
+    }
+
+    // ======================== 模具交替计划规则 ========================
+
+    @Override
+    public int getMouldChangePlanDays(String factoryCode) {
+        return getIntValue(factoryCode, "MOULD_CHANGE_PLAN_DAYS", 
+                LhScheduleConstant.MOULD_CHANGE_PLAN_DAYS);
+    }
+
+    // ======================== 收尾判定规则 ========================
+
+    @Override
+    public int getStructureEndingDays(String factoryCode) {
+        return getIntValue(factoryCode, "STRUCTURE_ENDING_DAYS", 
+                LhScheduleConstant.DEFAULT_STRUCTURE_ENDING_DAYS);
+    }
+
     // ======================== 私有辅助方法 ========================
 
     private int getIntValue(String factoryCode, String paramCode, int defaultValue) {

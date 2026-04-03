@@ -1,11 +1,13 @@
 package com.zlt.aps.lh.handler;
 
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.api.enums.SkuTagEnum;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
@@ -36,6 +38,9 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
     @Resource
     private LhScheduleResultMapper scheduleResultMapper;
+
+    @Resource
+    private IEndingJudgmentStrategy endingJudgmentStrategy;
 
     @Override
     protected void doHandle(LhScheduleContext context) {
@@ -236,6 +241,8 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             dto.setMouldQty(1);
         }
 
+        fillDailyCapacity(dto, capacity);
+
         // 优先级信息
         dto.setSupplyChainPriority(plan.getProductionType());
         dto.setDeliveryLocked(isDeliveryLocked(plan));
@@ -259,6 +266,30 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
+     * 填充日硫化产能，供统一收尾判定策略（待排量与日产对比）使用
+     *
+     * @param dto      SKU排程DTO（需已设置 dailyPlanQty、shiftCapacity）
+     * @param capacity SKU硫化产能主数据，可为null
+     */
+    private void fillDailyCapacity(SkuScheduleDTO dto, MdmSkuLhCapacity capacity) {
+        int dailyCap = 0;
+        if (capacity != null) {
+            if (capacity.getApsCapacity() != null && capacity.getApsCapacity() > 0) {
+                dailyCap = capacity.getApsCapacity();
+            } else if (capacity.getStandardCapacity() != null && capacity.getStandardCapacity() > 0) {
+                dailyCap = capacity.getStandardCapacity();
+            }
+        }
+        if (dailyCap <= 0 && dto.getShiftCapacity() > 0) {
+            dailyCap = dto.getShiftCapacity() * LhScheduleConstant.DEFAULT_SHIFTS_PER_DAY;
+        }
+        if (dailyCap <= 0 && dto.getDailyPlanQty() > 0) {
+            dailyCap = dto.getDailyPlanQty();
+        }
+        dto.setDailyCapacity(dailyCap);
+    }
+
+    /**
      * 判断SKU是否有交期锁定（周程滚动调整有锁定上机日期）
      *
      * @param plan 月生产计划记录
@@ -271,32 +302,23 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
     /**
      * 标注收尾SKU
-     * <p>
-     * 判断依据：硫化余量 <= 机台在3天内（可配置）可生产的总产能<br/>
-     * 即：收尾判定班次数 * 单班产能 >= 硫化余量
-     * </p>
+     * <p>委托收尾判定策略接口，与续作收尾判定、排序规则保持一致</p>
      *
      * @param context 排程上下文
      */
     private void markEndingSkus(LhScheduleContext context) {
-        // 收尾判定天数（默认3天 = 8班）
-        int endingDetectDays = LhScheduleTimeUtil.getEndingDetectDays(context);
-        // 8班（T日2班 + T+1日3班 + T+2日3班）
-        int totalScheduleShifts = 8;
-
         int endingCount = 0;
         for (List<SkuScheduleDTO> skuList : context.getStructureSkuMap().values()) {
             for (SkuScheduleDTO sku : skuList) {
-                // 计算排程期内（8班）的总产能
-                int shiftCapacity = sku.getShiftCapacity();
-                int totalCapacity = shiftCapacity * totalScheduleShifts;
-
-                // 若余量 <= 总产能，说明在排程期内可收尾，标注为收尾
-                if (sku.getSurplusQty() <= totalCapacity && sku.getSurplusQty() > 0) {
+                if (endingJudgmentStrategy.isEnding(context, sku)) {
                     sku.setSkuTag(SkuTagEnum.ENDING.getCode());
-                    // 计算预计收尾所需班次数
-                    int endingShifts = shiftCapacity > 0 ? (int) Math.ceil((double) sku.getSurplusQty() / shiftCapacity) : totalScheduleShifts;
-                    sku.setEndingDaysRemaining(endingShifts / 3 + 1);
+                    int endingDays = endingJudgmentStrategy.calculateEndingDays(context, sku);
+                    if (endingDays < 0) {
+                        // 班产缺失无法折算班次数时，收尾日保守记为 1
+                        sku.setEndingDaysRemaining(1);
+                    } else {
+                        sku.setEndingDaysRemaining(endingDays);
+                    }
                     endingCount++;
                 }
             }

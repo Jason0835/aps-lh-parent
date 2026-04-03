@@ -14,6 +14,26 @@ import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 public interface IProductionStrategy {
 
     /**
+     * 获取策略类型编码
+     * <p>用于策略自注册，返回对应的排程类型代码</p>
+     *
+     * @return 策略类型编码（如"01"表示续作,"02"表示新增），返回null表示不自动注册
+     */
+    default String getStrategyType() {
+        return null;
+    }
+
+    /**
+     * 获取策略名称
+     * <p>用于策略识别和日志记录</p>
+ *
+     * @return 策略名称
+     */
+    default String getStrategyName() {
+        return this.getClass().getSimpleName();
+    }
+
+    /**
      * 换活字块排产(同胎胚同模具的SKU切换)
      *
      * @param context 排程上下文

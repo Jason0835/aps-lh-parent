@@ -7,16 +7,20 @@ import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
-import com.zlt.aps.lh.api.enums.SkuTagEnum;
+import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import javax.annotation.Resource;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -35,6 +39,22 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component("continuousProductionStrategy")
 public class ContinuousProductionStrategy implements IProductionStrategy {
+
+    @Resource
+    private OrderNoGenerator orderNoGenerator;
+
+    @Resource
+    private IEndingJudgmentStrategy endingJudgmentStrategy;
+
+    @Override
+    public String getStrategyType() {
+        return ScheduleTypeEnum.CONTINUOUS.getCode();
+    }
+
+    @Override
+    public String getStrategyName() {
+        return "continuousProductionStrategy";
+    }
 
     @Override
     public void scheduleTypeBlockChange(LhScheduleContext context) {
@@ -84,12 +104,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            int dailyCapacity = sku.getDailyCapacity();
-            int pendingQty = sku.getPendingQty();
-
-            // 收尾判定：待排量 < 日产则为收尾，否则满产
-            boolean isEnding = SkuTagEnum.ENDING.getCode().equals(sku.getSkuTag())
-                    || (dailyCapacity > 0 && pendingQty < dailyCapacity);
+            boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
 
             // 创建排程结果（续作从班次1开始）
             Date startTime = shifts.isEmpty() ? new Date() : shifts.get(0).getStartTime();
@@ -545,14 +560,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 生成工单号：LHGD + 年月日 + 3位序号
+     * 生成工单号（使用线程安全的OrderNoGenerator）
      */
-    private static int orderSeq = 0;
-
     private String generateOrderNo(LhScheduleContext context) {
-        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd");
-        String dateStr = sdf.format(context.getScheduleTargetDate());
-        int seq = (++orderSeq) % 1000;
-        return String.format("%s%s%03d", "LHGD", dateStr, seq);
+        return orderNoGenerator.generateOrderNo(context.getScheduleTargetDate());
     }
 }

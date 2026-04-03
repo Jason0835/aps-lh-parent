@@ -3,6 +3,7 @@ package com.zlt.aps.lh.handler;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhParams;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
@@ -53,13 +54,10 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         }
 
         // S4.2.3 执行数据校验链（组内聚合模式会收集全部错误后再失败）
-        boolean valid = dataValidationChain.validate(context);
-        if (!valid) {
-            int errorCount = context.getValidationErrorList().size();
-            String reason = errorCount > 0
-                    ? "基础数据校验未通过，共 " + errorCount + " 条"
-                    : "基础数据校验未通过";
-            context.interruptSchedule(reason);
+        ValidationResult result = dataValidationChain.validateWithResult(context);
+        if (result.isFailed()) {
+            log.warn("数据校验未通过，共 {} 条错误，明细: {}", result.getErrors().size(), result.getFormattedErrors());
+            context.interruptSchedule(result.getSummaryMessage());
             return;
         }
 

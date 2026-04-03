@@ -8,14 +8,18 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
+import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.component.OrderNoGenerator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import javax.annotation.Resource;
 
 import java.util.ArrayList;
 import java.util.Date;
@@ -31,6 +35,19 @@ import java.util.List;
 @Slf4j
 @Component("newSpecProductionStrategy")
 public class NewSpecProductionStrategy implements IProductionStrategy {
+
+    @Resource
+    private OrderNoGenerator orderNoGenerator;
+
+    @Override
+    public String getStrategyType() {
+        return ScheduleTypeEnum.NEW_SPEC.getCode();
+    }
+
+    @Override
+    public String getStrategyName() {
+        return "newSpecProductionStrategy";
+    }
 
     @Override
     public void scheduleTypeBlockChange(LhScheduleContext context) {
@@ -347,15 +364,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 生成工单号
+     * 生成工单号（使用线程安全的OrderNoGenerator）
      */
-    private static int orderSeq = 0;
-
     private String generateOrderNo(LhScheduleContext context) {
-        java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyyMMdd");
-        String dateStr = sdf.format(context.getScheduleTargetDate());
-        int seq = (++orderSeq) % 1000;
-        return String.format("%s%s%03d", "LHGD", dateStr, seq);
+        return orderNoGenerator.generateOrderNo(context.getScheduleTargetDate());
     }
 
     /**

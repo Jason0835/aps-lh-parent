@@ -85,6 +85,9 @@ public final class LhScheduleConstant {
     /** 收尾判定天数 */
     public static final int DEFAULT_ENDING_DAYS = 3;
 
+    /** 标准每日班次数（早/中/夜），用于由班产推算日产能及收尾天数折算 */
+    public static final int DEFAULT_SHIFTS_PER_DAY = 3;
+
     /** 降模排产：结构收尾判定天数 */
     public static final int DEFAULT_STRUCTURE_ENDING_DAYS = 5;
 

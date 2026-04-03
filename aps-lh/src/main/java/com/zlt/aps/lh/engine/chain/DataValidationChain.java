@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.engine.chain;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.enums.ValidationPolicyEnum;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -89,6 +90,21 @@ public class DataValidationChain {
         }
         log.info("所有数据校验通过");
         return true;
+    }
+
+    /**
+     * 执行校验并返回结构化结果对象
+     * <p>推荐使用此方法，语义更清晰，错误信息更完整</p>
+     *
+     * @param context 排程上下文
+     * @return 校验结果对象，包含是否通过、错误列表及摘要信息
+     */
+    public ValidationResult validateWithResult(LhScheduleContext context) {
+        boolean passed = validate(context);
+        if (passed) {
+            return ValidationResult.pass();
+        }
+        return ValidationResult.fail(context.getValidationErrorList());
     }
 
     /**

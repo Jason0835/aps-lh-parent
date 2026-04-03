@@ -5,6 +5,7 @@ package com.zlt.aps.lh.engine.factory;
 
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IInsertOrderStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
@@ -13,17 +14,27 @@ import com.zlt.aps.lh.engine.strategy.IProductionShutdownStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
+import com.zlt.aps.lh.engine.rule.IScheduleRuleEngine;
+import com.zlt.aps.lh.component.OrderNoGenerator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 排程策略工厂
- * <p>负责创建和管理所有策略对象, 基于Spring容器实现</p>
+ * 排程策略工厂（改进版）
+ * <p>
+ * 改进点：
+ * <ul>
+ *   <li>支持策略自注册：策略实现类通过接口方法声明自己的类型</li>
+ *   <li>支持多实现：同一类型可注册多个策略，通过策略名称区分</li>
+ *   <li>集中管理：所有策略通过工厂获取，便于统一管理和监控</li>
+ * </ul>
+ * </p>
  *
  * @author APS
  */
@@ -31,8 +42,17 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class ScheduleStrategyFactory {
 
+    /** 排产策略Map（Spring自动注入所有实现） */
     @Resource
-    private Map<String, IProductionStrategy> productionStrategyMap;
+    private List<IProductionStrategy> productionStrategies;
+
+    /** 策略缓存：按策略类型编码索引 */
+    private final Map<String, IProductionStrategy> productionStrategyCache = new ConcurrentHashMap<>();
+
+    /** 策略缓存：按策略Bean名称索引 */
+    private final Map<String, IProductionStrategy> productionStrategyByName = new ConcurrentHashMap<>();
+
+    // ==================== 单例策略（每种类型只有一个默认实现） ====================
 
     @Resource
     private IMachineMatchStrategy machineMatchStrategy;
@@ -58,101 +78,132 @@ public class ScheduleStrategyFactory {
     @Resource
     private IInsertOrderStrategy insertOrderStrategy;
 
-    private final Map<String, IProductionStrategy> strategyCache = new ConcurrentHashMap<>();
+    @Resource
+    private IEndingJudgmentStrategy endingJudgmentStrategy;
 
+    @Resource
+    private IScheduleRuleEngine scheduleRuleEngine;
+
+    @Resource
+    private OrderNoGenerator orderNoGenerator;
+
+    /**
+     * 初始化：自动注册所有排产策略
+     * <p>
+     * 改进：使用策略自注册机制，无需硬编码策略名称
+     * </p>
+     */
     @PostConstruct
     public void init() {
-        strategyCache.put(ScheduleTypeEnum.CONTINUOUS.getCode(),
-                productionStrategyMap.get("continuousProductionStrategy"));
-        strategyCache.put(ScheduleTypeEnum.NEW_SPEC.getCode(),
-                productionStrategyMap.get("newSpecProductionStrategy"));
-        log.info("排程策略工厂初始化完成, 已注册策略数: {}", strategyCache.size());
+        // 自动注册排产策略
+        if (productionStrategies != null) {
+            for (IProductionStrategy strategy : productionStrategies) {
+                registerProductionStrategy(strategy);
+            }
+        }
+        
+        log.info("排程策略工厂初始化完成, 排产策略数: {}, 策略列表: {}", 
+                productionStrategyCache.size(), productionStrategyCache.keySet());
     }
 
     /**
-     * 获取排产策略
+     * 注册排产策略
+     *
+     * @param strategy 策略实例
+     */
+    private void registerProductionStrategy(IProductionStrategy strategy) {
+        String strategyType = strategy.getStrategyType();
+        String strategyName = strategy.getStrategyName();
+        
+        if (strategyType != null && !strategyType.isEmpty()) {
+            productionStrategyCache.put(strategyType, strategy);
+            log.debug("注册排产策略: type={}, name={}", strategyType, strategyName);
+        }
+        
+        if (strategyName != null && !strategyName.isEmpty()) {
+            productionStrategyByName.put(strategyName, strategy);
+        }
+    }
+
+    // ==================== 排产策略获取 ====================
+
+    /**
+     * 根据排程类型获取排产策略
      *
      * @param scheduleType 排程类型代码(01-续作, 02-新增)
      * @return 对应的排产策略实现
      * @throws IllegalArgumentException 未找到对应策略时抛出
      */
     public IProductionStrategy getProductionStrategy(String scheduleType) {
-        IProductionStrategy strategy = strategyCache.get(scheduleType);
+        IProductionStrategy strategy = productionStrategyCache.get(scheduleType);
         if (strategy == null) {
-            throw new IllegalArgumentException("未找到排程类型[" + scheduleType + "]对应的排产策略");
+            throw new IllegalArgumentException("未找到排程类型[" + scheduleType + "]对应的排产策略，已注册策略: " + productionStrategyCache.keySet());
         }
         return strategy;
     }
 
     /**
-     * 获取机台匹配策略
+ * 根据策略名称获取排产策略
+     * <p>用于获取特定命名的策略实现</p>
      *
-     * @return 机台匹配策略
+     * @param strategyName 策略Bean名称
+     * @return 排产策略实现
      */
+    public IProductionStrategy getProductionStrategyByName(String strategyName) {
+        return productionStrategyByName.get(strategyName);
+    }
+
+    // ==================== 其他策略获取 ====================
+
     public IMachineMatchStrategy getMachineMatchStrategy() {
         return machineMatchStrategy;
     }
 
-    /**
-     * 获取SKU优先级策略
-     *
-     * @return SKU优先级策略
-     */
     public ISkuPriorityStrategy getSkuPriorityStrategy() {
         return skuPriorityStrategy;
     }
 
-    /**
-     * 获取首检均衡策略
-     *
-     * @return 首检均衡策略
-     */
     public IFirstInspectionBalanceStrategy getFirstInspectionBalanceStrategy() {
         return firstInspectionBalanceStrategy;
     }
 
-    /**
-     * 获取换模均衡策略
-     *
-     * @return 换模均衡策略
-     */
     public IMouldChangeBalanceStrategy getMouldChangeBalanceStrategy() {
         return mouldChangeBalanceStrategy;
     }
 
-    /**
-     * 获取产能计算策略
-     *
-     * @return 产能计算策略
-     */
     public ICapacityCalculateStrategy getCapacityCalculateStrategy() {
         return capacityCalculateStrategy;
     }
 
-    /**
-     * 获取开停产处理策略
-     *
-     * @return 开停产处理策略
-     */
     public IProductionShutdownStrategy getProductionShutdownStrategy() {
         return productionShutdownStrategy;
     }
 
-    /**
-     * 获取试制/量试排产策略
-     *
-     * @return 试制量试策略
-     */
     public ITrialProductionStrategy getTrialProductionStrategy() {
         return trialProductionStrategy;
     }
 
-    /**
-     * 获取插单处理策略
-     *
-     * @return 插单处理策略
-     */
     public IInsertOrderStrategy getInsertOrderStrategy() {
         return insertOrderStrategy;
+    }
+
+    public IEndingJudgmentStrategy getEndingJudgmentStrategy() {
+        return endingJudgmentStrategy;
+    }
+
+    // ==================== 新增服务获取 ====================
+
+    /**
+     * 获取规则引擎
+     */
+    public IScheduleRuleEngine getScheduleRuleEngine() {
+        return scheduleRuleEngine;
+    }
+
+    /**
+     * 获取工单号生成器
+     */
+    public OrderNoGenerator getOrderNoGenerator() {
+        return orderNoGenerator;
     }
 }

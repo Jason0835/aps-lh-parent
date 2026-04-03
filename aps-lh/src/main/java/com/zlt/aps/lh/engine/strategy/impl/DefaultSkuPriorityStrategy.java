@@ -6,10 +6,12 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.enums.SchedulePriorityEnum;
-import com.zlt.aps.lh.api.enums.SkuTagEnum;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+
+import javax.annotation.Resource;
 
 import java.util.Comparator;
 import java.util.List;
@@ -25,6 +27,9 @@ import java.util.Map;
 @Component
 public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
 
+    @Resource
+    private IEndingJudgmentStrategy endingJudgmentStrategy;
+
     /**
      * 供应链优先级权重：高优先级(04) < 周期排产(05) < 中优先级(06) < 搭配排产(07)，数字越小越优先
      * 未知优先级排最后
@@ -35,7 +40,7 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
     public void sortByPriority(LhScheduleContext context) {
         log.info("执行SKU优先级排序, 新增SKU数: {}", context.getNewSpecSkuList().size());
 
-        Comparator<SkuScheduleDTO> comparator = buildSkuComparator();
+        Comparator<SkuScheduleDTO> comparator = buildSkuComparator(context);
 
         // 对新增SKU列表排序
         context.getNewSpecSkuList().sort(comparator);
@@ -66,25 +71,21 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
      *   <li>供应链优先级：高优先级(04) → 周期排产(05) → 中优先级(06) → 搭配排产(07)</li>
      * </ol>
      * </p>
+     *
+     * @param context 排程上下文
+     * @return SKU比较器
      */
-    private Comparator<SkuScheduleDTO> buildSkuComparator() {
+    private Comparator<SkuScheduleDTO> buildSkuComparator(LhScheduleContext context) {
         return Comparator
                 // 顺序1：有发货要求的优先（true=1，false=0，降序）
                 .comparingInt((SkuScheduleDTO s) -> s.isDeliveryLocked() ? 0 : 1)
                 // 顺序2：延误天数越多越优先（降序）
                 .thenComparingInt((SkuScheduleDTO s) -> -s.getDelayDays())
                 // 顺序3：收尾SKU优先；收尾日越晚（剩余天数越多）的越先上机
-                .thenComparingInt((SkuScheduleDTO s) -> isEnding(s) ? 0 : 1)
+                .thenComparingInt((SkuScheduleDTO s) -> endingJudgmentStrategy.isEnding(context, s) ? 0 : 1)
                 .thenComparingInt((SkuScheduleDTO s) -> -s.getEndingDaysRemaining())
                 // 顺序4：供应链优先级权重（数字越小越优先）
                 .thenComparingInt(this::getSupplyChainPriorityOrder);
-    }
-
-    /**
-     * 判断SKU是否处于收尾状态
-     */
-    private boolean isEnding(SkuScheduleDTO sku) {
-        return SkuTagEnum.ENDING.getCode().equals(sku.getSkuTag());
     }
 
     /**

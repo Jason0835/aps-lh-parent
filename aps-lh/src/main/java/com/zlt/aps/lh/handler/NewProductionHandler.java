@@ -50,7 +50,7 @@ public class NewProductionHandler extends AbsScheduleStepHandler {
         // S4.5.6 计算开产时间
         ICapacityCalculateStrategy capacityStrategy = strategyFactory.getCapacityCalculateStrategy();
 
-        /** @todo 对每个新增SKU执行以下流程:
+        /** 对每个新增SKU执行以下流程:
          * 1. 按优先级排序
          * 2. 匹配可用硫化机台
          * 3. 换模次数均衡校验(早<=8, 中<=7, 总<=15)

@@ -17,7 +17,7 @@ public class DefaultTrialProductionStrategy implements ITrialProductionStrategy 
 
     @Override
     public List<SkuScheduleDTO> filterTrialSkus(LhScheduleContext context, List<SkuScheduleDTO> allSkus) {
-        // @todo 筛选出施工阶段为试制(01)/量试(02)的SKU
+        // 筛选出施工阶段为试制(01)/量试(02)的SKU
         log.debug("筛选试制量试SKU");
         return allSkus.stream()
                 .filter(sku -> sku.getConstructionStage() != null

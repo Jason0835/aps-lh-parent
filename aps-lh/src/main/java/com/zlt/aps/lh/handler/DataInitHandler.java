@@ -9,6 +9,8 @@ import com.zlt.aps.lh.api.domain.entity.LhParams;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.engine.chain.DataValidationChain;
+import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
+import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.mapper.LhParamsMapper;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
@@ -57,7 +59,8 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         ValidationResult result = dataValidationChain.validateWithResult(context);
         if (result.isFailed()) {
             log.warn("数据校验未通过，共 {} 条错误，明细: {}", result.getErrors().size(), result.getFormattedErrors());
-            context.interruptSchedule(result.getSummaryMessage());
+            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT,
+                    ScheduleErrorCode.DATA_INCOMPLETE, result.getSummaryMessage());
             return;
         }
 

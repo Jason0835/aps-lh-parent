@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.handler;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.exception.ScheduleException;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -26,6 +27,9 @@ public abstract class AbsScheduleStepHandler {
         long startTime = System.currentTimeMillis();
         try {
             doHandle(context);
+        } catch (ScheduleException e) {
+            log.warn("[{}] 排程业务异常: {}", getStepName(), e.getMessage(), e);
+            context.interruptSchedule(e.getMessage());
         } catch (Exception e) {
             log.error("[{}] 执行异常", getStepName(), e);
             context.interruptSchedule(getStepName() + "执行异常: " + e.getMessage());

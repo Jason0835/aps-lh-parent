@@ -3,7 +3,9 @@ package com.zlt.aps.lh.engine.template;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
+import com.zlt.aps.lh.exception.ScheduleException;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -79,9 +81,16 @@ public abstract class AbsLhScheduleTemplate {
             doResultValidationAndSave(context);
 
             return buildSuccessResponse(context);
+        } catch (ScheduleException e) {
+            log.error("硫化排程领域异常, 当前步骤:{}", context.getCurrentStep(), e);
+            String batchNo = context.getBatchNo();
+            if (StringUtils.isEmpty(batchNo)) {
+                batchNo = e.getBatchNo();
+            }
+            return LhScheduleResponseDTO.fail(batchNo, e.getMessage());
         } catch (Exception e) {
             log.error("硫化排程执行异常, 当前步骤:{}", context.getCurrentStep(), e);
-            return LhScheduleResponseDTO.fail("排程执行异常: " + e.getMessage());
+            return LhScheduleResponseDTO.fail(context.getBatchNo(), "排程执行异常: " + e.getMessage());
         } finally {
             long elapsed = System.currentTimeMillis() - startTime;
             log.info("========== 硫化排程结束, 耗时: {}ms ==========", elapsed);

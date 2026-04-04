@@ -3,6 +3,8 @@ package com.zlt.aps.lh.engine.chain;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.enums.ValidationPolicyEnum;
+import com.zlt.aps.lh.exception.ScheduleErrorCode;
+import com.zlt.aps.lh.exception.ScheduleException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -129,7 +131,7 @@ public class DataValidationChain {
 
     /**
      * 断言：每个 group 对应的 {@link ValidationPolicyEnum} 在全部校验器中唯一
-     * <p>若同一 group 出现不同策略，说明配置错误，抛出 {@link IllegalStateException}。</p>
+     * <p>若同一 group 出现不同策略，说明配置错误，抛出 {@link ScheduleException}。</p>
      */
     private void assertConsistentPolicyPerGroup() {
         Map<Integer, ValidationPolicyEnum> groupPolicy = new LinkedHashMap<>();
@@ -139,7 +141,7 @@ public class DataValidationChain {
             if (!groupPolicy.containsKey(group)) {
                 groupPolicy.put(group, policy);
             } else if (groupPolicy.get(group) != policy) {
-                throw new IllegalStateException(String.format(
+                throw new ScheduleException(ScheduleErrorCode.VALIDATION_CHAIN_CONFIG_ERROR, String.format(
                         "校验组 %d 内策略不一致: 已有 %s, 当前校验器[%s]为 %s",
                         group, groupPolicy.get(group), validator.getValidatorName(), policy));
             }

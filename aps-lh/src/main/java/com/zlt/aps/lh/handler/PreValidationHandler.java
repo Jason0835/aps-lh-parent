@@ -7,6 +7,8 @@ import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
+import com.zlt.aps.lh.exception.ScheduleErrorCode;
+import com.zlt.aps.lh.exception.ScheduleException;
 import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
 import com.zlt.aps.lh.mapper.LhScheduleProcessLogMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
@@ -14,6 +16,7 @@ import com.zlt.aps.lh.mapper.LhUnscheduledResultMapper;
 import com.zlt.aps.lh.service.ILhScheduleResultService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
@@ -48,15 +51,9 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
     protected void doHandle(LhScheduleContext context) {
         // S4.1.1 校验MES下发状态
         checkMesReleaseStatus(context);
-        if (context.isInterrupted()) {
-            return;
-        }
 
         // S4.1.2 校验是否正在排程
         checkScheduleInProgress(context);
-        if (context.isInterrupted()) {
-            return;
-        }
 
         // S4.1.3 删除旧排程数据
         cleanHistoryData(context);
@@ -77,9 +74,11 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
         String factoryCode = context.getFactoryCode();
         int releasedCount = scheduleResultService.countReleasedByDate(targetDate, factoryCode);
         if (releasedCount > 0) {
-            context.interruptSchedule("该日期排程已下发MES，请先撤销发布后再重新排程。排程日期: "
-                    + LhScheduleTimeUtil.getDateStr(targetDate));
             log.warn("排程被拒绝: 日期[{}]已有已发布排程, 数量: {}", LhScheduleTimeUtil.getDateStr(targetDate), releasedCount);
+            throw new ScheduleException(ScheduleStepEnum.S4_1_PRE_VALIDATION, ScheduleErrorCode.MES_RELEASED,
+                    factoryCode, context.getBatchNo(),
+                    "该日期排程已下发MES，请先撤销发布后再重新排程。排程日期: "
+                            + LhScheduleTimeUtil.getDateStr(targetDate));
         }
     }
 
@@ -91,9 +90,11 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
      */
     private void checkScheduleInProgress(LhScheduleContext context) {
         // 若传入的batchNo不为空，说明已有排程在执行（或前端重复调用），需防重
-        if (context.getBatchNo() != null && !context.getBatchNo().isEmpty()) {
-            context.interruptSchedule("当前已有排程任务正在执行中，请勿重复提交。批次号: " + context.getBatchNo());
+        if (!StringUtils.isEmpty(context.getBatchNo())) {
             log.warn("排程被拒绝: 排程任务已在执行, 批次号: {}", context.getBatchNo());
+            throw new ScheduleException(ScheduleStepEnum.S4_1_PRE_VALIDATION, ScheduleErrorCode.SCHEDULE_IN_PROGRESS,
+                    context.getFactoryCode(), context.getBatchNo(),
+                    "当前已有排程任务正在执行中，请勿重复提交。批次号: " + context.getBatchNo());
         }
     }
 

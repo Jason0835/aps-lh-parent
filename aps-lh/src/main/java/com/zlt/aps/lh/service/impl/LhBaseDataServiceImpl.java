@@ -7,6 +7,7 @@ import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
+import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
@@ -22,6 +23,8 @@ import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
 import com.zlt.aps.lh.mapper.MdmWorkCalendarMapper;
+import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
+import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
@@ -194,7 +197,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         Long total = mpFactoryProductionVersionMapper.selectCount(wrapFinalProductionVersion(factoryCode, year, month));
         if (total == null || total == 0) {
             log.error("定稿排产版本无数据, 工厂: {}, 年: {}, 月: {}", factoryCode, year, month);
-            context.interruptSchedule(String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
+            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT, ScheduleErrorCode.DATA_INCOMPLETE,
+                    String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
             return;
         }
         if (total > 1) {
@@ -208,7 +212,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                         .last("LIMIT 1"));
         if (list == null || list.isEmpty()) {
             log.error("定稿排产版本查询最新一条无结果, 工厂: {}, 年: {}, 月: {}", factoryCode, year, month);
-            context.interruptSchedule(String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
+            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT, ScheduleErrorCode.DATA_INCOMPLETE,
+                    String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
             return;
         }
         MpFactoryProductionVersion row = list.get(0);
@@ -216,8 +221,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         if (pv == null || pv.isEmpty()) {
             log.error("定稿排产版本号为空, 工厂: {}, 年: {}, 月: {}, id: {}",
                     factoryCode, year, month, row.getId());
-            context.interruptSchedule(String.format(
-                    "定稿排产版本记录中排产版本号为空，工厂=%s 年=%d 月=%d", factoryCode, year, month));
+            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT, ScheduleErrorCode.DATA_INCOMPLETE,
+                    String.format("定稿排产版本记录中排产版本号为空，工厂=%s 年=%d 月=%d", factoryCode, year, month));
             return;
         }
         context.setProductionVersion(pv);

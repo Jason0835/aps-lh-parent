@@ -15,6 +15,10 @@ public enum ScheduleErrorCode {
     // ==================== 通用错误 ====================
     UNKNOWN("S9999", "未知错误"),
     SYSTEM_ERROR("S0001", "系统异常"),
+    /** 排程类型对应的排产策略未注册 */
+    PRODUCTION_STRATEGY_NOT_REGISTERED("S0002", "排产策略未注册"),
+    /** 数据校验链配置不一致（如校验组内策略冲突） */
+    VALIDATION_CHAIN_CONFIG_ERROR("S0003", "数据校验链配置错误"),
 
     // ==================== S4.1 前置校验错误 ====================
     MES_RELEASED("S4101", "排程已下发MES，禁止重新排程"),

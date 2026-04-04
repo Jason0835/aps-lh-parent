@@ -13,8 +13,8 @@ import com.zlt.aps.lh.engine.strategy.IProductionShutdownStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
-import com.zlt.aps.lh.engine.rule.IScheduleRuleEngine;
-import com.zlt.aps.lh.component.OrderNoGenerator;
+import com.zlt.aps.lh.exception.ScheduleErrorCode;
+import com.zlt.aps.lh.exception.ScheduleException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -126,12 +126,13 @@ public class ScheduleStrategyFactory {
      *
      * @param scheduleType 排程类型代码(01-续作, 02-新增)
      * @return 对应的排产策略实现
-     * @throws IllegalArgumentException 未找到对应策略时抛出
+     * @throws ScheduleException 未找到对应策略时抛出
      */
     public IProductionStrategy getProductionStrategy(String scheduleType) {
         IProductionStrategy strategy = productionStrategyCache.get(scheduleType);
         if (strategy == null) {
-            throw new IllegalArgumentException("未找到排程类型[" + scheduleType + "]对应的排产策略，已注册策略: " + productionStrategyCache.keySet());
+            throw new ScheduleException(ScheduleErrorCode.PRODUCTION_STRATEGY_NOT_REGISTERED,
+                    "未找到排程类型[" + scheduleType + "]对应的排产策略，已注册策略: " + productionStrategyCache.keySet());
         }
         return strategy;
     }

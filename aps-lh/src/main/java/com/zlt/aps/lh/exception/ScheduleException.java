@@ -2,6 +2,7 @@ package com.zlt.aps.lh.exception;
 
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import lombok.Getter;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * 排程领域异常
@@ -24,6 +25,10 @@ public class ScheduleException extends RuntimeException {
     /** 批次号 */
     private final String batchNo;
 
+    /**
+     * @param errorCode 错误码枚举
+     * @param message   业务详情说明（不含步骤/错误码前缀）
+     */
     public ScheduleException(ScheduleErrorCode errorCode, String message) {
         super(message);
         this.step = null;
@@ -32,6 +37,11 @@ public class ScheduleException extends RuntimeException {
         this.batchNo = null;
     }
 
+    /**
+     * @param step      排程步骤
+     * @param errorCode 错误码枚举
+     * @param message   业务详情说明
+     */
     public ScheduleException(ScheduleStepEnum step, ScheduleErrorCode errorCode, String message) {
         super(message);
         this.step = step;
@@ -40,7 +50,14 @@ public class ScheduleException extends RuntimeException {
         this.batchNo = null;
     }
 
-    public ScheduleException(ScheduleStepEnum step, ScheduleErrorCode errorCode, 
+    /**
+     * @param step        排程步骤
+     * @param errorCode   错误码枚举
+     * @param factoryCode 工厂编码
+     * @param batchNo     批次号
+     * @param message     业务详情说明
+     */
+    public ScheduleException(ScheduleStepEnum step, ScheduleErrorCode errorCode,
                              String factoryCode, String batchNo, String message) {
         super(message);
         this.step = step;
@@ -49,7 +66,13 @@ public class ScheduleException extends RuntimeException {
         this.batchNo = batchNo;
     }
 
-    public ScheduleException(ScheduleStepEnum step, ScheduleErrorCode errorCode, 
+    /**
+     * @param step      排程步骤
+     * @param errorCode 错误码枚举
+     * @param message   业务详情说明
+     * @param cause     底层原因
+     */
+    public ScheduleException(ScheduleStepEnum step, ScheduleErrorCode errorCode,
                              String message, Throwable cause) {
         super(message, cause);
         this.step = step;
@@ -59,7 +82,26 @@ public class ScheduleException extends RuntimeException {
     }
 
     /**
-     * 构建格式化的错误消息
+     * @param step        排程步骤
+     * @param errorCode   错误码枚举
+     * @param factoryCode 工厂编码
+     * @param batchNo     批次号
+     * @param message     业务详情说明
+     * @param cause       底层原因
+     */
+    public ScheduleException(ScheduleStepEnum step, ScheduleErrorCode errorCode,
+                             String factoryCode, String batchNo, String message, Throwable cause) {
+        super(message, cause);
+        this.step = step;
+        this.errorCode = errorCode;
+        this.factoryCode = factoryCode;
+        this.batchNo = batchNo;
+    }
+
+    /**
+     * 返回面向调用方与日志的完整格式化错误文案（含步骤、错误码、详情及工厂/批次后缀）。
+     *
+     * @return 格式化后的完整消息
      */
     @Override
     public String getMessage() {
@@ -71,10 +113,10 @@ public class ScheduleException extends RuntimeException {
             sb.append(errorCode.getCode()).append(": ");
         }
         sb.append(super.getMessage());
-        if (factoryCode != null) {
+        if (StringUtils.isNotEmpty(factoryCode)) {
             sb.append(", factory=").append(factoryCode);
         }
-        if (batchNo != null) {
+        if (StringUtils.isNotEmpty(batchNo)) {
             sb.append(", batchNo=").append(batchNo);
         }
         return sb.toString();

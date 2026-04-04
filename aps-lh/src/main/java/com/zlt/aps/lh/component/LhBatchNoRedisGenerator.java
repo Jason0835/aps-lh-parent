@@ -1,6 +1,9 @@
 package com.zlt.aps.lh.component;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
+import com.zlt.aps.lh.exception.ScheduleErrorCode;
+import com.zlt.aps.lh.exception.ScheduleException;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
@@ -38,7 +41,8 @@ public class LhBatchNoRedisGenerator {
         String redisKey = REDIS_KEY_PREFIX + factoryCode + ":" + dateStr;
         Long seq = stringRedisTemplate.opsForValue().increment(redisKey);
         if (seq == null) {
-            throw new IllegalStateException("Redis INCR 返回 null，请检查 Redis 是否可用");
+            throw new ScheduleException(ScheduleStepEnum.S4_1_PRE_VALIDATION, ScheduleErrorCode.BATCH_NO_GENERATE_FAILED,
+                    factoryCode, null, "Redis INCR 返回 null，请检查 Redis 是否可用");
         }
         if (seq == 1L) {
             stringRedisTemplate.expire(redisKey, TTL_HOURS, TimeUnit.HOURS);

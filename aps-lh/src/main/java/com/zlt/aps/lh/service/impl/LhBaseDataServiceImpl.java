@@ -13,6 +13,7 @@ import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
+import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
@@ -38,6 +39,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -113,6 +115,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     @Resource
     private MdmDevMaintenancePlanMapper devMaintenancePlanMapper;
 
+    @Resource
+    private LhScheduleResultMapper lhScheduleResultMapper;
+
     @Override
     public void loadAllBaseData(LhScheduleContext context) {
         String factoryCode = context.getFactoryCode();
@@ -179,11 +184,31 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 15. 加载设备保养计划
         loadMaintenancePlan(context, factoryCode);
 
-        // 16. todo 加载前日硫化排程结果信息（前日日期=目标日 -1）
+        // 16. 加载前日硫化排程结果
+        loadPreviousScheduleResults(context, factoryCode, targetDate);
 
         log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}", factoryCode, targetDate, scheduleDate);
     }
 
+    /**
+     * 加载前日硫化排程结果
+     *
+     * @param context     排程上下文
+     * @param factoryCode 分厂编号
+     * @param targetDate  排程目标日
+     * @return
+     */
+    private void loadPreviousScheduleResults(LhScheduleContext context, String factoryCode, Date targetDate) {
+        Date previousDate = LhScheduleTimeUtil.addDays(targetDate, -1);
+        List<LhScheduleResult> list = lhScheduleResultMapper.selectPreviousSchedule(previousDate, factoryCode);
+        if (list == null || list.isEmpty()) {
+            log.info("未找到前日排程数据, 日期: {}", LhScheduleTimeUtil.getDateStr(previousDate));
+            context.setPreviousScheduleResultList(new ArrayList<>());
+            return;
+        }
+        context.setPreviousScheduleResultList(list);
+        log.info("前日排程基础数据加载完成, 数量: {}, 日期: {}", list.size(), LhScheduleTimeUtil.getDateStr(previousDate));
+    }
 
     /**
      * 加载定稿排产版本：工厂 + 年 + 月 + 已定稿且未删除；无数据则中断；多条时取更新时间最新一条（再按主键降序）

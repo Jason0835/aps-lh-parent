@@ -8,7 +8,6 @@ import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.api.enums.SkuTagEnum;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
-import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
@@ -21,7 +20,6 @@ import org.springframework.stereotype.Component;
 import javax.annotation.Resource;
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,14 +35,11 @@ import java.util.Map;
 public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
     @Resource
-    private LhScheduleResultMapper scheduleResultMapper;
-
-    @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
 
     @Override
     protected void doHandle(LhScheduleContext context) {
-        // S4.3.1 加载前日排程并调整欠/超产量
+        // S4.3.1 前日排程欠/超产量调整
         adjustPreviousSchedule(context);
 
         // S4.3.2 按产品结构归集SKU，计算硫化余量
@@ -61,7 +56,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 加载前日排程并修正欠/超产差额
+     * 对前日排程结果做欠/超产量调整（原地修改列表）。
      * <p>
      * 欠产（夜班计划 > 实际完成）：将差额追加到T日早班的计划量中<br/>
      * 超产（实际完成 > 计划）：可冲抵后续班次计划<br/>
@@ -71,17 +66,8 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @param context 排程上下文
      */
     private void adjustPreviousSchedule(LhScheduleContext context) {
-        Date targetDate = context.getScheduleTargetDate();
-        String factoryCode = context.getFactoryCode();
-
-        // 查询上一目标日的排程结果（库表 schedule_date 存排程目标日）
-        Date previousDate = LhScheduleTimeUtil.addDays(targetDate, -1);
-        List<LhScheduleResult> previousScheduleList =
-                scheduleResultMapper.selectPreviousSchedule(previousDate, factoryCode);
-
+        List<LhScheduleResult> previousScheduleList = context.getPreviousScheduleResultList();
         if (previousScheduleList == null || previousScheduleList.isEmpty()) {
-            log.info("未找到前日排程数据, 日期: {}", LhScheduleTimeUtil.getDateStr(previousDate));
-            context.setPreviousScheduleResultList(new ArrayList<>());
             return;
         }
 
@@ -102,8 +88,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             }
         }
 
-        context.setPreviousScheduleResultList(previousScheduleList);
-        log.info("前日排程加载并调整完成, 数量: {}", previousScheduleList.size());
+        log.info("前日排程欠产调整完成, 数量: {}", previousScheduleList.size());
     }
 
     /**

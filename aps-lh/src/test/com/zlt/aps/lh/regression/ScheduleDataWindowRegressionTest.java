@@ -8,6 +8,7 @@ import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
+import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
@@ -35,6 +36,7 @@ import java.util.Date;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,6 +76,8 @@ class ScheduleDataWindowRegressionTest {
     private MdmLhRepairCapsuleMapper lhRepairCapsuleMapper;
     @Mock
     private MdmDevMaintenancePlanMapper devMaintenancePlanMapper;
+    @Mock
+    private LhScheduleResultMapper lhScheduleResultMapper;
 
     @InjectMocks
     private LhBaseDataServiceImpl lhBaseDataService;
@@ -132,6 +136,7 @@ class ScheduleDataWindowRegressionTest {
         when(lhSpecifyMachineMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhRepairCapsuleMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devMaintenancePlanMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(lhScheduleResultMapper.selectPreviousSchedule(any(), any())).thenReturn(Collections.emptyList());
 
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode(factoryCode);
@@ -144,6 +149,8 @@ class ScheduleDataWindowRegressionTest {
         verify(workCalendarMapper).selectList(any());
         verify(devicePlanShutMapper).selectList(any());
         verify(lhCleaningPlanMapper).selectList(any());
+        Date expectedPreviousTargetDay = LhScheduleTimeUtil.addDays(target, -1);
+        verify(lhScheduleResultMapper).selectPreviousSchedule(eq(expectedPreviousTargetDay), eq(factoryCode));
     }
 
     private static Date date(int y, int month, int day) {

@@ -16,6 +16,7 @@ import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.exception.ScheduleException;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -129,6 +130,9 @@ public class ScheduleStrategyFactory {
      * @throws ScheduleException 未找到对应策略时抛出
      */
     public IProductionStrategy getProductionStrategy(String scheduleType) {
+        if (StringUtils.isEmpty(scheduleType)) {
+            throw new ScheduleException(ScheduleErrorCode.PRODUCTION_STRATEGY_NOT_REGISTERED, "排程类型不能为空");
+        }
         IProductionStrategy strategy = productionStrategyCache.get(scheduleType);
         if (strategy == null) {
             throw new ScheduleException(ScheduleErrorCode.PRODUCTION_STRATEGY_NOT_REGISTERED,
@@ -143,9 +147,18 @@ public class ScheduleStrategyFactory {
      *
      * @param strategyName 策略Bean名称
      * @return 排产策略实现
+     * @throws ScheduleException 名称为空或未注册对应 Bean 时抛出
      */
     public IProductionStrategy getProductionStrategyByName(String strategyName) {
-        return productionStrategyByName.get(strategyName);
+        if (StringUtils.isEmpty(strategyName)) {
+            throw new ScheduleException(ScheduleErrorCode.PRODUCTION_STRATEGY_NOT_REGISTERED, "排产策略 Bean 名称不能为空");
+        }
+        IProductionStrategy strategy = productionStrategyByName.get(strategyName);
+        if (strategy == null) {
+            throw new ScheduleException(ScheduleErrorCode.PRODUCTION_STRATEGY_NOT_REGISTERED,
+                    "未找到 Bean 名称[" + strategyName + "]对应的排产策略，已注册: " + productionStrategyByName.keySet());
+        }
+        return strategy;
     }
 
     // ==================== 其他策略获取 ====================

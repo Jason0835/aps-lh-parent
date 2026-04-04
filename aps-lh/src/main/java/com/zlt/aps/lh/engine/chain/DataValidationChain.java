@@ -94,7 +94,6 @@ public class DataValidationChain {
 
     /**
      * 执行校验并返回结构化结果对象
-     * <p>推荐使用此方法，语义更清晰，错误信息更完整</p>
      *
      * @param context 排程上下文
      * @return 校验结果对象，包含是否通过、错误列表及摘要信息

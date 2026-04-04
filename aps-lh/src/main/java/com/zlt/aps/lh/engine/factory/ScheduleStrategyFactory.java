@@ -3,7 +3,6 @@
  */
 package com.zlt.aps.lh.engine.factory;
 
-import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
@@ -81,11 +80,6 @@ public class ScheduleStrategyFactory {
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
 
-    @Resource
-    private IScheduleRuleEngine scheduleRuleEngine;
-
-    @Resource
-    private OrderNoGenerator orderNoGenerator;
 
     /**
      * 初始化：自动注册所有排产策略
@@ -101,8 +95,8 @@ public class ScheduleStrategyFactory {
                 registerProductionStrategy(strategy);
             }
         }
-        
-        log.info("排程策略工厂初始化完成, 排产策略数: {}, 策略列表: {}", 
+
+        log.info("排程策略工厂初始化完成, 排产策略数: {}, 策略列表: {}",
                 productionStrategyCache.size(), productionStrategyCache.keySet());
     }
 
@@ -114,12 +108,12 @@ public class ScheduleStrategyFactory {
     private void registerProductionStrategy(IProductionStrategy strategy) {
         String strategyType = strategy.getStrategyType();
         String strategyName = strategy.getStrategyName();
-        
+
         if (strategyType != null && !strategyType.isEmpty()) {
             productionStrategyCache.put(strategyType, strategy);
             log.debug("注册排产策略: type={}, name={}", strategyType, strategyName);
         }
-        
+
         if (strategyName != null && !strategyName.isEmpty()) {
             productionStrategyByName.put(strategyName, strategy);
         }
@@ -143,7 +137,7 @@ public class ScheduleStrategyFactory {
     }
 
     /**
- * 根据策略名称获取排产策略
+     * 根据策略名称获取排产策略
      * <p>用于获取特定命名的策略实现</p>
      *
      * @param strategyName 策略Bean名称
@@ -191,19 +185,6 @@ public class ScheduleStrategyFactory {
         return endingJudgmentStrategy;
     }
 
-    // ==================== 新增服务获取 ====================
 
-    /**
-     * 获取规则引擎
-     */
-    public IScheduleRuleEngine getScheduleRuleEngine() {
-        return scheduleRuleEngine;
-    }
 
-    /**
-     * 获取工单号生成器
-     */
-    public OrderNoGenerator getOrderNoGenerator() {
-        return orderNoGenerator;
-    }
 }

@@ -6,6 +6,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
+import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
@@ -19,6 +20,7 @@ import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 
@@ -26,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 新增规格排产策略实现
@@ -220,7 +223,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
         // 按班次分配计划量
         int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
-        int remaining = distributeToShifts(result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), pendingQty, capacityCalculate);
+        int remaining = distributeToShifts(context, result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), pendingQty, capacityCalculate);
 
         int totalQty = calcTotalPlanQty(result);
         result.setTotalDailyPlanQty(totalQty);
@@ -232,7 +235,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
      *
      * @return 未排产的剩余量
      */
-    private int distributeToShifts(LhScheduleResult result,
+    private int distributeToShifts(LhScheduleContext context,
+                                   LhScheduleResult result,
                                    List<ShiftInfo> shifts,
                                    Date startTime,
                                    int lhTimeSeconds,
@@ -242,13 +246,13 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0 || startTime == null) {
             return remaining;
         }
+        Map<Integer, ShiftRuntimeState> stateMap = context.getShiftRuntimeStateMap();
 
         boolean started = false;
         for (ShiftInfo shift : shifts) {
             if (remaining <= 0) {
                 break;
             }
-            // 找到开产时间所在班次或之后的班次
             if (!started) {
                 if (startTime.before(shift.getEndTime())) {
                     started = true;
@@ -269,10 +273,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
             int shiftMaxQty;
             if (startTime.equals(effectiveStart)) {
-                // 首班：使用首班计划量计算
                 shiftMaxQty = capacityCalculate.calculateFirstShiftQty(effectiveStart, shift.getEndTime(), lhTimeSeconds, mouldQty);
             } else {
-                // 后续班次：使用标准班产
                 shiftMaxQty = capacityCalculate.calculateShiftCapacity(lhTimeSeconds, mouldQty);
             }
 
@@ -281,6 +283,13 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getEndTime());
                 remaining -= shiftQty;
                 startTime = shift.getEndTime();
+
+                if (!CollectionUtils.isEmpty(stateMap)) {
+                    ShiftRuntimeState st = stateMap.get(shift.getShiftIndex());
+                    if (st != null) {
+                        st.setRemainingCapacity(Math.max(0, shiftMaxQty - shiftQty));
+                    }
+                }
             }
         }
         return remaining;

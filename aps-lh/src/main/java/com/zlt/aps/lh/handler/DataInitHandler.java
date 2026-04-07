@@ -3,6 +3,7 @@ package com.zlt.aps.lh.handler;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
 import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhParams;
@@ -13,6 +14,7 @@ import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.mapper.LhParamsMapper;
 import com.zlt.aps.lh.service.ILhBaseDataService;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhRepairCapsule;
@@ -66,6 +68,9 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
         // S4.2.4 封装标准化数据对象（初始化机台排程状态）
         buildStandardDataObjects(context);
+
+        List<ShiftInfo> windowShifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        LhScheduleTimeUtil.initShiftRuntimeStateMap(context, windowShifts);
 
         log.info("基础数据初始化完成, 机台数量: {}, 月计划SKU数: {}",
                 context.getMachineInfoMap().size(), context.getMonthPlanList().size());

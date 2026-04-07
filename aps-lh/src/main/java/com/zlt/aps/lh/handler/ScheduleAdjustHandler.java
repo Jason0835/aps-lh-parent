@@ -333,7 +333,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             for (SkuScheduleDTO sku : skuList) {
                 // 判断是否为续作：从MES在机信息中查找该SKU是否已在某台机台上生产
                 String continuousMachineCode = findContinuousMachine(context, sku.getMaterialCode());
-                if (continuousMachineCode != null) {
+                if (StringUtils.isNotEmpty(continuousMachineCode)) {
                     // 续作SKU：记录所在机台
                     sku.setScheduleType(ScheduleTypeEnum.CONTINUOUS.getCode());
                     sku.setContinuousMachineCode(continuousMachineCode);

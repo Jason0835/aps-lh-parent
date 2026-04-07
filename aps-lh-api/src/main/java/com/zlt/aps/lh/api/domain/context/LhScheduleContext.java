@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.api.domain.context;
 
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
@@ -105,6 +106,8 @@ public class LhScheduleContext {
     private Map<String, MachineScheduleDTO> machineScheduleMap = new LinkedHashMap<>();
     /** 机台剩余产能Map, key=machineCode, value=各班次剩余产能 */
     private Map<String, int[]> machineShiftCapacityMap = new LinkedHashMap<>();
+    /** 班次运行态，key=班次索引 1～8 */
+    private Map<Integer, ShiftRuntimeState> shiftRuntimeStateMap = new LinkedHashMap<>(8);
     /** 机台已分配SKU Map, key=machineCode, value=已分配的排程结果 */
     private Map<String, List<LhScheduleResult>> machineAssignmentMap = new LinkedHashMap<>();
     /** 每日换模计数, key=dateString, value=[早班换模数, 中班换模数] */

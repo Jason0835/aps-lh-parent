@@ -2,6 +2,7 @@ package com.zlt.aps.lh.api.domain.dto;
 
 import com.zlt.aps.lh.api.enums.ShiftEnum;
 
+import java.io.Serializable;
 import java.util.Date;
 
 /**
@@ -9,7 +10,9 @@ import java.util.Date;
  *
  * @author APS
  */
-public class ShiftInfo {
+public class ShiftInfo implements Serializable {
+
+    private static final long serialVersionUID = 1L;
 
     /** 班次索引（1-8，对应class1到class8） */
     private final int shiftIndex;
@@ -26,21 +29,60 @@ public class ShiftInfo {
     /** 班次结束时间 */
     private final Date endTime;
 
+    /** 班次展示名称（含相对 T 日偏移前缀） */
+    private final String shiftName;
+
     /**
-     * 构造班次信息
-     *
-     * @param shiftIndex 班次索引
-     * @param shiftType  班次类型
-     * @param workDate   所属日期
-     * @param startTime  开始时间
-     * @param endTime    结束时间
+     * 相对排程 T 日的日历偏移：0 表示 T 日，1 表示 T+1，2 表示 T+2
      */
-    public ShiftInfo(int shiftIndex, ShiftEnum shiftType, Date workDate, Date startTime, Date endTime) {
+    private final int dateOffset;
+
+    /** 班次类型编码，与 {@link ShiftEnum#getCode()} 一致 */
+    private final String shiftCode;
+
+    /** 班次时长（分钟） */
+    private final int durationMinutes;
+
+    /** 是否跨越自然日（开始、结束在当地时区不属于同一日历日） */
+    private final boolean crossesCalendarDay;
+
+    /** 是否跨越自然月（开始、结束在当地时区不属于同一自然月） */
+    private final boolean crossesMonth;
+
+    /** 是否跨越自然年（开始、结束在当地时区不属于同一自然年） */
+    private final boolean crossesYear;
+
+    /**
+     * 构造班次信息（全字段）
+     *
+     * @param shiftIndex          班次索引（1～8）
+     * @param shiftType           班次类型枚举
+     * @param workDate            逻辑归属日（当日 0 点）
+     * @param startTime           班次开始时间
+     * @param endTime             班次结束时间
+     * @param shiftName           班次展示名称
+     * @param dateOffset          相对 T 日偏移（0/1/2）
+     * @param shiftCode           班次类型编码
+     * @param durationMinutes     班次时长（分钟）
+     * @param crossesCalendarDay  是否跨自然日
+     * @param crossesMonth        是否跨自然月
+     * @param crossesYear         是否跨自然年
+     */
+    public ShiftInfo(int shiftIndex, ShiftEnum shiftType, Date workDate, Date startTime, Date endTime,
+            String shiftName, int dateOffset, String shiftCode, int durationMinutes,
+            boolean crossesCalendarDay, boolean crossesMonth, boolean crossesYear) {
         this.shiftIndex = shiftIndex;
         this.shiftType = shiftType;
         this.workDate = workDate;
         this.startTime = startTime;
         this.endTime = endTime;
+        this.shiftName = shiftName;
+        this.dateOffset = dateOffset;
+        this.shiftCode = shiftCode;
+        this.durationMinutes = durationMinutes;
+        this.crossesCalendarDay = crossesCalendarDay;
+        this.crossesMonth = crossesMonth;
+        this.crossesYear = crossesYear;
     }
 
     /**
@@ -89,6 +131,69 @@ public class ShiftInfo {
     }
 
     /**
+     * 获取班次展示名称
+     *
+     * @return 班次名称
+     */
+    public String getShiftName() {
+        return shiftName;
+    }
+
+    /**
+     * 获取相对排程 T 日的日历偏移
+     *
+     * @return 0 表示 T 日，1 表示 T+1，2 表示 T+2
+     */
+    public int getDateOffset() {
+        return dateOffset;
+    }
+
+    /**
+     * 获取班次类型编码
+     *
+     * @return 与枚举编码一致
+     */
+    public String getShiftCode() {
+        return shiftCode;
+    }
+
+    /**
+     * 获取班次时长（分钟）
+     *
+     * @return 时长分钟数
+     */
+    public int getDurationMinutes() {
+        return durationMinutes;
+    }
+
+    /**
+     * 是否跨越自然日
+     *
+     * @return true-跨日
+     */
+    public boolean isCrossesCalendarDay() {
+        return crossesCalendarDay;
+    }
+
+    /**
+     * 是否跨越自然月
+     *
+     * @return true-跨月
+     */
+    public boolean isCrossesMonth() {
+        return crossesMonth;
+    }
+
+    /**
+     * 是否跨越自然年
+     *
+     * @return true-跨年
+     */
+    public boolean isCrossesYear() {
+        return crossesYear;
+    }
+
+    /**
      * 判断是否为夜班
      *
      * @return true-夜班
@@ -127,6 +232,9 @@ public class ShiftInfo {
     @Override
     public String toString() {
         return "ShiftInfo{班次索引=" + shiftIndex + ", 类型=" + shiftType.getDescription()
+                + ", 名称=" + shiftName + ", 偏移=T+" + dateOffset + ", 编码=" + shiftCode
+                + ", 时长分钟=" + durationMinutes + ", 跨日=" + crossesCalendarDay
+                + ", 跨月=" + crossesMonth + ", 跨年=" + crossesYear
                 + ", 开始=" + startTime + ", 结束=" + endTime + "}";
     }
 }

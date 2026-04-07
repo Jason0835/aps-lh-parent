@@ -43,4 +43,17 @@
             <artifactId>commons-lang3</artifactId>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <!-- reactor 下 -Dtest=单测类名 时，本模块无匹配用例不视为失败 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <failIfNoSpecifiedTests>false</failIfNoSpecifiedTests>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

@@ -137,7 +137,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     /**
      * 计算SKU的硫化余量
      * <p>
-     * 优先使用月底计划余量表（T_MDM_MONTH_SURPLUS）中的数据<br/>
+     * 优先使用月底计划余量表（T_MDM_MONTH_SURPLUS）中的数据，按物料编号匹配<br/>
      * 若无数据，则通过 月度计划总量 - 各班次完成量之和 计算
      * </p>
      *
@@ -147,13 +147,13 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      */
     private int calculateSurplusQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
         String materialCode = plan.getMaterialCode();
-        String factoryCode = plan.getFactoryCode();
 
-        // 先从月底计划余量Map中获取
-        String groupKey = factoryCode + "|*|" + materialCode;
-        MdmMonthSurplus monthSurplus = context.getMonthSurplusMap().get(groupKey);
-        if (monthSurplus != null && monthSurplus.getPlanSurplusQty() != null) {
-            return monthSurplus.getPlanSurplusQty().intValue();
+        // 先从月底计划余量Map中获取（仅按物料编号）
+        if (StringUtils.isNotEmpty(materialCode)) {
+            MdmMonthSurplus monthSurplus = context.getMonthSurplusMap().get(materialCode);
+            if (monthSurplus != null && monthSurplus.getPlanSurplusQty() != null) {
+                return monthSurplus.getPlanSurplusQty().intValue();
+            }
         }
 
         // 若无余量数据，用月计划总量减去各班次完成量

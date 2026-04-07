@@ -73,7 +73,7 @@ public class LhScheduleContext {
     private Map<String, LhMachineInfo> machineInfoMap = new LinkedHashMap<>();
     /** 模具清洗计划列表 */
     private List<LhCleaningPlan> cleaningPlanList = new ArrayList<>();
-    /** 月底计划余量Map, key=groupKey(factoryCode|*|materialCode) */
+    /** 月底计划余量Map, key=materialCode */
     private Map<String, MdmMonthSurplus> monthSurplusMap = new HashMap<>();
     /** 各班次完成量Map, key=machineCode+materialCode */
     private Map<String, LhShiftFinishQty> shiftFinishQtyMap = new HashMap<>();

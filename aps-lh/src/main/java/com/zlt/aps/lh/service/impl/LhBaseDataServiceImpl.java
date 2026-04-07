@@ -425,7 +425,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     }
 
     /**
-     * 加载月底计划余量，按GroupKey建立Map
+     * 加载月底计划余量，按物料编号建立Map
      *
      * @param context     排程上下文
      * @param factoryCode 分厂编号
@@ -442,7 +442,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         Map<String, MdmMonthSurplus> monthSurplusMap = new HashMap<>(64);
         if (monthSurplusList != null) {
             for (MdmMonthSurplus surplus : monthSurplusList) {
-                monthSurplusMap.put(surplus.getGroupKey(), surplus);
+                if (StringUtils.isNotEmpty(surplus.getMaterialCode())) {
+                    monthSurplusMap.put(surplus.getMaterialCode(), surplus);
+                }
             }
         }
         context.setMonthSurplusMap(monthSurplusMap);

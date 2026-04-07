@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.engine.observer;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.api.enums.EventTypeEnum;
 import lombok.Data;
 
 import java.util.Date;
@@ -14,7 +15,7 @@ import java.util.Date;
 public class ScheduleEvent {
 
     /** 事件类型 */
-    private EventType eventType;
+    private EventTypeEnum eventType;
     /** 批次号 */
     private String batchNo;
     /** 工厂编号 */
@@ -27,23 +28,6 @@ public class ScheduleEvent {
     private String message;
     /** 排程上下文(携带结果数据) */
     private LhScheduleContext context;
-
-    /**
-     * 事件类型枚举
-     */
-    public enum EventType {
-        /** 排程开始 */
-        SCHEDULE_STARTED,
-        /** 排程步骤完成 */
-        STEP_COMPLETED,
-        /** 排程完成 */
-        SCHEDULE_COMPLETED,
-        /** 排程失败 */
-        SCHEDULE_FAILED,
-        /** 排程结果发布 */
-        RESULT_PUBLISHED
-    }
-
 
     /**
      * 事件中的业务排程日：优先目标日；发布场景无目标日时从结果首条取 scheduleDate
@@ -66,7 +50,7 @@ public class ScheduleEvent {
      */
     public static ScheduleEvent completed(LhScheduleContext context) {
         ScheduleEvent event = new ScheduleEvent();
-        event.setEventType(EventType.SCHEDULE_COMPLETED);
+        event.setEventType(EventTypeEnum.SCHEDULE_COMPLETED);
         event.setBatchNo(context.getBatchNo());
         event.setFactoryCode(context.getFactoryCode());
         event.setScheduleDate(resolveBusinessScheduleDate(context));
@@ -85,7 +69,7 @@ public class ScheduleEvent {
      */
     public static ScheduleEvent failed(LhScheduleContext context, String reason) {
         ScheduleEvent event = new ScheduleEvent();
-        event.setEventType(EventType.SCHEDULE_FAILED);
+        event.setEventType(EventTypeEnum.SCHEDULE_FAILED);
         event.setBatchNo(context.getBatchNo());
         event.setFactoryCode(context.getFactoryCode());
         event.setScheduleDate(resolveBusinessScheduleDate(context));
@@ -103,7 +87,7 @@ public class ScheduleEvent {
      */
     public static ScheduleEvent published(LhScheduleContext context) {
         ScheduleEvent event = new ScheduleEvent();
-        event.setEventType(EventType.RESULT_PUBLISHED);
+        event.setEventType(EventTypeEnum.RESULT_PUBLISHED);
         event.setBatchNo(context.getBatchNo());
         event.setFactoryCode(context.getFactoryCode());
         event.setScheduleDate(resolveBusinessScheduleDate(context));

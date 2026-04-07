@@ -5,6 +5,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
@@ -106,7 +107,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                  ICapacityCalculateStrategy capacityCalculate) {
         log.info("新增排产 - 执行新增规格排产, 新增SKU数: {}", context.getNewSpecSkuList().size());
 
-        List<LhScheduleTimeUtil.ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         Iterator<SkuScheduleDTO> iterator = context.getNewSpecSkuList().iterator();
         while (iterator.hasNext()) {
@@ -179,7 +180,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                          SkuScheduleDTO sku,
                                                          Date startTime,
                                                          Date mouldChangeTime,
-                                                         List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                                         List<ShiftInfo> shifts,
                                                          ICapacityCalculateStrategy capacityCalculate) {
         LhScheduleResult result = new LhScheduleResult();
         result.setFactoryCode(context.getFactoryCode());
@@ -232,7 +233,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
      * @return 未排产的剩余量
      */
     private int distributeToShifts(LhScheduleResult result,
-                                   List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                   List<ShiftInfo> shifts,
                                    Date startTime,
                                    int lhTimeSeconds,
                                    int mouldQty,
@@ -243,7 +244,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         }
 
         boolean started = false;
-        for (LhScheduleTimeUtil.ShiftInfo shift : shifts) {
+        for (ShiftInfo shift : shifts) {
             if (remaining <= 0) {
                 break;
             }

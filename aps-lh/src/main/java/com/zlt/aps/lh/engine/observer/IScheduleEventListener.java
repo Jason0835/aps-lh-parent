@@ -1,5 +1,7 @@
 package com.zlt.aps.lh.engine.observer;
 
+import com.zlt.aps.lh.api.enums.EventTypeEnum;
+
 /**
  * 排程事件监听器接口(观察者)
  *
@@ -20,5 +22,5 @@ public interface IScheduleEventListener {
      * @param eventType 事件类型
      * @return true-关注, false-不关注
      */
-    boolean supports(ScheduleEvent.EventType eventType);
+    boolean supports(EventTypeEnum eventType);
 }

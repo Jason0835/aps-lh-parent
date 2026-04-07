@@ -5,6 +5,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
@@ -60,7 +61,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     public void scheduleTypeBlockChange(LhScheduleContext context) {
         log.info("续作排产 - 换活字块排产, 机台数: {}", context.getMachineScheduleMap().size());
 
-        List<LhScheduleTimeUtil.ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         // 按收尾时间升序处理每个在产机台
         List<MachineScheduleDTO> endingMachines = context.getMachineScheduleMap().values().stream()
@@ -95,7 +96,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     public void scheduleContinuousEnding(LhScheduleContext context) {
         log.info("续作排产 - 续作收尾判定, 续作SKU数: {}", context.getContinuousSkuList().size());
 
-        List<LhScheduleTimeUtil.ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
             String machineCode = sku.getContinuousMachineCode();
@@ -128,7 +129,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     public void allocateShiftPlanQty(LhScheduleContext context) {
         log.info("续作排产 - 班次计划量分配");
 
-        List<LhScheduleTimeUtil.ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if (!"01".equals(result.getScheduleType())) {
@@ -282,7 +283,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                                   MachineScheduleDTO machine,
                                                   SkuScheduleDTO sku,
                                                   Date startTime,
-                                                  List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                                  List<ShiftInfo> shifts,
                                                   boolean isEnding) {
         LhScheduleResult result = new LhScheduleResult();
         result.setFactoryCode(context.getFactoryCode());
@@ -343,7 +344,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * @return 未能排产的剩余量
      */
     private int distributeToShifts(LhScheduleResult result,
-                                   List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                   List<ShiftInfo> shifts,
                                    Date startTime,
                                    int lhTimeSeconds,
                                    int mouldQty,
@@ -353,7 +354,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         }
 
         boolean started = false;
-        for (LhScheduleTimeUtil.ShiftInfo shift : shifts) {
+        for (ShiftInfo shift : shifts) {
             if (remaining <= 0) {
                 break;
             }
@@ -408,7 +409,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * 计算规格收尾时间（最后一个有计划量班次中，完成剩余量所需的时间点）
      */
     private Date calcSpecEndTime(LhScheduleResult result,
-                                 List<LhScheduleTimeUtil.ShiftInfo> shifts,
+                                 List<ShiftInfo> shifts,
                                  int lhTimeSeconds,
                                  int mouldQty,
                                  int remainingUnscheduled,
@@ -418,7 +419,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         }
         // 找到最后一个有计划量的班次
         for (int i = shifts.size() - 1; i >= 0; i--) {
-            LhScheduleTimeUtil.ShiftInfo shift = shifts.get(i);
+            ShiftInfo shift = shifts.get(i);
             Integer planQty = getShiftPlanQty(result, shift.getShiftIndex());
             if (planQty != null && planQty > 0 && lhTimeSeconds > 0 && mouldQty > 0) {
                 // 收尾时间 = 该班次开始时间 + (计划量/模数) * 硫化时间
@@ -473,7 +474,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 重新在班次间均衡分配计划量（用于allocateShiftPlanQty后续调整）
      */
-    private void redistributeShiftQty(LhScheduleResult result, List<LhScheduleTimeUtil.ShiftInfo> shifts) {
+    private void redistributeShiftQty(LhScheduleResult result, List<ShiftInfo> shifts) {
         if (result.getLhTime() == null || result.getLhTime() <= 0 || result.getMouldQty() == null) {
             return;
         }
@@ -482,7 +483,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         int totalQty = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
         int remaining = totalQty;
 
-        for (LhScheduleTimeUtil.ShiftInfo shift : shifts) {
+        for (ShiftInfo shift : shifts) {
             if (remaining <= 0) {
                 setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
                 continue;

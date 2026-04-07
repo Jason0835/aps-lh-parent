@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.engine.observer.listeners;
 
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
+import com.zlt.aps.lh.api.enums.EventTypeEnum;
 import com.zlt.aps.lh.engine.observer.IScheduleEventListener;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import com.zlt.aps.lh.mapper.LhScheduleProcessLogMapper;
@@ -45,7 +46,7 @@ public class LogEventListener implements IScheduleEventListener {
     }
 
     @Override
-    public boolean supports(ScheduleEvent.EventType eventType) {
+    public boolean supports(EventTypeEnum eventType) {
         return true;
     }
 }

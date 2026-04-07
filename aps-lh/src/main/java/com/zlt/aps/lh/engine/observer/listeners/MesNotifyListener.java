@@ -1,5 +1,6 @@
 package com.zlt.aps.lh.engine.observer.listeners;
 
+import com.zlt.aps.lh.api.enums.EventTypeEnum;
 import com.zlt.aps.lh.engine.observer.IScheduleEventListener;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import lombok.extern.slf4j.Slf4j;
@@ -31,8 +32,8 @@ public class MesNotifyListener implements IScheduleEventListener {
     }
 
     @Override
-    public boolean supports(ScheduleEvent.EventType eventType) {
-        return eventType == ScheduleEvent.EventType.SCHEDULE_COMPLETED
-                || eventType == ScheduleEvent.EventType.RESULT_PUBLISHED;
+    public boolean supports(EventTypeEnum eventType) {
+        return eventType == EventTypeEnum.SCHEDULE_COMPLETED
+                || eventType == EventTypeEnum.RESULT_PUBLISHED;
     }
 }

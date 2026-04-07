@@ -6,6 +6,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
+import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
@@ -20,6 +21,7 @@ import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 
@@ -323,7 +325,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
         // 按班次分配计划量
         int remaining = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
-        remaining = distributeToShifts(result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), remaining);
+        remaining = distributeToShifts(context, result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), remaining);
 
         // 设置收尾时间（最后一个有计划量班次的结束时间）
         Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), sku.getMouldQty(), remaining, isEnding);
@@ -343,7 +345,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      *
      * @return 未能排产的剩余量
      */
-    private int distributeToShifts(LhScheduleResult result,
+    private int distributeToShifts(LhScheduleContext context,
+                                   LhScheduleResult result,
                                    List<ShiftInfo> shifts,
                                    Date startTime,
                                    int lhTimeSeconds,
@@ -352,13 +355,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0) {
             return remaining;
         }
+        Map<Integer, ShiftRuntimeState> stateMap = context.getShiftRuntimeStateMap();
 
         boolean started = false;
         for (ShiftInfo shift : shifts) {
             if (remaining <= 0) {
                 break;
             }
-            // 找到开始班次：startTime在该班次的时间范围内，或者已经开始
             if (!started) {
                 if (startTime != null && !startTime.before(shift.getEndTime()) && shift != shifts.get(shifts.size() - 1)) {
                     continue;
@@ -366,7 +369,6 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 started = true;
             }
 
-            // 计算该班次可用时间
             Date effectiveStart = (startTime != null && startTime.after(shift.getStartTime()))
                     ? startTime : shift.getStartTime();
             if (effectiveStart.after(shift.getEndTime())) {
@@ -384,6 +386,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getEndTime());
             remaining -= shiftQty;
             startTime = null;
+
+            if (!CollectionUtils.isEmpty(stateMap)) {
+                ShiftRuntimeState st = stateMap.get(shift.getShiftIndex());
+                if (st != null) {
+                    st.setRemainingCapacity(Math.max(0, shiftMaxQty - shiftQty));
+                }
+            }
         }
         return remaining;
     }

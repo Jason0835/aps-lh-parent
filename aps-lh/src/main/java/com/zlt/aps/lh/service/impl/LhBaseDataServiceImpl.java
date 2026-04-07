@@ -42,6 +42,7 @@ import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
@@ -273,15 +274,15 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param yearMonth   年月（如202603）
      */
     private void loadMonthPlan(LhScheduleContext context, String factoryCode, int yearMonth) {
-        LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult> w = new LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult>()
+        LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult> wrapper = new LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult>()
                 .eq(FactoryMonthPlanProductionFinalResult::getFactoryCode, factoryCode)
                 .eq(FactoryMonthPlanProductionFinalResult::getYearMonth, yearMonth)
                 .eq(FactoryMonthPlanProductionFinalResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
         String productionVersion = context.getProductionVersion();
-        if (productionVersion != null && !productionVersion.isEmpty()) {
-            w.eq(FactoryMonthPlanProductionFinalResult::getProductionVersion, productionVersion);
+        if (StringUtils.isNotEmpty(productionVersion)) {
+            wrapper.eq(FactoryMonthPlanProductionFinalResult::getProductionVersion, productionVersion);
         }
-        List<FactoryMonthPlanProductionFinalResult> monthPlanList = monthPlanMapper.selectList(w);
+        List<FactoryMonthPlanProductionFinalResult> monthPlanList = monthPlanMapper.selectList(wrapper);
         context.setMonthPlanList(monthPlanList != null ? monthPlanList : context.getMonthPlanList());
         log.debug("月生产计划加载完成, 数量: {}", context.getMonthPlanList().size());
     }

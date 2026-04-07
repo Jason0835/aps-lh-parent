@@ -15,6 +15,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
@@ -120,8 +121,12 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
             SkuScheduleDTO dto = buildSkuScheduleDTO(context, plan, surplusQty);
 
-            String structureName = plan.getStructureName() != null ? plan.getStructureName() : "未知结构";
-            structureSkuMap.computeIfAbsent(structureName, k -> new ArrayList<>()).add(dto);
+            // 产品结构为空，跳过
+            if (StringUtils.isEmpty(plan.getStructureName())) {
+                continue;
+            }
+
+            structureSkuMap.computeIfAbsent(plan.getStructureName(), k -> new ArrayList<>()).add(dto);
         }
 
         context.setStructureSkuMap(structureSkuMap);
@@ -214,18 +219,18 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         // 产能信息（从SKU日硫化产能Map获取）
         MdmSkuLhCapacity capacity = context.getSkuLhCapacityMap().get(plan.getMaterialCode());
         if (capacity != null) {
-            // 硫化时间（秒），curingTime来自月计划，若无则用600秒（10分钟）作为默认
+            // 硫化时间（秒），curingTime来自月计划，若无则用3600秒（1小时）作为默认
             int lhTimeSeconds = plan.getCuringTime() != null ? plan.getCuringTime() : 3600;
             dto.setLhTimeSeconds(lhTimeSeconds);
             dto.setShiftCapacity(capacity.getClassCapacity() != null ? capacity.getClassCapacity() : 0);
             dto.setMouldQty(1);
-//            dto.setMouldQty(capacity.getMouldQty() != null ? capacity.getMouldQty() : 1);
         } else {
             // 无产能数据时使用默认值
             dto.setLhTimeSeconds(3600);
             dto.setMouldQty(1);
         }
 
+        // 填充日硫化产能
         fillDailyCapacity(dto, capacity);
 
         // 优先级信息

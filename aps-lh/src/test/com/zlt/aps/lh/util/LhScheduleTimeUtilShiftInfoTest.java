@@ -1,6 +1,6 @@
 package com.zlt.aps.lh.util;
 
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.enums.ShiftEnum;
 import org.junit.jupiter.api.Test;

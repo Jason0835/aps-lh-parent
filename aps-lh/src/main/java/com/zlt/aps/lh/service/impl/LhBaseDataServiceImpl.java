@@ -2,7 +2,7 @@ package com.zlt.aps.lh.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;

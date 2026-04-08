@@ -1,6 +1,6 @@
 package com.zlt.aps.lh.service;
 
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 
 import java.util.List;

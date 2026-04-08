@@ -1,7 +1,7 @@
 package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.engine.decorator.IScheduleExecutor;

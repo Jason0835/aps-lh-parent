@@ -1,6 +1,6 @@
 package com.zlt.aps.lh.engine.observer;
 
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.enums.EventTypeEnum;
 import lombok.Data;
 

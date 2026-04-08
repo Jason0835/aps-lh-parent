@@ -2,7 +2,7 @@
 
 **日期**：2026-04-07  
 **状态**：已定稿（待实现计划）  
-**范围**：`aps-lh-api` 中 `ShiftInfo`、`LhScheduleContext` 及 `LhScheduleTimeUtil` 等与班次相关的引擎侧契约。
+**范围**：`aps-lh-api` 中 `ShiftInfo`；`aps-lh` 中 `LhScheduleContext` 与 `LhScheduleTimeUtil` 等与班次相关的引擎侧契约。
 
 ---
 

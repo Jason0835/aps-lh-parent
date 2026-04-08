@@ -1,7 +1,7 @@
 package com.zlt.aps.lh.engine.chain.validators;
 
 import com.zlt.aps.lh.api.constant.LhDataValidationGroupConstant;
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.enums.ValidationPolicyEnum;
 import com.zlt.aps.lh.engine.chain.IDataValidator;
 import lombok.extern.slf4j.Slf4j;

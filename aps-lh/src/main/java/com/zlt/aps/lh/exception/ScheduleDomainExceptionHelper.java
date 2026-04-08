@@ -1,6 +1,6 @@
 package com.zlt.aps.lh.exception;
 
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 
 /**

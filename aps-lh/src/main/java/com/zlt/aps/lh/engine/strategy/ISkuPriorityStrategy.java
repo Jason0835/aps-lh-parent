@@ -3,7 +3,7 @@
  */
 package com.zlt.aps.lh.engine.strategy;
 
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 
 /**
  * SKU排产优先级策略接口

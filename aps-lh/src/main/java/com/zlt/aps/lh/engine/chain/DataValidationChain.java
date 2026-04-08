@@ -1,6 +1,6 @@
 package com.zlt.aps.lh.engine.chain;
 
-import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.enums.ValidationPolicyEnum;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;

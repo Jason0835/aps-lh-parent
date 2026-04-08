@@ -3,7 +3,7 @@ package com.zlt.aps.lh.handler;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
-import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
+import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhParams;
@@ -87,7 +87,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         // S4.2.4 封装标准化数据对象（初始化机台排程状态）
         buildStandardDataObjects(context);
 
-        List<ShiftInfo> windowShifts = context.getScheduleWindowShifts();
+        List<LhShiftConfigVO> windowShifts = context.getScheduleWindowShifts();
         LhScheduleTimeUtil.initShiftRuntimeStateMap(context, windowShifts);
 
         log.info("基础数据初始化完成, 机台数量: {}, 月计划SKU数: {}",

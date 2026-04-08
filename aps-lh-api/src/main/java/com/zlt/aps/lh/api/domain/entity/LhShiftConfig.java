@@ -9,7 +9,6 @@ import lombok.Getter;
 import lombok.Setter;
 
 import java.io.Serializable;
-import java.util.Date;
 
 /**
  * 硫化班次配置实体（表 T_LH_SHIFT_CONFIG）
@@ -44,17 +43,13 @@ public class LhShiftConfig extends BaseEntity implements Serializable {
     @TableField("SHIFT_TYPE")
     private String shiftType;
 
-    @ApiModelProperty("所属业务日(对应业务上的T日、T+1日、T+2日的日期, 格式：yyyyMMdd 00:00:00)")
-    @TableField("WORK_DATE")
-    private Date workDate;
-
-    @ApiModelProperty("开始时间")
+    @ApiModelProperty("开始时刻，格式 HH:mm:ss")
     @TableField("START_TIME")
-    private Date startTime;
+    private String startTime;
 
-    @ApiModelProperty("结束时间")
+    @ApiModelProperty("结束时刻，格式 HH:mm:ss")
     @TableField("END_TIME")
-    private Date endTime;
+    private String endTime;
 
     @ApiModelProperty("日期偏移（0表示T日，1表示T+1，2表示T+2）")
     @TableField("DATE_OFFSET")

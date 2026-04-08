@@ -3,7 +3,7 @@ package com.zlt.aps.lh.handler;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
-import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
+import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
@@ -75,7 +75,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             return;
         }
 
-        List<ShiftInfo> shifts = context.getScheduleWindowShifts();
+        List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
         if (CollectionUtils.isEmpty(shifts)) {
             shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
         }
@@ -187,11 +187,11 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         int finishedQty = 0;
         for (LhScheduleResult result : context.getPreviousScheduleResultList()) {
             if (plan.getMaterialCode() != null && plan.getMaterialCode().equals(result.getMaterialCode())) {
-                List<ShiftInfo> shifts = context.getScheduleWindowShifts();
+                List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
                 if (CollectionUtils.isEmpty(shifts)) {
                     shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
                 }
-                for (ShiftInfo s : shifts) {
+                for (LhShiftConfigVO s : shifts) {
                     finishedQty += safeInt(ShiftFieldUtil.getShiftFinishQty(result, s.getShiftIndex()));
                 }
             }

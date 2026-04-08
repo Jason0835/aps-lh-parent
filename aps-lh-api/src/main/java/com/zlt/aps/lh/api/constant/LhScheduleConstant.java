@@ -199,7 +199,7 @@ public final class LhScheduleConstant {
     public static final int MAX_SHIFT_SLOT_COUNT = 8;
 
     /**
-     * @deprecated 易与「窗口内实际班次数」混淆；请使用 {@link #MAX_SHIFT_SLOT_COUNT} 或当次 {@code List<ShiftInfo>} 长度
+     * @deprecated 易与「窗口内实际班次数」混淆；请使用 {@link #MAX_SHIFT_SLOT_COUNT} 或当次 {@code List<com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO>} 长度
      */
     @Deprecated
     public static final int TOTAL_SHIFTS = 9;

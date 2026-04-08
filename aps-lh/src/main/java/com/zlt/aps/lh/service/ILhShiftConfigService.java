@@ -1,12 +1,12 @@
 package com.zlt.aps.lh.service;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
-import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
+import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 
 import java.util.List;
 
 /**
- * 硫化班次配置：加载并解析为排程用 {@link ShiftInfo} 列表
+ * 硫化班次配置：加载并解析为排程用 {@link LhShiftConfigVO} 列表
  */
 public interface ILhShiftConfigService {
 
@@ -17,5 +17,5 @@ public interface ILhShiftConfigService {
      * @return 班次列表（1≤N≤8）
      * @throws IllegalArgumentException 配置非法（班次数、序号、偏移等）
      */
-    List<ShiftInfo> resolveAndAttachScheduleShifts(LhScheduleContext context);
+    List<LhShiftConfigVO> resolveAndAttachScheduleShifts(LhScheduleContext context);
 }

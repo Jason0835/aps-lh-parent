@@ -5,7 +5,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
-import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
+import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
@@ -111,7 +111,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                  ICapacityCalculateStrategy capacityCalculate) {
         log.info("新增排产 - 执行新增规格排产, 新增SKU数: {}", context.getNewSpecSkuList().size());
 
-        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         Iterator<SkuScheduleDTO> iterator = context.getNewSpecSkuList().iterator();
         while (iterator.hasNext()) {
@@ -184,7 +184,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                          SkuScheduleDTO sku,
                                                          Date startTime,
                                                          Date mouldChangeTime,
-                                                         List<ShiftInfo> shifts,
+                                                         List<LhShiftConfigVO> shifts,
                                                          ICapacityCalculateStrategy capacityCalculate) {
         LhScheduleResult result = new LhScheduleResult();
         result.setFactoryCode(context.getFactoryCode());
@@ -238,7 +238,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
      */
     private int distributeToShifts(LhScheduleContext context,
                                    LhScheduleResult result,
-                                   List<ShiftInfo> shifts,
+                                   List<LhShiftConfigVO> shifts,
                                    Date startTime,
                                    int lhTimeSeconds,
                                    int mouldQty,
@@ -250,40 +250,40 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         Map<Integer, ShiftRuntimeState> stateMap = context.getShiftRuntimeStateMap();
 
         boolean started = false;
-        for (ShiftInfo shift : shifts) {
+        for (LhShiftConfigVO shift : shifts) {
             if (remaining <= 0) {
                 break;
             }
             if (!started) {
-                if (startTime.before(shift.getEndTime())) {
+                if (startTime.before(shift.getShiftEndDateTime())) {
                     started = true;
                 } else {
                     continue;
                 }
             }
 
-            Date effectiveStart = startTime.after(shift.getStartTime()) ? startTime : shift.getStartTime();
-            if (!effectiveStart.before(shift.getEndTime())) {
+            Date effectiveStart = startTime.after(shift.getShiftStartDateTime()) ? startTime : shift.getShiftStartDateTime();
+            if (!effectiveStart.before(shift.getShiftEndDateTime())) {
                 continue;
             }
 
-            long availableSeconds = (shift.getEndTime().getTime() - effectiveStart.getTime()) / 1000L;
+            long availableSeconds = (shift.getShiftEndDateTime().getTime() - effectiveStart.getTime()) / 1000L;
             if (availableSeconds <= 0) {
                 continue;
             }
 
             int shiftMaxQty;
             if (startTime.equals(effectiveStart)) {
-                shiftMaxQty = capacityCalculate.calculateFirstShiftQty(effectiveStart, shift.getEndTime(), lhTimeSeconds, mouldQty);
+                shiftMaxQty = capacityCalculate.calculateFirstShiftQty(effectiveStart, shift.getShiftEndDateTime(), lhTimeSeconds, mouldQty);
             } else {
                 shiftMaxQty = capacityCalculate.calculateShiftCapacity(lhTimeSeconds, mouldQty);
             }
 
             int shiftQty = Math.min(remaining, shiftMaxQty);
             if (shiftQty > 0) {
-                setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getEndTime());
+                setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getShiftEndDateTime());
                 remaining -= shiftQty;
-                startTime = shift.getEndTime();
+                startTime = shift.getShiftEndDateTime();
 
                 if (!CollectionUtils.isEmpty(stateMap)) {
                     ShiftRuntimeState st = stateMap.get(shift.getShiftIndex());
@@ -300,9 +300,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         ShiftFieldUtil.setShiftPlanQty(result, shiftIndex, qty, startTime, endTime);
     }
 
-    private int calcTotalPlanQty(LhScheduleResult result, List<ShiftInfo> shifts) {
+    private int calcTotalPlanQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
         int total = 0;
-        for (ShiftInfo s : shifts) {
+        for (LhShiftConfigVO s : shifts) {
             Integer q = ShiftFieldUtil.getShiftPlanQty(result, s.getShiftIndex());
             total += (q != null ? q : 0);
         }
@@ -310,8 +310,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     }
 
     private void scaleShiftPlanQty(LhScheduleContext context, LhScheduleResult result, double ratio) {
-        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
-        for (ShiftInfo s : shifts) {
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        for (LhShiftConfigVO s : shifts) {
             int idx = s.getShiftIndex();
             Integer qty = ShiftFieldUtil.getShiftPlanQty(result, idx);
             if (qty != null && qty > 0) {

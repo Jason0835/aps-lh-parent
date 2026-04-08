@@ -3,7 +3,7 @@ package com.zlt.aps.lh.api.domain.dto;
 import java.io.Serializable;
 
 /**
- * 班次运行态（排程执行过程中与 {@link ShiftInfo} 分离的瞬时状态）
+ * 班次运行态（排程执行过程中与 {@link com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO} 定义分离的瞬时状态）
  * <p>描述某班次在算法运行时的剩余产能、是否可用及不可用原因等，不承载班次日历维度的静态信息。</p>
  *
  * @author APS

@@ -1,7 +1,8 @@
 package com.zlt.aps.lh.util;
 
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
-import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
+import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
+import com.zlt.aps.lh.api.enums.ShiftEnum;
 import org.junit.jupiter.api.Test;
 
 import java.util.Calendar;
@@ -14,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@link LhScheduleTimeUtil#getScheduleShifts} 扩展字段与跨日/跨年行为单测
+ * {@link LhScheduleTimeUtil#getScheduleShifts} 默认模板与 {@link LhShiftConfigVO} 跨日/跨年行为单测
  */
 class LhScheduleTimeUtilShiftInfoTest {
 
@@ -26,15 +27,16 @@ class LhScheduleTimeUtilShiftInfoTest {
         cal.set(Calendar.MILLISECOND, 0);
         Date scheduleDate = cal.getTime();
 
-        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(ctx, scheduleDate);
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(ctx, scheduleDate);
         assertEquals(8, shifts.size());
-        ShiftInfo class3 = shifts.get(2);
-        assertEquals(3, class3.getShiftIndex());
-        assertEquals(1, class3.getDateOffset());
+        LhShiftConfigVO class3 = shifts.get(2);
+        assertEquals(3, class3.getShiftIndex().intValue());
+        assertEquals(1, class3.getDateOffset().intValue());
         assertTrue(class3.isCrossesCalendarDay(), "夜班应跨自然日");
-        assertEquals(class3.getShiftType().getCode(), class3.getShiftCode());
+        assertEquals(class3.resolveShiftTypeEnum().getCode(), class3.getShiftCode());
         assertTrue(class3.getDurationMinutes() > 0);
         assertNotNull(class3.getShiftName());
+        assertEquals(ShiftEnum.NIGHT_SHIFT, class3.resolveShiftTypeEnum());
     }
 
     @Test
@@ -43,9 +45,9 @@ class LhScheduleTimeUtilShiftInfoTest {
         Calendar cal = Calendar.getInstance();
         cal.set(2026, Calendar.MARCH, 1, 8, 0, 0);
         cal.set(Calendar.MILLISECOND, 0);
-        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(ctx, cal.getTime());
-        ShiftInfo class1 = shifts.get(0);
-        assertEquals(0, class1.getDateOffset());
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(ctx, cal.getTime());
+        LhShiftConfigVO class1 = shifts.get(0);
+        assertEquals(0, class1.getDateOffset().intValue());
         assertFalse(class1.isCrossesCalendarDay());
     }
 
@@ -55,9 +57,9 @@ class LhScheduleTimeUtilShiftInfoTest {
         Calendar cal = Calendar.getInstance();
         cal.set(2025, Calendar.DECEMBER, 31, 12, 0, 0);
         cal.set(Calendar.MILLISECOND, 0);
-        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(ctx, cal.getTime());
-        ShiftInfo class3 = shifts.get(2);
-        assertEquals(3, class3.getShiftIndex());
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(ctx, cal.getTime());
+        LhShiftConfigVO class3 = shifts.get(2);
+        assertEquals(3, class3.getShiftIndex().intValue());
         assertTrue(class3.isCrossesYear(), "T 日夜班应跨入次年");
     }
 }

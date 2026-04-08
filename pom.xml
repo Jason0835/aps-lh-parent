@@ -19,7 +19,9 @@
         <!-- Redis 客户端（spring-boot-starter-data-redis 默认使用 Lettuce，此处显式锁定版本） -->
         <lettuce.version>6.2.7.RELEASE</lettuce.version>
         <lombok.version>1.18.16</lombok.version>
-        <swagger.version>2.9.2</swagger.version>
+        <!-- 与 knife4j-spring-boot-starter 2.0.9 配套使用 Springfox 2.10.5 -->
+        <swagger.version>2.10.5</swagger.version>
+        <knife4j.version>2.0.9</knife4j.version>
         <lang3.version>3.20.0</lang3.version>
         <hutool.version>5.8.25</hutool.version>
     </properties>
@@ -72,6 +74,11 @@
                 <groupId>io.springfox</groupId>
                 <artifactId>springfox-swagger-ui</artifactId>
                 <version>${swagger.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.xiaoymin</groupId>
+                <artifactId>knife4j-spring-boot-starter</artifactId>
+                <version>${knife4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.commons</groupId>

@@ -8,7 +8,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.core.env.Environment;
-import springfox.documentation.swagger2.annotations.EnableSwagger2;
+import com.github.xiaoymin.knife4j.spring.annotations.EnableKnife4j;
+import springfox.documentation.swagger2.annotations.EnableSwagger2WebMvc;
 
 import java.net.InetAddress;
 
@@ -18,7 +19,8 @@ import java.net.InetAddress;
  */
 @Slf4j
 @SpringBootApplication
-@EnableSwagger2
+@EnableSwagger2WebMvc
+@EnableKnife4j
 @ComponentScan(value = {"com.zlt.*"})
 @MapperScan({"com.zlt.aps.**.mapper"})
 public class ApsLhApplication {
@@ -34,8 +36,9 @@ public class ApsLhApplication {
         log.info("\n----------------------------------------------------------\n\t" +
                 "Application Lh is running!\n\t" +
                 "APS硫化接口文档 URLs:\n\t" +
-                "接口文档: \thttp://" + ip + ":" + port + "/swagger-ui/index.html\n\t" +
-                "接口文档: \thttp://" + ip + ":" + port + "/doc.html\n" +
+                "接口文档(Knife4j): \thttp://" + ip + ":" + port + "/doc.html\n\t" +
+                "接口文档(Swagger UI): \thttp://" + ip + ":" + port + "/swagger-ui.html\n\t" +
+                "OpenAPI JSON: \thttp://" + ip + ":" + port + "/v2/api-docs\n" +
                 "----------------------------------------------------------\n\t"
         );
     }

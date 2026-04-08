@@ -1,6 +1,10 @@
 server:
   port: 9669
 
+# Knife4j 增强文档（基于 Springfox），生产环境可按需关闭
+knife4j:
+  enable: true
+
 spring:
   application:
     name: aps-lh

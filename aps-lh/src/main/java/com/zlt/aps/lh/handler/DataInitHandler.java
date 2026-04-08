@@ -14,6 +14,7 @@ import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.mapper.LhParamsMapper;
 import com.zlt.aps.lh.service.ILhBaseDataService;
+import com.zlt.aps.lh.service.ILhShiftConfigService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
@@ -23,6 +24,7 @@ import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,10 +48,26 @@ public class DataInitHandler extends AbsScheduleStepHandler {
     @Resource
     private LhParamsMapper lhParamsMapper;
 
+    @Resource
+    private ILhShiftConfigService lhShiftConfigService;
+
     @Override
     protected void doHandle(LhScheduleContext context) {
         // S4.2.1 先加载硫化参数
         loadLhParams(context);
+
+        // 按参数 SCHEDULE_DAYS 校正 T 日（与基础数据时间窗口一致）
+        recomputeScheduleDateFromParams(context);
+
+        // S4.2.1b 解析班次配置（无表数据则用默认模板），并写入上下文
+        try {
+            lhShiftConfigService.resolveAndAttachScheduleShifts(context);
+        } catch (IllegalArgumentException e) {
+            log.error("班次配置非法: {}", e.getMessage());
+            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT,
+                    ScheduleErrorCode.DATA_INCOMPLETE, "班次配置非法: " + e.getMessage());
+            return;
+        }
 
         // S4.2.2 加载所有基础数据
         loadBaseData(context);
@@ -69,7 +87,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         // S4.2.4 封装标准化数据对象（初始化机台排程状态）
         buildStandardDataObjects(context);
 
-        List<ShiftInfo> windowShifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        List<ShiftInfo> windowShifts = context.getScheduleWindowShifts();
         LhScheduleTimeUtil.initShiftRuntimeStateMap(context, windowShifts);
 
         log.info("基础数据初始化完成, 机台数量: {}, 月计划SKU数: {}",
@@ -92,6 +110,18 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             }
         }
         log.info("硫化参数加载完成, 参数数量: {}", context.getLhParamsMap().size());
+    }
+
+    /**
+     * 根据硫化参数 SCHEDULE_DAYS 与排程目标日重新计算引擎用 T 日
+     *
+     * @param context 排程上下文
+     */
+    private void recomputeScheduleDateFromParams(LhScheduleContext context) {
+        Date target = LhScheduleTimeUtil.clearTime(context.getScheduleTargetDate());
+        int scheduleDays = LhScheduleTimeUtil.getScheduleDays(context);
+        int offsetDays = Math.max(0, scheduleDays - 1);
+        context.setScheduleDate(LhScheduleTimeUtil.addDays(target, -offsetDays));
     }
 
     /**

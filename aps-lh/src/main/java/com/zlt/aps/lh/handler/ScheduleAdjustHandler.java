@@ -3,11 +3,13 @@ package com.zlt.aps.lh.handler;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.api.enums.SkuTagEnum;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
+import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
@@ -17,6 +19,7 @@ import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 import java.math.BigDecimal;
@@ -72,21 +75,31 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             return;
         }
 
-        // 处理前日排程：识别欠产量（班次3为夜班，即T日的夜班）
-        for (LhScheduleResult result : previousScheduleList) {
-            // 获取夜班（class3 = T+1日夜班，即前日的夜班）计划量和完成量
-            int nightPlanQty = result.getClass3PlanQty() != null ? result.getClass3PlanQty() : 0;
-            int nightFinishQty = result.getClass3FinishQty() != null ? result.getClass3FinishQty() : 0;
+        List<ShiftInfo> shifts = context.getScheduleWindowShifts();
+        if (CollectionUtils.isEmpty(shifts)) {
+            shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        }
+        Integer nightIdx = LhScheduleTimeUtil.findFirstNightShiftIndexWithOffset(shifts, 1);
+        Integer morningT0Idx = LhScheduleTimeUtil.findFirstMorningShiftIndexWithOffset(shifts, 0);
 
-            // 计算夜班欠产量
+        if (nightIdx == null || morningT0Idx == null) {
+            log.warn("未解析到夜班/T日早班槽位，跳过欠产调整");
+        } else {
+        // 处理前日排程：欠产量来自「归属 T+1 的首个夜班」（与现行三班八段语义一致）
+        for (LhScheduleResult result : previousScheduleList) {
+            int nightPlanQty = safeInt(ShiftFieldUtil.getShiftPlanQty(result, nightIdx));
+            int nightFinishQty = safeInt(ShiftFieldUtil.getShiftFinishQty(result, nightIdx));
+
             int deficit = nightPlanQty - nightFinishQty;
             if (deficit > 0) {
-                // 欠产：在T日早班（class1）追加欠产量
-                int currentClass1Plan = result.getClass1PlanQty() != null ? result.getClass1PlanQty() : 0;
-                result.setClass1PlanQty(currentClass1Plan + deficit);
+                int currentMorningPlan = safeInt(ShiftFieldUtil.getShiftPlanQty(result, morningT0Idx));
+                ShiftFieldUtil.setShiftPlanQty(result, morningT0Idx, currentMorningPlan + deficit,
+                        ShiftFieldUtil.getShiftStartTime(result, morningT0Idx),
+                        ShiftFieldUtil.getShiftEndTime(result, morningT0Idx));
                 log.debug("欠产调整: 机台[{}] SKU[{}] 夜班欠产[{}]条, 追加至T日早班",
                         result.getLhMachineCode(), result.getMaterialCode(), deficit);
             }
+        }
         }
 
         log.info("前日排程欠产调整完成, 数量: {}", previousScheduleList.size());
@@ -174,14 +187,13 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         int finishedQty = 0;
         for (LhScheduleResult result : context.getPreviousScheduleResultList()) {
             if (plan.getMaterialCode() != null && plan.getMaterialCode().equals(result.getMaterialCode())) {
-                finishedQty += safeInt(result.getClass1FinishQty());
-                finishedQty += safeInt(result.getClass2FinishQty());
-                finishedQty += safeInt(result.getClass3FinishQty());
-                finishedQty += safeInt(result.getClass4FinishQty());
-                finishedQty += safeInt(result.getClass5FinishQty());
-                finishedQty += safeInt(result.getClass6FinishQty());
-                finishedQty += safeInt(result.getClass7FinishQty());
-                finishedQty += safeInt(result.getClass8FinishQty());
+                List<ShiftInfo> shifts = context.getScheduleWindowShifts();
+                if (CollectionUtils.isEmpty(shifts)) {
+                    shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+                }
+                for (ShiftInfo s : shifts) {
+                    finishedQty += safeInt(ShiftFieldUtil.getShiftFinishQty(result, s.getShiftIndex()));
+                }
             }
         }
         return finishedQty;

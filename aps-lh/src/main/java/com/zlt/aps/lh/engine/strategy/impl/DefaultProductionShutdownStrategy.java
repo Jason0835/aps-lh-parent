@@ -42,7 +42,7 @@ public class DefaultProductionShutdownStrategy implements IProductionShutdownStr
         }
 
         // 仅依据上下文已加载的排程窗口日历（T～T+SCHEDULE_DAYS-1），向后最多看 SCHEDULE_DAYS-1 天停产（offset 与递减比例见常量注释）
-        int maxAheadDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
+        int maxAheadDays = Math.max(0, LhScheduleTimeUtil.getScheduleDays(context) - 1);
         for (int offset = 1; offset <= maxAheadDays; offset++) {
             Date futureDate = LhScheduleTimeUtil.addDays(targetDate, offset);
             MdmWorkCalendar futureCalendar = findWorkCalendar(context, futureDate);

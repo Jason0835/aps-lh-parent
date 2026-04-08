@@ -14,7 +14,7 @@ public class ShiftInfo implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    /** 班次索引（1-8，对应class1到class8） */
+    /** 班次索引（1～N，N≤8，对应 class1 到 classN） */
     private final int shiftIndex;
 
     /** 班次类型（夜班/早班/中班） */

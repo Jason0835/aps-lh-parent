@@ -4,10 +4,13 @@ import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.ShiftInfo;
 import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ShiftEnum;
 
 import java.time.LocalDate;
 import java.time.ZoneId;
+import org.springframework.util.CollectionUtils;
+
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -100,7 +103,98 @@ public final class LhScheduleTimeUtil {
      */
     public static final String PARAM_CAPSULE_PREHEAT_HOURS = "CAPSULE_PREHEAT_HOURS";
 
+    /**
+     * 参数代码 - 排程天数（覆盖日历窗口 T～T+N-1）
+     */
+    public static final String PARAM_SCHEDULE_DAYS = "SCHEDULE_DAYS";
+
     private LhScheduleTimeUtil() {
+    }
+
+    /**
+     * 获取排程天数（优先硫化参数 SCHEDULE_DAYS，默认 {@link LhScheduleConstant#SCHEDULE_DAYS}）
+     *
+     * @param context 排程上下文，可为 null（返回默认值）
+     * @return 天数，至少为 1
+     */
+    public static int getScheduleDays(LhScheduleContext context) {
+        if (context == null) {
+            return Math.max(1, LhScheduleConstant.SCHEDULE_DAYS);
+        }
+        int days = context.getParamIntValue(PARAM_SCHEDULE_DAYS, LhScheduleConstant.SCHEDULE_DAYS);
+        return Math.max(1, days);
+    }
+
+    /**
+     * 填充班次跨自然日/月/年标记（默认系统时区）
+     *
+     * @param start    开始时间
+     * @param end      结束时间
+     * @param outDay   长度 1，输出是否跨自然日
+     * @param outMonth 长度 1，输出是否跨自然月
+     * @param outYear  长度 1，输出是否跨自然年
+     */
+    public static void fillCrossFlagsForShift(Date start, Date end,
+            boolean[] outDay, boolean[] outMonth, boolean[] outYear) {
+        fillCrossFlags(start, end, DEFAULT_ZONE, outDay, outMonth, outYear);
+    }
+
+    /**
+     * 模具计划等业务使用的「首班开始时间」：优先当前窗口第一班，否则回退 class1/目标日
+     *
+     * @param context 排程上下文
+     * @param result  排程结果
+     * @return 计划日时间
+     */
+    public static Date resolveFirstShiftStartForPlan(LhScheduleContext context, LhScheduleResult result) {
+        if (context != null && !CollectionUtils.isEmpty(context.getScheduleWindowShifts())) {
+            Date t = context.getScheduleWindowShifts().get(0).getStartTime();
+            if (t != null) {
+                return t;
+            }
+        }
+        if (result != null && result.getClass1StartTime() != null) {
+            return result.getClass1StartTime();
+        }
+        return context != null ? context.getScheduleTargetDate() : null;
+    }
+
+    /**
+     * 查找指定日期偏移下第一个早班的班次索引
+     *
+     * @param shifts     班次列表
+     * @param dateOffset 相对 T 日偏移
+     * @return 班次索引，未找到返回 null
+     */
+    public static Integer findFirstMorningShiftIndexWithOffset(List<ShiftInfo> shifts, int dateOffset) {
+        if (CollectionUtils.isEmpty(shifts)) {
+            return null;
+        }
+        for (ShiftInfo s : shifts) {
+            if (s.isMorningShift() && s.getDateOffset() == dateOffset) {
+                return s.getShiftIndex();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 查找指定日期偏移下第一个夜班的班次索引
+     *
+     * @param shifts     班次列表
+     * @param dateOffset 相对 T 日偏移（如现行模板下「T+1 日夜班」为 1）
+     * @return 班次索引，未找到返回 null
+     */
+    public static Integer findFirstNightShiftIndexWithOffset(List<ShiftInfo> shifts, int dateOffset) {
+        if (CollectionUtils.isEmpty(shifts)) {
+            return null;
+        }
+        for (ShiftInfo s : shifts) {
+            if (s.isNightShift() && s.getDateOffset() == dateOffset) {
+                return s.getShiftIndex();
+            }
+        }
+        return null;
     }
 
     /**
@@ -299,70 +393,69 @@ public final class LhScheduleTimeUtil {
     }
 
     /**
-     * 根据排程日期（T日）获取排程的8个班次信息列表
+     * 根据排程日期（T日）获取排程班次信息列表
      * <p>
-     * 排程8个班次：<br/>
-     * 1班：T日早班(6:00-14:00)<br/>
-     * 2班：T日中班(14:00-22:00)<br/>
-     * 3班：T+1日夜班(22:00-6:00)<br/>
-     * 4班：T+1日早班(6:00-14:00)<br/>
-     * 5班：T+1日中班(14:00-22:00)<br/>
-     * 6班：T+2日夜班(22:00-6:00)<br/>
-     * 7班：T+2日早班(6:00-14:00)<br/>
-     * 8班：T+2日中班(14:00-22:00)
+     * 若上下文已解析 {@link LhScheduleContext#getScheduleWindowShifts()} 则直接返回其副本；
+     * 否则使用与现网一致的默认 8 班模板（三班两两 + 跨日夜班）。
      * </p>
      *
      * @param context      排程上下文
      * @param scheduleDate 排程日期（T日）
-     * @return 8个班次信息列表
+     * @return 班次列表（1～N，N≤8）
      */
     public static List<ShiftInfo> getScheduleShifts(LhScheduleContext context, Date scheduleDate) {
+        if (context != null && !CollectionUtils.isEmpty(context.getScheduleWindowShifts())) {
+            return new ArrayList<>(context.getScheduleWindowShifts());
+        }
+        return buildDefaultScheduleShifts(context, scheduleDate);
+    }
+
+    /**
+     * 构建默认 8 班模板（与历史硬编码逻辑一致，受硫化参数中小时与班时长影响）
+     *
+     * @param context      排程上下文
+     * @param scheduleDate T 日
+     * @return 8 个班次
+     */
+    public static List<ShiftInfo> buildDefaultScheduleShifts(LhScheduleContext context, Date scheduleDate) {
         int morningHour = getMorningStartHour(context);
         int afternoonHour = getAfternoonStartHour(context);
         int nightHour = getNightStartHour(context);
         int shiftDuration = getShiftDurationHours(context);
 
-        List<ShiftInfo> shifts = new ArrayList<>(8);
+        List<ShiftInfo> shifts = new ArrayList<>(LhScheduleConstant.MAX_SHIFT_SLOT_COUNT);
 
         Date tPlus1Day = addDays(scheduleDate, 1);
         Date tPlus2Day = addDays(scheduleDate, 2);
 
-        // T日早班（班次1）
         Date tDayMorningStart = buildTime(scheduleDate, morningHour, 0, 0);
         Date tDayMorningEnd = addHours(tDayMorningStart, shiftDuration);
         shifts.add(buildShiftInfo(context, 1, ShiftEnum.MORNING_SHIFT, 0, scheduleDate, tDayMorningStart, tDayMorningEnd));
 
-        // T日中班（班次2）
         Date tDayAfternoonStart = buildTime(scheduleDate, afternoonHour, 0, 0);
         Date tDayAfternoonEnd = addHours(tDayAfternoonStart, shiftDuration);
         shifts.add(buildShiftInfo(context, 2, ShiftEnum.AFTERNOON_SHIFT, 0, scheduleDate, tDayAfternoonStart, tDayAfternoonEnd));
 
-        // T+1日夜班：T日22:00 至 T+1日早班起点
         Date tPlus1NightStart = buildTime(scheduleDate, nightHour, 0, 0);
         Date tPlus1NightEnd = buildTime(tPlus1Day, morningHour, 0, 0);
         shifts.add(buildShiftInfo(context, 3, ShiftEnum.NIGHT_SHIFT, 1, tPlus1Day, tPlus1NightStart, tPlus1NightEnd));
 
-        // T+1日早班（班次4）
         Date tPlus1MorningStart = buildTime(tPlus1Day, morningHour, 0, 0);
         Date tPlus1MorningEnd = addHours(tPlus1MorningStart, shiftDuration);
         shifts.add(buildShiftInfo(context, 4, ShiftEnum.MORNING_SHIFT, 1, tPlus1Day, tPlus1MorningStart, tPlus1MorningEnd));
 
-        // T+1日中班（班次5）
         Date tPlus1AfternoonStart = buildTime(tPlus1Day, afternoonHour, 0, 0);
         Date tPlus1AfternoonEnd = addHours(tPlus1AfternoonStart, shiftDuration);
         shifts.add(buildShiftInfo(context, 5, ShiftEnum.AFTERNOON_SHIFT, 1, tPlus1Day, tPlus1AfternoonStart, tPlus1AfternoonEnd));
 
-        // T+2日夜班：T+1日22:00 至 T+2日早班起点
         Date tPlus2NightStart = buildTime(tPlus1Day, nightHour, 0, 0);
         Date tPlus2NightEnd = buildTime(tPlus2Day, morningHour, 0, 0);
         shifts.add(buildShiftInfo(context, 6, ShiftEnum.NIGHT_SHIFT, 2, tPlus2Day, tPlus2NightStart, tPlus2NightEnd));
 
-        // T+2日早班（班次7）
         Date tPlus2MorningStart = buildTime(tPlus2Day, morningHour, 0, 0);
         Date tPlus2MorningEnd = addHours(tPlus2MorningStart, shiftDuration);
         shifts.add(buildShiftInfo(context, 7, ShiftEnum.MORNING_SHIFT, 2, tPlus2Day, tPlus2MorningStart, tPlus2MorningEnd));
 
-        // T+2日中班（班次8）
         Date tPlus2AfternoonStart = buildTime(tPlus2Day, afternoonHour, 0, 0);
         Date tPlus2AfternoonEnd = addHours(tPlus2AfternoonStart, shiftDuration);
         shifts.add(buildShiftInfo(context, 8, ShiftEnum.AFTERNOON_SHIFT, 2, tPlus2Day, tPlus2AfternoonStart, tPlus2AfternoonEnd));
@@ -638,7 +731,11 @@ public final class LhScheduleTimeUtil {
      * @param shifts  班次列表（通常为 8 班）
      */
     public static void initShiftRuntimeStateMap(LhScheduleContext context, List<ShiftInfo> shifts) {
-        Map<Integer, ShiftRuntimeState> map = new LinkedHashMap<>(8);
+        if (context == null || shifts == null) {
+            return;
+        }
+        int cap = shifts.size();
+        Map<Integer, ShiftRuntimeState> map = new LinkedHashMap<>(Math.max(1, cap));
         for (ShiftInfo shift : shifts) {
             ShiftRuntimeState s = new ShiftRuntimeState();
             s.setShiftIndex(shift.getShiftIndex());

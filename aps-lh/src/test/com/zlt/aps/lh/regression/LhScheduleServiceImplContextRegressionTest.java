@@ -5,6 +5,7 @@ import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.engine.decorator.IScheduleExecutor;
+import com.zlt.aps.lh.engine.rule.IScheduleRuleEngine;
 import com.zlt.aps.lh.service.impl.LhScheduleServiceImpl;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,7 @@ import java.util.Date;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,11 +33,15 @@ class LhScheduleServiceImplContextRegressionTest {
     @Mock
     private IScheduleExecutor scheduleExecutor;
 
+    @Mock
+    private IScheduleRuleEngine scheduleRuleEngine;
+
     @InjectMocks
     private LhScheduleServiceImpl lhScheduleService;
 
     @Test
     void executeSchedule_passesCorrectTargetDayAndTDayToExecutor() {
+        when(scheduleRuleEngine.getScheduleDays(anyString())).thenReturn(LhScheduleConstant.SCHEDULE_DAYS);
         when(scheduleExecutor.execute(any())).thenReturn(LhScheduleResponseDTO.success("B1", "ok"));
 
         Date target = date(2026, 4, 4);

@@ -13,6 +13,7 @@ import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
 import com.zlt.aps.lh.mapper.LhScheduleProcessLogMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhUnscheduledResultMapper;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -131,7 +132,7 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             plan.setLhResultBatchNo(context.getBatchNo());
             plan.setOrderNo(generateChangePlanOrderNo(context));
             plan.setScheduleDate(context.getScheduleTargetDate());
-            plan.setPlanDate(result.getClass1StartTime() != null ? result.getClass1StartTime() : context.getScheduleTargetDate());
+            plan.setPlanDate(LhScheduleTimeUtil.resolveFirstShiftStartForPlan(context, result));
             plan.setPlanOrder(planOrder++);
             plan.setLhMachineCode(result.getLhMachineCode());
             plan.setLhMachineName(result.getLhMachineName());

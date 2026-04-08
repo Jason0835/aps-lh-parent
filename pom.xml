@@ -21,7 +21,7 @@
         <lombok.version>1.18.16</lombok.version>
         <swagger.version>2.9.2</swagger.version>
         <lang3.version>3.20.0</lang3.version>
-        <hutool.version>5.8.26</hutool.version>
+        <hutool.version>5.8.25</hutool.version>
     </properties>
 
     <modules>

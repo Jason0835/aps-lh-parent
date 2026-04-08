@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.enums.SkuTagEnum;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import org.springframework.util.CollectionUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -83,7 +84,9 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
      * @return 排程窗口内总班次数
      */
     private int getTotalScheduleShifts(LhScheduleContext context) {
-        int endingDetectDays = LhScheduleTimeUtil.getEndingDetectDays(context);
-        return endingDetectDays * LhScheduleConstant.DEFAULT_SHIFTS_PER_DAY - 1;
+        if (!CollectionUtils.isEmpty(context.getScheduleWindowShifts())) {
+            return context.getScheduleWindowShifts().size();
+        }
+        return LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate()).size();
     }
 }

@@ -16,6 +16,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import lombok.extern.slf4j.Slf4j;
@@ -91,7 +92,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             if (totalPlan > sku.getEmbryoStock()) {
                 // 库存不足，按比例削减各班次计划量
                 double ratio = (double) sku.getEmbryoStock() / totalPlan;
-                scaleShiftPlanQty(result, ratio);
+                scaleShiftPlanQty(context, result, ratio);
                 result.setTotalDailyPlanQty(sku.getEmbryoStock());
             }
         }
@@ -225,7 +226,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
         int remaining = distributeToShifts(context, result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), pendingQty, capacityCalculate);
 
-        int totalQty = calcTotalPlanQty(result);
+        int totalQty = calcTotalPlanQty(result, shifts);
         result.setTotalDailyPlanQty(totalQty);
         return result;
     }
@@ -296,80 +297,28 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     }
 
     private void setShiftPlanQty(LhScheduleResult result, int shiftIndex, int qty, Date startTime, Date endTime) {
-        switch (shiftIndex) {
-            case 1: result.setClass1PlanQty(qty); result.setClass1StartTime(startTime); result.setClass1EndTime(endTime); break;
-            case 2: result.setClass2PlanQty(qty); result.setClass2StartTime(startTime); result.setClass2EndTime(endTime); break;
-            case 3: result.setClass3PlanQty(qty); result.setClass3StartTime(startTime); result.setClass3EndTime(endTime); break;
-            case 4: result.setClass4PlanQty(qty); result.setClass4StartTime(startTime); result.setClass4EndTime(endTime); break;
-            case 5: result.setClass5PlanQty(qty); result.setClass5StartTime(startTime); result.setClass5EndTime(endTime); break;
-            case 6: result.setClass6PlanQty(qty); result.setClass6StartTime(startTime); result.setClass6EndTime(endTime); break;
-            case 7: result.setClass7PlanQty(qty); result.setClass7StartTime(startTime); result.setClass7EndTime(endTime); break;
-            case 8: result.setClass8PlanQty(qty); result.setClass8StartTime(startTime); result.setClass8EndTime(endTime); break;
-            default: log.warn("未知班次索引: {}", shiftIndex); break;
-        }
+        ShiftFieldUtil.setShiftPlanQty(result, shiftIndex, qty, startTime, endTime);
     }
 
-    private int calcTotalPlanQty(LhScheduleResult result) {
+    private int calcTotalPlanQty(LhScheduleResult result, List<ShiftInfo> shifts) {
         int total = 0;
-        total += (result.getClass1PlanQty() != null ? result.getClass1PlanQty() : 0);
-        total += (result.getClass2PlanQty() != null ? result.getClass2PlanQty() : 0);
-        total += (result.getClass3PlanQty() != null ? result.getClass3PlanQty() : 0);
-        total += (result.getClass4PlanQty() != null ? result.getClass4PlanQty() : 0);
-        total += (result.getClass5PlanQty() != null ? result.getClass5PlanQty() : 0);
-        total += (result.getClass6PlanQty() != null ? result.getClass6PlanQty() : 0);
-        total += (result.getClass7PlanQty() != null ? result.getClass7PlanQty() : 0);
-        total += (result.getClass8PlanQty() != null ? result.getClass8PlanQty() : 0);
+        for (ShiftInfo s : shifts) {
+            Integer q = ShiftFieldUtil.getShiftPlanQty(result, s.getShiftIndex());
+            total += (q != null ? q : 0);
+        }
         return total;
     }
 
-    private void scaleShiftPlanQty(LhScheduleResult result, double ratio) {
-        for (int i = 1; i <= 8; i++) {
-            Integer qty = getShiftPlanQty(result, i);
+    private void scaleShiftPlanQty(LhScheduleContext context, LhScheduleResult result, double ratio) {
+        List<ShiftInfo> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        for (ShiftInfo s : shifts) {
+            int idx = s.getShiftIndex();
+            Integer qty = ShiftFieldUtil.getShiftPlanQty(result, idx);
             if (qty != null && qty > 0) {
-                setShiftPlanQty(result, i, (int) (qty * ratio), getShiftStartTime(result, i), getShiftEndTime(result, i));
+                setShiftPlanQty(result, idx, (int) (qty * ratio),
+                        ShiftFieldUtil.getShiftStartTime(result, idx),
+                        ShiftFieldUtil.getShiftEndTime(result, idx));
             }
-        }
-    }
-
-    private Integer getShiftPlanQty(LhScheduleResult result, int shiftIndex) {
-        switch (shiftIndex) {
-            case 1: return result.getClass1PlanQty();
-            case 2: return result.getClass2PlanQty();
-            case 3: return result.getClass3PlanQty();
-            case 4: return result.getClass4PlanQty();
-            case 5: return result.getClass5PlanQty();
-            case 6: return result.getClass6PlanQty();
-            case 7: return result.getClass7PlanQty();
-            case 8: return result.getClass8PlanQty();
-            default: return null;
-        }
-    }
-
-    private Date getShiftStartTime(LhScheduleResult result, int shiftIndex) {
-        switch (shiftIndex) {
-            case 1: return result.getClass1StartTime();
-            case 2: return result.getClass2StartTime();
-            case 3: return result.getClass3StartTime();
-            case 4: return result.getClass4StartTime();
-            case 5: return result.getClass5StartTime();
-            case 6: return result.getClass6StartTime();
-            case 7: return result.getClass7StartTime();
-            case 8: return result.getClass8StartTime();
-            default: return null;
-        }
-    }
-
-    private Date getShiftEndTime(LhScheduleResult result, int shiftIndex) {
-        switch (shiftIndex) {
-            case 1: return result.getClass1EndTime();
-            case 2: return result.getClass2EndTime();
-            case 3: return result.getClass3EndTime();
-            case 4: return result.getClass4EndTime();
-            case 5: return result.getClass5EndTime();
-            case 6: return result.getClass6EndTime();
-            case 7: return result.getClass7EndTime();
-            case 8: return result.getClass8EndTime();
-            default: return null;
         }
     }
 

@@ -16,6 +16,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
@@ -332,7 +333,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
 
-        int totalQty = calcTotalPlanQty(result);
+        int totalQty = calcTotalPlanQty(result, shifts);
         result.setTotalDailyPlanQty(totalQty);
         result.setRealScheduleDate(context.getScheduleDate());
         result.setProductionStatus("0");
@@ -398,20 +399,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 按班次索引设置计划量和开始/结束时间
+     * 按班次索引设置计划量和开始/结束时间（Hutool BeanUtil）
      */
     private void setShiftPlanQty(LhScheduleResult result, int shiftIndex, int qty, Date startTime, Date endTime) {
-        switch (shiftIndex) {
-            case 1: result.setClass1PlanQty(qty); result.setClass1StartTime(startTime); result.setClass1EndTime(endTime); break;
-            case 2: result.setClass2PlanQty(qty); result.setClass2StartTime(startTime); result.setClass2EndTime(endTime); break;
-            case 3: result.setClass3PlanQty(qty); result.setClass3StartTime(startTime); result.setClass3EndTime(endTime); break;
-            case 4: result.setClass4PlanQty(qty); result.setClass4StartTime(startTime); result.setClass4EndTime(endTime); break;
-            case 5: result.setClass5PlanQty(qty); result.setClass5StartTime(startTime); result.setClass5EndTime(endTime); break;
-            case 6: result.setClass6PlanQty(qty); result.setClass6StartTime(startTime); result.setClass6EndTime(endTime); break;
-            case 7: result.setClass7PlanQty(qty); result.setClass7StartTime(startTime); result.setClass7EndTime(endTime); break;
-            case 8: result.setClass8PlanQty(qty); result.setClass8StartTime(startTime); result.setClass8EndTime(endTime); break;
-            default: log.warn("未知班次索引: {}", shiftIndex); break;
-        }
+        ShiftFieldUtil.setShiftPlanQty(result, shiftIndex, qty, startTime, endTime);
     }
 
     /**
@@ -429,11 +420,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         // 找到最后一个有计划量的班次
         for (int i = shifts.size() - 1; i >= 0; i--) {
             ShiftInfo shift = shifts.get(i);
-            Integer planQty = getShiftPlanQty(result, shift.getShiftIndex());
+            Integer planQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
             if (planQty != null && planQty > 0 && lhTimeSeconds > 0 && mouldQty > 0) {
                 // 收尾时间 = 该班次开始时间 + (计划量/模数) * 硫化时间
                 long secondsNeeded = (long) (planQty / mouldQty) * lhTimeSeconds;
-                Date shiftStart = getShiftStartTime(result, shift.getShiftIndex());
+                Date shiftStart = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
                 if (shiftStart != null) {
                     return new Date(shiftStart.getTime() + secondsNeeded * 1000L);
                 }
@@ -443,38 +434,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         return null;
     }
 
-    private Integer getShiftPlanQty(LhScheduleResult result, int shiftIndex) {
-        switch (shiftIndex) {
-            case 1: return result.getClass1PlanQty();
-            case 2: return result.getClass2PlanQty();
-            case 3: return result.getClass3PlanQty();
-            case 4: return result.getClass4PlanQty();
-            case 5: return result.getClass5PlanQty();
-            case 6: return result.getClass6PlanQty();
-            case 7: return result.getClass7PlanQty();
-            case 8: return result.getClass8PlanQty();
-            default: return null;
-        }
-    }
-
-    private Date getShiftStartTime(LhScheduleResult result, int shiftIndex) {
-        switch (shiftIndex) {
-            case 1: return result.getClass1StartTime();
-            case 2: return result.getClass2StartTime();
-            case 3: return result.getClass3StartTime();
-            case 4: return result.getClass4StartTime();
-            case 5: return result.getClass5StartTime();
-            case 6: return result.getClass6StartTime();
-            case 7: return result.getClass7StartTime();
-            case 8: return result.getClass8StartTime();
-            default: return null;
-        }
-    }
-
-    private int calcTotalPlanQty(LhScheduleResult result) {
+    private int calcTotalPlanQty(LhScheduleResult result, List<ShiftInfo> shifts) {
         int total = 0;
-        for (int i = 1; i <= 8; i++) {
-            Integer qty = getShiftPlanQty(result, i);
+        for (ShiftInfo s : shifts) {
+            Integer qty = ShiftFieldUtil.getShiftPlanQty(result, s.getShiftIndex());
             total += (qty != null ? qty : 0);
         }
         return total;
@@ -487,7 +450,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (result.getLhTime() == null || result.getLhTime() <= 0 || result.getMouldQty() == null) {
             return;
         }
-        int shiftSeconds = 8 * 3600;
+        int shiftSeconds = !shifts.isEmpty() && shifts.get(0).getDurationMinutes() > 0
+                ? shifts.get(0).getDurationMinutes() * 60
+                : 8 * 3600;
         int shiftCapacity = (shiftSeconds / result.getLhTime()) * result.getMouldQty();
         int totalQty = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
         int remaining = totalQty;

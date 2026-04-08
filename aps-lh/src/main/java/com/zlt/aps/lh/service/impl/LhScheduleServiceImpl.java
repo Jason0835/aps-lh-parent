@@ -1,12 +1,12 @@
 package com.zlt.aps.lh.service.impl;
 
-import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.engine.rule.IScheduleRuleEngine;
 import com.zlt.aps.lh.engine.decorator.IScheduleExecutor;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import com.zlt.aps.lh.engine.observer.ScheduleEventPublisher;
@@ -31,6 +31,9 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
 
     @Resource
     private IScheduleExecutor scheduleExecutor;
+
+    @Resource
+    private IScheduleRuleEngine scheduleRuleEngine;
 
     @Resource
     private LhScheduleResultMapper scheduleResultMapper;
@@ -83,8 +86,9 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
         Date target = LhScheduleTimeUtil.clearTime(
                 request.getScheduleDate() != null ? request.getScheduleDate() : new Date());
         context.setScheduleTargetDate(target);
-        int offsetDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
-        // 引擎使用 T 日 = 目标日 − (连续排程日历跨度 − 1)
+        int scheduleDays = scheduleRuleEngine.getScheduleDays(request.getFactoryCode());
+        int offsetDays = Math.max(0, scheduleDays - 1);
+        // 引擎使用 T 日 = 目标日 − (连续排程日历跨度 − 1)；与 DataInit 中按参数校正后一致
         context.setScheduleDate(LhScheduleTimeUtil.addDays(target, -offsetDays));
         return context;
     }

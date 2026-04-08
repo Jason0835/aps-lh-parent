@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Slf4j
 @Component
+@Deprecated
 public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Resource
@@ -41,37 +42,37 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getDailyMouldChangeLimit(String factoryCode) {
-        return getIntValue(factoryCode, "DAILY_MOULD_CHANGE_LIMIT", 
+        return getIntValue(factoryCode, "DAILY_MOULD_CHANGE_LIMIT",
                 LhScheduleConstant.DEFAULT_DAILY_MOULD_CHANGE_LIMIT);
     }
 
     @Override
     public int getMorningMouldChangeLimit(String factoryCode) {
-        return getIntValue(factoryCode, "MORNING_MOULD_CHANGE_LIMIT", 
+        return getIntValue(factoryCode, "MORNING_MOULD_CHANGE_LIMIT",
                 LhScheduleConstant.DEFAULT_MORNING_MOULD_CHANGE_LIMIT);
     }
 
     @Override
     public int getAfternoonMouldChangeLimit(String factoryCode) {
-        return getIntValue(factoryCode, "AFTERNOON_MOULD_CHANGE_LIMIT", 
+        return getIntValue(factoryCode, "AFTERNOON_MOULD_CHANGE_LIMIT",
                 LhScheduleConstant.DEFAULT_AFTERNOON_MOULD_CHANGE_LIMIT);
     }
 
     @Override
     public int getMouldChangePreheatHours(String factoryCode) {
-        return getIntValue(factoryCode, "MOULD_CHANGE_PREHEAT_HOURS", 
+        return getIntValue(factoryCode, "MOULD_CHANGE_PREHEAT_HOURS",
                 LhScheduleConstant.MOULD_CHANGE_PREHEAT_HOURS);
     }
 
     @Override
     public int getMouldChangeOtherHours(String factoryCode) {
-        return getIntValue(factoryCode, "MOULD_CHANGE_OTHER_HOURS", 
+        return getIntValue(factoryCode, "MOULD_CHANGE_OTHER_HOURS",
                 LhScheduleConstant.MOULD_CHANGE_OTHER_HOURS);
     }
 
     @Override
     public int getMouldChangeTotalHours(String factoryCode) {
-        return getIntValue(factoryCode, "MOULD_CHANGE_TOTAL_HOURS", 
+        return getIntValue(factoryCode, "MOULD_CHANGE_TOTAL_HOURS",
                 LhScheduleConstant.MOULD_CHANGE_TOTAL_HOURS);
     }
 
@@ -79,13 +80,13 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getFirstInspectionHours(String factoryCode) {
-        return getIntValue(factoryCode, "FIRST_INSPECTION_HOURS", 
+        return getIntValue(factoryCode, "FIRST_INSPECTION_HOURS",
                 LhScheduleConstant.FIRST_INSPECTION_HOURS);
     }
 
     @Override
     public int getMaxFirstInspectionPerShift(String factoryCode) {
-        return getIntValue(factoryCode, "MAX_FIRST_INSPECTION_PER_SHIFT", 
+        return getIntValue(factoryCode, "MAX_FIRST_INSPECTION_PER_SHIFT",
                 LhScheduleConstant.MAX_FIRST_INSPECTION_PER_SHIFT);
     }
 
@@ -93,7 +94,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getShiftDurationHours(String factoryCode) {
-        return getIntValue(factoryCode, "SHIFT_DURATION_HOURS", 
+        return getIntValue(factoryCode, "SHIFT_DURATION_HOURS",
                 LhScheduleConstant.SHIFT_DURATION_HOURS);
     }
 
@@ -107,13 +108,13 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getNoMouldChangeStartHour(String factoryCode) {
-        return getIntValue(factoryCode, "NO_MOULD_CHANGE_START_HOUR", 
+        return getIntValue(factoryCode, "NO_MOULD_CHANGE_START_HOUR",
                 LhScheduleConstant.NO_MOULD_CHANGE_START_HOUR);
     }
 
     @Override
     public int getNoMouldChangeEndHour(String factoryCode) {
-        return getIntValue(factoryCode, "NO_MOULD_CHANGE_END_HOUR", 
+        return getIntValue(factoryCode, "NO_MOULD_CHANGE_END_HOUR",
                 LhScheduleConstant.NO_MOULD_CHANGE_END_HOUR);
     }
 
@@ -121,19 +122,19 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getScheduleDays(String factoryCode) {
-        return getIntValue(factoryCode, "SCHEDULE_DAYS", 
+        return getIntValue(factoryCode, "SCHEDULE_DAYS",
                 LhScheduleConstant.SCHEDULE_DAYS);
     }
 
     @Override
     public int getEndingDetectDays(String factoryCode) {
-        return getIntValue(factoryCode, "ENDING_DETECT_DAYS", 
+        return getIntValue(factoryCode, "ENDING_DETECT_DAYS",
                 LhScheduleConstant.DEFAULT_ENDING_DAYS);
     }
 
     @Override
     public int getEndingTimeToleranceMinutes(String factoryCode) {
-        return getIntValue(factoryCode, "ENDING_TIME_TOLERANCE_MINUTES", 
+        return getIntValue(factoryCode, "ENDING_TIME_TOLERANCE_MINUTES",
                 LhScheduleConstant.DEFAULT_ENDING_TIME_TOLERANCE_MINUTES);
     }
 
@@ -141,37 +142,37 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getDryIceIntervalDays(String factoryCode) {
-        return getIntValue(factoryCode, "DRY_ICE_INTERVAL_DAYS", 
+        return getIntValue(factoryCode, "DRY_ICE_INTERVAL_DAYS",
                 LhScheduleConstant.DRY_ICE_INTERVAL_DAYS);
     }
 
     @Override
     public int getDryIceWarningDays(String factoryCode) {
-        return getIntValue(factoryCode, "DRY_ICE_WARNING_DAYS", 
+        return getIntValue(factoryCode, "DRY_ICE_WARNING_DAYS",
                 LhScheduleConstant.DRY_ICE_WARNING_DAYS);
     }
 
     @Override
     public int getDryIceAdvanceDays(String factoryCode) {
-        return getIntValue(factoryCode, "DRY_ICE_ADVANCE_DAYS", 
+        return getIntValue(factoryCode, "DRY_ICE_ADVANCE_DAYS",
                 LhScheduleConstant.DRY_ICE_ADVANCE_DAYS);
     }
 
     @Override
     public int getDryIceDurationHours(String factoryCode) {
-        return getIntValue(factoryCode, "DRY_ICE_DURATION_HOURS", 
+        return getIntValue(factoryCode, "DRY_ICE_DURATION_HOURS",
                 LhScheduleConstant.DRY_ICE_DURATION_HOURS);
     }
 
     @Override
     public int getDryIceLossQty(String factoryCode) {
-        return getIntValue(factoryCode, "DRY_ICE_LOSS_QTY", 
+        return getIntValue(factoryCode, "DRY_ICE_LOSS_QTY",
                 LhScheduleConstant.DRY_ICE_LOSS_QTY);
     }
 
     @Override
     public int getDryIceDailyLimit(String factoryCode) {
-        return getIntValue(factoryCode, "DRY_ICE_DAILY_LIMIT", 
+        return getIntValue(factoryCode, "DRY_ICE_DAILY_LIMIT",
                 LhScheduleConstant.DRY_ICE_DAILY_LIMIT);
     }
 
@@ -179,31 +180,31 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getSandBlastDurationHours(String factoryCode) {
-        return getIntValue(factoryCode, "SAND_BLAST_DURATION_HOURS", 
+        return getIntValue(factoryCode, "SAND_BLAST_DURATION_HOURS",
                 LhScheduleConstant.SAND_BLAST_DURATION_HOURS);
     }
 
     @Override
     public int getSandBlastWithInspectionHours(String factoryCode) {
-        return getIntValue(factoryCode, "SAND_BLAST_WITH_INSPECTION_HOURS", 
+        return getIntValue(factoryCode, "SAND_BLAST_WITH_INSPECTION_HOURS",
                 LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
     }
 
     @Override
     public int getSandBlastDailyLimit(String factoryCode) {
-        return getIntValue(factoryCode, "SAND_BLAST_DAILY_LIMIT", 
+        return getIntValue(factoryCode, "SAND_BLAST_DAILY_LIMIT",
                 LhScheduleConstant.SAND_BLAST_DAILY_LIMIT);
     }
 
     @Override
     public int getSandBlastMaintenanceDayMid(String factoryCode) {
-        return getIntValue(factoryCode, "SAND_BLAST_MAINTENANCE_DAY_MID", 
+        return getIntValue(factoryCode, "SAND_BLAST_MAINTENANCE_DAY_MID",
                 LhScheduleConstant.SAND_BLAST_MAINTENANCE_DAY_MID);
     }
 
     @Override
     public int getSandBlastMaintenanceDayEnd(String factoryCode) {
-        return getIntValue(factoryCode, "SAND_BLAST_MAINTENANCE_DAY_END", 
+        return getIntValue(factoryCode, "SAND_BLAST_MAINTENANCE_DAY_END",
                 LhScheduleConstant.SAND_BLAST_MAINTENANCE_DAY_END);
     }
 
@@ -211,19 +212,19 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getMaintenanceDurationHours(String factoryCode) {
-        return getIntValue(factoryCode, "MAINTENANCE_DURATION_HOURS", 
+        return getIntValue(factoryCode, "MAINTENANCE_DURATION_HOURS",
                 LhScheduleConstant.MAINTENANCE_DURATION_HOURS);
     }
 
     @Override
     public int getMaintenanceStartHour(String factoryCode) {
-        return getIntValue(factoryCode, "MAINTENANCE_START_HOUR", 
+        return getIntValue(factoryCode, "MAINTENANCE_START_HOUR",
                 LhScheduleConstant.MAINTENANCE_START_HOUR);
     }
 
     @Override
     public int getMaintenanceWarningDays(String factoryCode) {
-        return getIntValue(factoryCode, "MAINTENANCE_WARNING_DAYS", 
+        return getIntValue(factoryCode, "MAINTENANCE_WARNING_DAYS",
                 LhScheduleConstant.MAINTENANCE_WARNING_DAYS);
     }
 
@@ -236,7 +237,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
         try {
             return Double.parseDouble(value.trim());
         } catch (NumberFormatException e) {
-            log.warn("参数解析失败，factoryCode={}, paramCode={}, value={}, 使用默认值：{}", 
+            log.warn("参数解析失败，factoryCode={}, paramCode={}, value={}, 使用默认值：{}",
                     factoryCode, "CAPSULE_PREHEAT_HOURS", value, LhScheduleConstant.CAPSULE_PREHEAT_HOURS);
             return LhScheduleConstant.CAPSULE_PREHEAT_HOURS.doubleValue();
         }
@@ -246,7 +247,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getMachineStopTimeoutHours(String factoryCode) {
-        return getIntValue(factoryCode, "MACHINE_STOP_TIMEOUT_HOURS", 
+        return getIntValue(factoryCode, "MACHINE_STOP_TIMEOUT_HOURS",
                 LhScheduleConstant.MACHINE_STOP_TIMEOUT_HOURS);
     }
 
@@ -254,19 +255,19 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getCapsuleWarningCount(String factoryCode) {
-        return getIntValue(factoryCode, "CAPSULE_WARNING_COUNT", 
+        return getIntValue(factoryCode, "CAPSULE_WARNING_COUNT",
                 LhScheduleConstant.CAPSULE_WARNING_COUNT);
     }
 
     @Override
     public int getCapsuleForceDownCount(String factoryCode) {
-        return getIntValue(factoryCode, "CAPSULE_FORCE_DOWN_COUNT", 
+        return getIntValue(factoryCode, "CAPSULE_FORCE_DOWN_COUNT",
                 LhScheduleConstant.CAPSULE_FORCE_DOWN_COUNT);
     }
 
     @Override
     public int getCapsuleChangeLossQty(String factoryCode) {
-        return getIntValue(factoryCode, "CAPSULE_CHANGE_LOSS_QTY", 
+        return getIntValue(factoryCode, "CAPSULE_CHANGE_LOSS_QTY",
                 LhScheduleConstant.CAPSULE_CHANGE_LOSS_QTY);
     }
 
@@ -274,25 +275,25 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getShutdownDayMinus3Rate(String factoryCode) {
-        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_3_RATE", 
+        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_3_RATE",
                 LhScheduleConstant.SHUTDOWN_DAY_MINUS_3_RATE);
     }
 
     @Override
     public int getShutdownDayMinus2Rate(String factoryCode) {
-        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_2_RATE", 
+        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_2_RATE",
                 LhScheduleConstant.SHUTDOWN_DAY_MINUS_2_RATE);
     }
 
     @Override
     public int getShutdownDayMinus1Rate(String factoryCode) {
-        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_1_RATE", 
+        return getIntValue(factoryCode, "SHUTDOWN_DAY_MINUS_1_RATE",
                 LhScheduleConstant.SHUTDOWN_DAY_MINUS_1_RATE);
     }
 
     @Override
     public int getStartupFirstDayRate(String factoryCode) {
-        return getIntValue(factoryCode, "STARTUP_FIRST_DAY_RATE", 
+        return getIntValue(factoryCode, "STARTUP_FIRST_DAY_RATE",
                 LhScheduleConstant.STARTUP_FIRST_DAY_RATE);
     }
 
@@ -300,7 +301,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getTrialDailyLimit(String factoryCode) {
-        return getIntValue(factoryCode, "TRIAL_DAILY_LIMIT", 
+        return getIntValue(factoryCode, "TRIAL_DAILY_LIMIT",
                 LhScheduleConstant.TRIAL_DAILY_LIMIT);
     }
 
@@ -308,7 +309,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getMouldChangePlanDays(String factoryCode) {
-        return getIntValue(factoryCode, "MOULD_CHANGE_PLAN_DAYS", 
+        return getIntValue(factoryCode, "MOULD_CHANGE_PLAN_DAYS",
                 LhScheduleConstant.MOULD_CHANGE_PLAN_DAYS);
     }
 
@@ -316,7 +317,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
 
     @Override
     public int getStructureEndingDays(String factoryCode) {
-        return getIntValue(factoryCode, "STRUCTURE_ENDING_DAYS", 
+        return getIntValue(factoryCode, "STRUCTURE_ENDING_DAYS",
                 LhScheduleConstant.DEFAULT_STRUCTURE_ENDING_DAYS);
     }
 
@@ -330,7 +331,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
         try {
             return Integer.parseInt(value.trim());
         } catch (NumberFormatException e) {
-            log.warn("参数解析失败, factoryCode={}, paramCode={}, value={}, 使用默认值: {}", 
+            log.warn("参数解析失败, factoryCode={}, paramCode={}, value={}, 使用默认值: {}",
                     factoryCode, paramCode, value, defaultValue);
             return defaultValue;
         }
@@ -344,7 +345,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
         try {
             return Double.parseDouble(value.trim());
         } catch (NumberFormatException e) {
-            log.warn("参数解析失败, factoryCode={}, paramCode={}, value={}, 使用默认值: {}", 
+            log.warn("参数解析失败, factoryCode={}, paramCode={}, value={}, 使用默认值: {}",
                     factoryCode, paramCode, value, defaultValue);
             return defaultValue;
         }
@@ -366,7 +367,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
                     new LambdaQueryWrapper<LhParams>()
                             .eq(LhParams::getFactoryCode, factoryCode)
                             .eq(LhParams::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
-            
+
             // 转换为Map
             Map<String, String> params = new HashMap<>();
             if (paramsList != null) {
@@ -376,7 +377,7 @@ public class DatabaseScheduleRuleEngine implements IScheduleRuleEngine {
                     }
                 }
             }
-            
+
             paramsCache.put(factoryCode, params);
             cacheTimestamp.put(factoryCode, System.currentTimeMillis());
             log.debug("刷新参数缓存, factoryCode={}, 参数数量: {}", factoryCode, params.size());

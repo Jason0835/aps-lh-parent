@@ -192,10 +192,16 @@ public final class LhScheduleConstant {
 
     // ======================== 排程天数 ========================
 
-    /** 排程天数 */
+    /** 排程天数（默认值；运行期以硫化参数 SCHEDULE_DAYS 为准） */
     public static final int SCHEDULE_DAYS = 3;
 
-    /** 总班次数（3天 * 3班） */
+    /** 排程结果实体班次槽位上限（class1～class8） */
+    public static final int MAX_SHIFT_SLOT_COUNT = 8;
+
+    /**
+     * @deprecated 易与「窗口内实际班次数」混淆；请使用 {@link #MAX_SHIFT_SLOT_COUNT} 或当次 {@code List<ShiftInfo>} 长度
+     */
+    @Deprecated
     public static final int TOTAL_SHIFTS = 9;
 
     // ======================== 左右模 ========================

@@ -1,6 +1,3 @@
-/**
- * Copyright (c) 2008, 智立通（厦门）科技有限公司 All rights reserved。
- */
 package com.zlt.aps.lh.api.constant;
 
 import java.math.BigDecimal;

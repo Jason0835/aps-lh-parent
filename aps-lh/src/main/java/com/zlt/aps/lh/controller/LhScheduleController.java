@@ -22,7 +22,7 @@ import javax.annotation.Resource;
 @Api(tags = "硫化排程接口")
 @Slf4j
 @RestController
-@RequestMapping("/lh/schedule")
+@RequestMapping("/lhSchedule")
 public class LhScheduleController {
 
     @Resource

@@ -21,6 +21,7 @@
         <lombok.version>1.18.16</lombok.version>
         <swagger.version>2.9.2</swagger.version>
         <lang3.version>3.20.0</lang3.version>
+        <hutool.version>5.8.26</hutool.version>
     </properties>
 
     <modules>
@@ -76,6 +77,11 @@
                 <groupId>org.apache.commons</groupId>
                 <artifactId>commons-lang3</artifactId>
                 <version>${lang3.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>cn.hutool</groupId>
+                <artifactId>hutool-core</artifactId>
+                <version>${hutool.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

@@ -22,8 +22,8 @@ import javax.annotation.Resource;
 @Api(tags = "硫化排程接口")
 @Slf4j
 @RestController
-@RequestMapping("/lhSchedule")
-public class LhScheduleController {
+@RequestMapping("/lhScheduleResult")
+public class LhScheduleResultController {
 
     @Resource
     private ILhScheduleService lhScheduleService;

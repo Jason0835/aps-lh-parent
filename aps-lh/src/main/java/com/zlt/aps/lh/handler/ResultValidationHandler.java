@@ -1,12 +1,12 @@
 package com.zlt.aps.lh.handler;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
-import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import com.zlt.aps.lh.engine.observer.ScheduleEventPublisher;
 import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
@@ -19,7 +19,6 @@ import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
 import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -34,7 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ResultValidationHandler extends AbsScheduleStepHandler {
 
     @Resource
-    private ScheduleEventPublisher eventPublisher;
+    private ScheduleEventPublisher scheduleEventPublisher;
 
     @Resource
     private LhScheduleResultMapper scheduleResultMapper;
@@ -69,7 +68,7 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
         saveScheduleResults(context);
 
         // S4.6.5 发布排程完成事件（观察者模式）
-        eventPublisher.publish(ScheduleEvent.completed(context));
+        scheduleEventPublisher.publish(ScheduleEvent.completed(context));
     }
 
     /**

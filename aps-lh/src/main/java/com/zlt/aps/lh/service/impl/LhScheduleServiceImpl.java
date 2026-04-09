@@ -1,17 +1,17 @@
 package com.zlt.aps.lh.service.impl;
 
-import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
-import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
-import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
-import com.zlt.aps.lh.engine.rule.IScheduleRuleEngine;
+import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.decorator.IScheduleExecutor;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import com.zlt.aps.lh.engine.observer.ScheduleEventPublisher;
+import com.zlt.aps.lh.engine.rule.IScheduleRuleEngine;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.service.ILhScheduleService;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
@@ -39,7 +39,7 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
     private LhScheduleResultMapper scheduleResultMapper;
 
     @Resource
-    private ScheduleEventPublisher eventPublisher;
+    private ScheduleEventPublisher scheduleEventPublisher;
 
     @Override
     public LhScheduleResponseDTO executeSchedule(LhScheduleRequestDTO request) {
@@ -68,7 +68,7 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
             LhScheduleContext publishContext = new LhScheduleContext();
             publishContext.setBatchNo(batchNo);
             publishContext.setScheduleResultList(results);
-            eventPublisher.publish(ScheduleEvent.published(publishContext));
+            scheduleEventPublisher.publish(ScheduleEvent.published(publishContext));
 
             log.info("排程结果发布成功, 批次号: {}, 发布记录数: {}", batchNo, results.size());
             return LhScheduleResponseDTO.success(batchNo, "发布成功，共发布" + results.size() + "条记录");

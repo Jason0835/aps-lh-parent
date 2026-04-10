@@ -2,6 +2,7 @@ package com.zlt.aps.lh.api.domain.entity;
 
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.ruoyi.common.core.annotation.Excel;
 import com.ruoyi.common.core.web.domain.BaseEntity;
 import io.swagger.annotations.ApiModel;
@@ -158,6 +159,7 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
      * 排程日期
      */
     @Excel(name = "ui.data.column.lhScheduleResult.scheduleDate")
+    @JsonFormat(pattern = "yyyy-MM-dd", timezone = "GMT+8")
     @ApiModelProperty(value = "排程日期", name = "scheduleDate")
     @TableField(value = "SCHEDULE_DATE")
     private Date scheduleDate;
@@ -573,7 +575,7 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
     /**
      * 施工阶段 00 无工艺 01 试制 02 量试 03 正式
      */
-    @Excel(name = "ui.data.column.lhScheduleResult.constructionStage")
+    @Excel(name = "ui.data.column.lhScheduleResult.constructionStage", dictType = "biz_construction_stage")
     @ApiModelProperty(value = "施工阶段 00 无工艺 01 试制 02 量试 03 正式", name = "constructionStage")
     @TableField(value = "CONSTRUCTION_STAGE")
     private String constructionStage;
@@ -661,7 +663,7 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
     /**
      * 是否收尾
      */
-    @Excel(name = "ui.data.column.lhScheduleResult.isEnd")
+    @Excel(name = "ui.data.column.lhScheduleResult.isEnd", dictType = "biz_yes_no")
     @ApiModelProperty(value = "是否收尾", name = "isEnd")
     @TableField(value = "IS_END")
     private String isEnd;

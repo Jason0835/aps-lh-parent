@@ -127,6 +127,9 @@ S4.1 中批次号由 `LhBatchNoRedisGenerator` 生成：格式 `LHPC` + `yyyyMMd
 
 - 若采用 Superpowers 等流程产出正式规格，可在 `docs/superpowers/specs/` 下按日期归档专题设计，并在本文件「维护约定」中增加交叉引用链接。
 - API 字段语义（尤其日期字段）建议在 Swagger 注解或独立 `API.md` 中与本文第 4 节保持一致。
+- 本轮与硫化排程风险收敛和内核重构直接相关的专题文档：
+  - `docs/2026-04-11-lh-p0-p1-min-risk-fix-checklist.md`
+  - `docs/2026-04-11-lh-engine-redesign.md`
 
 ---
 

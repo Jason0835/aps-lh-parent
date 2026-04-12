@@ -73,7 +73,10 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
         if (shifts < 0) {
             return -1;
         }
-        return shifts / LhScheduleConstant.DEFAULT_SHIFTS_PER_DAY + 1;
+        if (shifts == 0) {
+            return 0;
+        }
+        return (int) Math.ceil((double) shifts / LhScheduleConstant.DEFAULT_SHIFTS_PER_DAY);
     }
 
     /**

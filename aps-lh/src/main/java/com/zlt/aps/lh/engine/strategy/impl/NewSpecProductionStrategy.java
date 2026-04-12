@@ -30,6 +30,7 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 新增规格排产策略实现
@@ -85,7 +86,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
             SkuScheduleDTO sku = findSkuDto(context, result.getMaterialCode());
-            if (sku == null || sku.getEmbryoStock() <= 0) {
+            if (sku == null || sku.getEmbryoStock() < 0) {
                 continue;
             }
             int totalPlan = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
@@ -133,23 +134,28 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            // 3. 检查换模能力
+            // 3. 计算机台准备就绪时间
             Date endingTime = bestMachine.getEstimatedEndTime() != null ? bestMachine.getEstimatedEndTime() : new Date();
-            if (!mouldChangeBalance.hasCapacity(context, endingTime)) {
+            Date machineReadyTime = capacityCalculate.calculateStartTime(context, bestMachine.getMachineCode(), endingTime);
+
+            // 4. 检查换模能力
+            if (!mouldChangeBalance.hasCapacity(context, machineReadyTime)) {
                 addUnscheduledResult(context, sku, "换模能力不足，已达当日换模上限");
                 iterator.remove();
                 continue;
             }
 
-            // 4. 分配换模班次（返回换模完成时间）
-            Date mouldChangeCompleteTime = mouldChangeBalance.allocateMouldChange(context, endingTime);
-            if (mouldChangeCompleteTime == null) {
+            // 5. 分配换模班次（返回换模开始时间）
+            Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineReadyTime);
+            if (mouldChangeStartTime == null) {
                 addUnscheduledResult(context, sku, "换模班次分配失败");
                 iterator.remove();
                 continue;
             }
+            Date mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
+                    mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
 
-            // 5. 分配首检时间
+            // 6. 分配首检时间
             Date inspectionTime = inspectionBalance.allocateInspection(context, bestMachine.getMachineCode(), mouldChangeCompleteTime);
             if (inspectionTime == null) {
                 addUnscheduledResult(context, sku, "首检班次分配失败");
@@ -157,16 +163,21 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            // 6. 计算开产时间（换模结束时间 + 首检时间）
-            Date productionStartTime = capacityCalculate.calculateStartTime(context, bestMachine.getMachineCode(), endingTime);
+            // 7. 计算开产时间（首检结束后开产）
+            Date productionStartTime = LhScheduleTimeUtil.addHours(
+                    inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
 
-            // 7. 构建排程结果，按班次分配计划量
-            LhScheduleResult result = buildNewSpecScheduleResult(context, bestMachine, sku, productionStartTime, mouldChangeCompleteTime, shifts, capacityCalculate);
+            // 8. 构建排程结果，按班次分配计划量
+            LhScheduleResult result = buildNewSpecScheduleResult(
+                    context, bestMachine, sku, productionStartTime, mouldChangeStartTime, mouldChangeCompleteTime, shifts, capacityCalculate);
             if (result != null && result.getTotalDailyPlanQty() != null && result.getTotalDailyPlanQty() > 0) {
                 context.getScheduleResultList().add(result);
+                updateMachineState(context, bestMachine, sku, result);
                 registerMachineAssignment(context, bestMachine.getMachineCode(), result);
                 iterator.remove();
-                log.debug("新增排产完成, SKU: {}, 机台: {}, 开产时间: {}", sku.getMaterialCode(), bestMachine.getMachineCode(), productionStartTime);
+                log.debug("新增排产完成, SKU: {}, 机台: {}, 机台就绪: {}, 换模开始: {}, 换模结束: {}, 首检开始: {}, 开产时间: {}",
+                        sku.getMaterialCode(), bestMachine.getMachineCode(),
+                        machineReadyTime, mouldChangeStartTime, mouldChangeCompleteTime, inspectionTime, productionStartTime);
             } else {
                 addUnscheduledResult(context, sku, "排程窗口内无可用产能");
                 iterator.remove();
@@ -183,7 +194,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                          MachineScheduleDTO machine,
                                                          SkuScheduleDTO sku,
                                                          Date startTime,
-                                                         Date mouldChangeTime,
+                                                         Date mouldChangeStartTime,
+                                                         Date mouldChangeEndTime,
                                                          List<LhShiftConfigVO> shifts,
                                                          ICapacityCalculateStrategy capacityCalculate) {
         LhScheduleResult result = new LhScheduleResult();
@@ -221,6 +233,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setMachineOrder(machine.getMachineOrder());
         result.setRealScheduleDate(context.getScheduleDate());
         result.setProductionStatus("0");
+        result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode()));
 
         // 按班次分配计划量
         int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
@@ -228,6 +241,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
         int totalQty = calcTotalPlanQty(result, shifts);
         result.setTotalDailyPlanQty(totalQty);
+        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), sku.getMouldQty());
+        result.setSpecEndTime(specEndTime);
+        result.setTdaySpecEndTime(specEndTime);
         return result;
     }
 
@@ -320,6 +336,45 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                         ShiftFieldUtil.getShiftEndTime(result, idx));
             }
         }
+    }
+
+    private Date calcSpecEndTime(LhScheduleResult result, List<LhShiftConfigVO> shifts, int lhTimeSeconds, int mouldQty) {
+        if (lhTimeSeconds <= 0 || mouldQty <= 0) {
+            return null;
+        }
+        for (int i = shifts.size() - 1; i >= 0; i--) {
+            LhShiftConfigVO shift = shifts.get(i);
+            Integer planQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
+            if (planQty == null || planQty <= 0) {
+                continue;
+            }
+            Date shiftStart = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
+            if (shiftStart == null) {
+                return shift.getShiftEndDateTime();
+            }
+            long secondsNeeded = (long) Math.ceil((double) planQty / mouldQty) * lhTimeSeconds;
+            return new Date(shiftStart.getTime() + secondsNeeded * 1000L);
+        }
+        return null;
+    }
+
+    private String resolveMouldCode(LhScheduleContext context, String materialCode) {
+        if (!context.getSkuMouldRelMap().containsKey(materialCode)) {
+            return null;
+        }
+        return context.getSkuMouldRelMap().get(materialCode).stream()
+                .map(rel -> rel.getMouldCode())
+                .filter(code -> code != null && !code.trim().isEmpty())
+                .distinct()
+                .collect(Collectors.joining(","));
+    }
+
+    private void updateMachineState(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
+        machine.setCurrentMaterialCode(sku.getMaterialCode());
+        machine.setCurrentMaterialDesc(sku.getMaterialDesc());
+        machine.setPreviousSpecCode(sku.getSpecCode());
+        machine.setPreviousProSize(sku.getProSize());
+        machine.setEstimatedEndTime(result.getSpecEndTime());
     }
 
     /**

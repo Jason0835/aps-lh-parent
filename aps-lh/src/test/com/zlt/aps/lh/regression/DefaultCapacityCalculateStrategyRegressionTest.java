@@ -48,9 +48,9 @@ class DefaultCapacityCalculateStrategyRegressionTest {
         Date ending = LhScheduleTimeUtil.buildTime(date(2026, 4, 2), 12, 0, 0);
         Date startTime = strategy.calculateStartTime(context, machineCode, ending);
 
-        // 维修 10h + 换模含预热等（默认 8h）应从 repairStart 8:00 起算
-        Date expectedMin = LhScheduleTimeUtil.addHours(begin, 10 + 8);
-        assertTrue(!startTime.before(expectedMin), "开产时间应反映停机计划时长（10h）而非默认 8h");
+        // 语义已调整为“机台准备就绪时间”，应至少覆盖维修 10 小时
+        Date expectedMin = LhScheduleTimeUtil.addHours(begin, 10);
+        assertTrue(!startTime.before(expectedMin), "机台准备就绪时间应反映停机计划时长（10h）");
     }
 
     private static Date date(int y, int month, int day) {

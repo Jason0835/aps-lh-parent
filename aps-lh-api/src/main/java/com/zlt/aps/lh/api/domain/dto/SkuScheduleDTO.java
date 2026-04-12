@@ -77,7 +77,7 @@ public class SkuScheduleDTO {
     /** 是否有发货要求(锁定交期) */
     private boolean deliveryLocked;
     /** 延误天数 */
-    private int delayDays;
+    private int delayDays = -1;
     /** 供应链优先级 */
     private String supplyChainPriority;
 
@@ -93,7 +93,7 @@ public class SkuScheduleDTO {
 
     // ========== 胎胚相关 ==========
     /** 胎胚库存 */
-    private int embryoStock;
+    private int embryoStock = -1;
     /** 胎胚可供硫化时长(小时) */
     private double embryoSupplyHours;
 

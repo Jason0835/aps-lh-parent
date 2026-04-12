@@ -101,11 +101,15 @@ public class LhScheduleContext {
     private List<SkuScheduleDTO> continuousSkuList = new ArrayList<>();
     /** 新增SKU列表 */
     private List<SkuScheduleDTO> newSpecSkuList = new ArrayList<>();
+    /** 前一日欠产/超产向当日传导的净值，key=materialCode */
+    private Map<String, Integer> carryForwardQtyMap = new HashMap<>();
 
     // ========== 机台分配状态 ==========
 
     /** 机台排程DTO Map, key=machineCode */
     private Map<String, MachineScheduleDTO> machineScheduleMap = new LinkedHashMap<>();
+    /** 机台初始状态快照，供换模计划和回归校验使用 */
+    private Map<String, MachineScheduleDTO> initialMachineScheduleMap = new LinkedHashMap<>();
     /** 机台剩余产能Map, key=machineCode, value=各班次剩余产能 */
     private Map<String, int[]> machineShiftCapacityMap = new LinkedHashMap<>();
     /** 班次运行态，key=班次索引 1～N（N≤8） */

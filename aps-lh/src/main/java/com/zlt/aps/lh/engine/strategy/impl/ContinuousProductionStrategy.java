@@ -474,12 +474,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     private Map<String, Integer> buildEmbryoStockMap(LhScheduleContext context) {
         Map<String, Integer> stockMap = new HashMap<>();
         for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
-            if (sku.getEmbryoCode() != null) {
+            if (sku.getEmbryoCode() != null && sku.getEmbryoStock() >= 0) {
                 stockMap.put(sku.getEmbryoCode(), sku.getEmbryoStock());
             }
         }
         for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
-            if (sku.getEmbryoCode() != null && !stockMap.containsKey(sku.getEmbryoCode())) {
+            if (sku.getEmbryoCode() != null
+                    && sku.getEmbryoStock() >= 0
+                    && !stockMap.containsKey(sku.getEmbryoCode())) {
                 stockMap.put(sku.getEmbryoCode(), sku.getEmbryoStock());
             }
         }
@@ -495,7 +497,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             return;
         }
         Integer stock = embryoStockMap.get(embryoCode);
-        if (stock == null || stock <= 0) {
+        if (stock == null || stock < 0) {
             return;
         }
         int totalPlan = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;

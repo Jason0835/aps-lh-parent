@@ -14,6 +14,8 @@ import cn.hutool.core.date.DateUtil;
 import java.time.ZoneId;
 import org.springframework.util.CollectionUtils;
 
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
@@ -656,6 +658,34 @@ public final class LhScheduleTimeUtil {
         cal.set(Calendar.SECOND, second);
         cal.set(Calendar.MILLISECOND, 0);
         return cal.getTime();
+    }
+
+    /**
+     * 按常见格式解析时间字符串。
+     *
+     * @param value 时间字符串
+     * @return 解析结果，无法识别时返回 null
+     */
+    public static Date parseFlexibleDateTime(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        String text = value.trim();
+        String[] patterns = new String[]{
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm",
+                "yyyy-MM-dd"
+        };
+        for (String pattern : patterns) {
+            try {
+                SimpleDateFormat format = new SimpleDateFormat(pattern);
+                format.setLenient(false);
+                return format.parse(text);
+            } catch (ParseException ignored) {
+                // 尝试下一个格式
+            }
+        }
+        return null;
     }
 
     /**

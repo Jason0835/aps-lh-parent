@@ -41,24 +41,27 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
             return new Date();
         }
 
-        // 基础开产时间 = 前SKU收尾时间 + 换模含预热时间 + 其他时间（首检+等待交替）
-        int mouldChangeTotalHours = LhScheduleTimeUtil.getMouldChangeTotalHours(context);
-        Date baseStartTime = LhScheduleTimeUtil.addHours(endingTime, mouldChangeTotalHours);
+        // 语义调整为“机台准备就绪时间”，仅表达机台从何时开始可以继续安排换模/首检/生产
+        Date baseReadyTime = endingTime;
 
         // 判断机台是否有保养/维修计划，若有则取最晚时间
         Date maintenanceStartTime = calculateMaintenanceStartTime(context, machineCode);
         Date repairStartTime = calculateRepairStartTime(context, machineCode);
+        Date cleaningStartTime = calculateCleaningReadyTime(context, machineCode);
 
-        // 取三者最大值：基础开产时间、保养后开产时间、维修后开产时间
-        Date maxStartTime = baseStartTime;
+        // 取四者最大值：基础可用时间、保养后可用时间、维修后可用时间、清洗后可用时间
+        Date maxStartTime = baseReadyTime;
         if (maintenanceStartTime != null && maintenanceStartTime.after(maxStartTime)) {
             maxStartTime = maintenanceStartTime;
         }
         if (repairStartTime != null && repairStartTime.after(maxStartTime)) {
             maxStartTime = repairStartTime;
         }
+        if (cleaningStartTime != null && cleaningStartTime.after(maxStartTime)) {
+            maxStartTime = cleaningStartTime;
+        }
 
-        log.debug("计算开产时间, 机台: {}, 收尾时间: {}, 开产时间: {}", machineCode, endingTime, maxStartTime);
+        log.debug("计算机台准备就绪时间, 机台: {}, 收尾时间: {}, 就绪时间: {}", machineCode, endingTime, maxStartTime);
         return maxStartTime;
     }
 
@@ -116,9 +119,8 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
         int maintenanceDurationHours = LhScheduleConstant.MAINTENANCE_DURATION_HOURS;
         Date maintenanceEnd = LhScheduleTimeUtil.addHours(maintenanceStart, maintenanceDurationHours);
 
-        // 开产时间 = 保养结束时间 + 换模含预热时间
-        int mouldChangeTotalHours = LhScheduleTimeUtil.getMouldChangeTotalHours(context);
-        return LhScheduleTimeUtil.addHours(maintenanceEnd, mouldChangeTotalHours);
+        // 语义为机台保养完成后的就绪时间
+        return maintenanceEnd;
     }
 
     /**
@@ -161,8 +163,31 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
 
         Date repairEnd = LhScheduleTimeUtil.addHours(repairStart, repairDurationHours);
 
-        // 维修后换模：开产时间 = 维修结束 + 换模含预热(4h)
-        int mouldChangeTotalHours = LhScheduleTimeUtil.getMouldChangeTotalHours(context);
-        return LhScheduleTimeUtil.addHours(repairEnd, mouldChangeTotalHours);
+        // 语义为机台维修完成后的就绪时间
+        return repairEnd;
+    }
+
+    /**
+     * 计算设备清洗后的机台可用时间。
+     *
+     * @param context     排程上下文
+     * @param machineCode 机台编号
+     * @return 清洗后的可用时间
+     */
+    private Date calculateCleaningReadyTime(LhScheduleContext context, String machineCode) {
+        MachineScheduleDTO machineDTO = context.getMachineScheduleMap().get(machineCode);
+        if (machineDTO == null || machineDTO.getCleaningPlanTime() == null) {
+            return null;
+        }
+
+        if (machineDTO.isHasSandBlastCleaning()) {
+            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
+                    LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
+        }
+        if (machineDTO.isHasDryIceCleaning()) {
+            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
+                    LhScheduleConstant.DRY_ICE_DURATION_HOURS);
+        }
+        return null;
     }
 }

@@ -4,11 +4,13 @@ import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
+import com.zlt.aps.lh.component.ScheduleExecutionGuard;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.decorator.IScheduleExecutor;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import com.zlt.aps.lh.engine.observer.ScheduleEventPublisher;
 import com.zlt.aps.lh.engine.rule.IScheduleRuleEngine;
+import com.zlt.aps.lh.exception.ScheduleException;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.service.ILhScheduleService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
@@ -41,11 +43,27 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
     @Resource
     private ScheduleEventPublisher scheduleEventPublisher;
 
+    @Resource
+    private ScheduleExecutionGuard scheduleExecutionGuard;
+
     @Override
     public LhScheduleResponseDTO executeSchedule(LhScheduleRequestDTO request) {
         log.info("接收排程请求, 工厂: {}, 日期: {}", request.getFactoryCode(), request.getScheduleDate());
         LhScheduleContext context = buildContext(request);
-        return scheduleExecutor.execute(context);
+        String lockToken = null;
+        try {
+            lockToken = scheduleExecutionGuard.acquire(context.getFactoryCode(), context.getScheduleTargetDate());
+            return scheduleExecutor.execute(context);
+        } catch (ScheduleException e) {
+            log.warn("排程请求被拒绝, 工厂: {}, 日期: {}, 原因: {}",
+                    context.getFactoryCode(), context.getScheduleTargetDate(), e.getMessage());
+            return LhScheduleResponseDTO.fail(context.getBatchNo(), e.getMessage());
+        } catch (Exception e) {
+            log.error("排程服务入口异常, 工厂: {}, 日期: {}", context.getFactoryCode(), context.getScheduleTargetDate(), e);
+            return LhScheduleResponseDTO.fail(context.getBatchNo(), "排程执行异常: " + e.getMessage());
+        } finally {
+            scheduleExecutionGuard.release(context.getFactoryCode(), context.getScheduleTargetDate(), lockToken);
+        }
     }
 
     @Override

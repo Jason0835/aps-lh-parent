@@ -9,17 +9,24 @@ import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import com.zlt.aps.lh.engine.observer.ScheduleEventPublisher;
-import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
-import com.zlt.aps.lh.mapper.LhScheduleProcessLogMapper;
-import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
-import com.zlt.aps.lh.mapper.LhUnscheduledResultMapper;
+import com.zlt.aps.lh.exception.ScheduleErrorCode;
+import com.zlt.aps.lh.exception.ScheduleException;
+import com.zlt.aps.lh.service.impl.SchedulePersistenceService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -36,16 +43,7 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
     private ScheduleEventPublisher scheduleEventPublisher;
 
     @Resource
-    private LhScheduleResultMapper scheduleResultMapper;
-
-    @Resource
-    private LhUnscheduledResultMapper unscheduledResultMapper;
-
-    @Resource
-    private LhMouldChangePlanMapper mouldChangePlanMapper;
-
-    @Resource
-    private LhScheduleProcessLogMapper processLogMapper;
+    private SchedulePersistenceService schedulePersistenceService;
 
     private static final AtomicInteger ORDER_SEQ = new AtomicInteger(0);
     private static final AtomicInteger CHG_SEQ = new AtomicInteger(0);
@@ -54,9 +52,6 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
     protected void doHandle(LhScheduleContext context) {
         // S4.6.1 排程后置校验
         postValidation(context);
-        if (context.isInterrupted()) {
-            return;
-        }
 
         // S4.6.2 生成模具交替计划
         generateMouldChangePlan(context);
@@ -64,10 +59,13 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
         // S4.6.3 补全工单号和发布状态
         assignOrderNumbers(context);
 
-        // S4.6.4 保存排程结果到数据库
-        saveScheduleResults(context);
+        // S4.6.4 添加排程汇总日志
+        addSummaryLog(context);
 
-        // S4.6.5 发布排程完成事件（观察者模式）
+        // S4.6.5 保存排程结果到数据库
+        schedulePersistenceService.replaceScheduleAtomically(context);
+
+        // S4.6.6 发布排程完成事件（观察者模式）
         scheduleEventPublisher.publish(ScheduleEvent.completed(context));
     }
 
@@ -83,24 +81,37 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             log.warn("排程结果为空，可能所有SKU均未成功排产");
         }
 
+        if (StringUtils.isBlank(context.getBatchNo()) || StringUtils.isBlank(context.getFactoryCode())) {
+            throw new ScheduleException(ScheduleStepEnum.S4_6_RESULT_VALIDATION,
+                    ScheduleErrorCode.RESULT_VALIDATION_FAILED,
+                    context.getFactoryCode(), context.getBatchNo(),
+                    "批次号或工厂编码为空，无法执行结果保存");
+        }
+
         // 校验2：检查每个排程结果必填字段
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if (result.getLhMachineCode() == null || result.getMaterialCode() == null) {
-                log.warn("排程结果存在缺失必填字段的记录, materialCode: {}", result.getMaterialCode());
-            }
-            // 确保批次号和工厂编号已填充
             if (result.getBatchNo() == null) {
                 result.setBatchNo(context.getBatchNo());
             }
             if (result.getFactoryCode() == null) {
                 result.setFactoryCode(context.getFactoryCode());
             }
-        }
-
-        // 校验3：检查模具交替计划完整性
-        for (LhMouldChangePlan plan : context.getMouldChangePlanList()) {
-            if (plan.getAfterMaterialCode() == null) {
-                log.warn("模具交替计划存在后规格为空的记录, 机台: {}", plan.getLhMachineCode());
+            if (result.getScheduleDate() == null) {
+                result.setScheduleDate(context.getScheduleTargetDate());
+            }
+            if (result.getIsRelease() == null) {
+                result.setIsRelease("0");
+            }
+            requireField(result.getBatchNo(), "batchNo", context, result);
+            requireField(result.getFactoryCode(), "factoryCode", context, result);
+            requireField(result.getLhMachineCode(), "lhMachineCode", context, result);
+            requireField(result.getMaterialCode(), "materialCode", context, result);
+            requireField(result.getScheduleType(), "scheduleType", context, result);
+            if (result.getSpecEndTime() == null) {
+                throwValidationFailure(context, result, "specEndTime 缺失");
+            }
+            if ("1".equals(result.getIsChangeMould()) && StringUtils.isBlank(result.getMouldCode())) {
+                throwValidationFailure(context, result, "换模结果 mouldCode 缺失");
             }
         }
 
@@ -115,23 +126,29 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
      * </p>
      */
     private void generateMouldChangePlan(LhScheduleContext context) {
-        log.info("生成模具交替计划, 换模排程结果数: {}",
-                context.getScheduleResultList().stream().filter(r -> "1".equals(r.getIsChangeMould())).count());
+        List<LhScheduleResult> changeResults = context.getScheduleResultList().stream()
+                .filter(r -> "1".equals(r.getIsChangeMould()))
+                .sorted(Comparator.comparing(LhScheduleResult::getLhMachineCode, Comparator.nullsLast(String::compareTo))
+                        .thenComparing(this::resolveProductionStartTime, Comparator.nullsLast(Date::compareTo))
+                        .thenComparing(LhScheduleResult::getSpecEndTime, Comparator.nullsLast(Date::compareTo)))
+                .collect(Collectors.toList());
+        log.info("生成模具交替计划, 换模排程结果数: {}", changeResults.size());
 
         List<LhMouldChangePlan> plans = context.getMouldChangePlanList();
+        plans.clear();
+
+        Map<String, RollingMachineState> rollingStateMap = new HashMap<>();
         int planOrder = 1;
 
-        for (LhScheduleResult result : context.getScheduleResultList()) {
-            if (!"1".equals(result.getIsChangeMould())) {
-                continue;
-            }
-
+        for (LhScheduleResult result : changeResults) {
+            RollingMachineState state = rollingStateMap.computeIfAbsent(result.getLhMachineCode(),
+                    machineCode -> buildInitialState(context, machineCode));
             LhMouldChangePlan plan = new LhMouldChangePlan();
             plan.setFactoryCode(context.getFactoryCode());
             plan.setLhResultBatchNo(context.getBatchNo());
             plan.setOrderNo(generateChangePlanOrderNo(context));
             plan.setScheduleDate(context.getScheduleTargetDate());
-            plan.setPlanDate(LhScheduleTimeUtil.resolveFirstShiftStartForPlan(context, result));
+            plan.setPlanDate(resolveProductionStartTime(result));
             plan.setPlanOrder(planOrder++);
             plan.setLhMachineCode(result.getLhMachineCode());
             plan.setLhMachineName(result.getLhMachineName());
@@ -141,18 +158,15 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             plan.setIsRelease("0");
             plan.setMouldStatus("0");
             plan.setIsDelete(0);
-
-            // 记录前规格信息（从机台排程信息中获取）
-            MachineScheduleDTO machine = context.getMachineScheduleMap().get(result.getLhMachineCode());
-            if (machine != null) {
-                plan.setBeforeMaterialCode(machine.getCurrentMaterialCode());
-                plan.setBeforeMaterialDesc(machine.getCurrentMaterialDesc());
-                plan.setChangeTime(machine.getEstimatedEndTime());
-            }
+            plan.setBeforeMaterialCode(state.getCurrentMaterialCode());
+            plan.setBeforeMaterialDesc(state.getCurrentMaterialDesc());
+            plan.setChangeTime(state.getEstimatedEndTime());
 
             // 判断交替类型
             plan.setChangeMouldType(determineChangeMouldType(result));
             plans.add(plan);
+
+            updateRollingState(context, state, result);
         }
 
         log.info("生成模具交替计划完成, 共 {} 条", plans.size());
@@ -202,40 +216,6 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 批量保存所有排程输出结果到数据库
-     */
-    private void saveScheduleResults(LhScheduleContext context) {
-        log.info("保存排程结果, 排程结果: {}, 未排产: {}, 换模计划: {}, 日志: {}",
-                context.getScheduleResultList().size(),
-                context.getUnscheduledResultList().size(),
-                context.getMouldChangePlanList().size(),
-                context.getScheduleLogList().size());
-
-        // 1. 保存排程结果
-        if (!context.getScheduleResultList().isEmpty()) {
-            scheduleResultMapper.insertBatch(context.getScheduleResultList());
-        }
-
-        // 2. 保存未排产结果
-        if (!context.getUnscheduledResultList().isEmpty()) {
-            unscheduledResultMapper.insertBatch(context.getUnscheduledResultList());
-        }
-
-        // 3. 保存模具交替计划
-        if (!context.getMouldChangePlanList().isEmpty()) {
-            mouldChangePlanMapper.insertBatch(context.getMouldChangePlanList());
-        }
-
-        // 4. 添加排程汇总日志并保存
-        addSummaryLog(context);
-        if (!context.getScheduleLogList().isEmpty()) {
-            processLogMapper.insertBatch(context.getScheduleLogList());
-        }
-
-        log.info("排程结果保存完成");
-    }
-
-    /**
      * 添加排程汇总日志
      */
     private void addSummaryLog(LhScheduleContext context) {
@@ -265,5 +245,137 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
     @Override
     protected String getStepName() {
         return ScheduleStepEnum.S4_6_RESULT_VALIDATION.getDescription();
+    }
+
+    @Override
+    protected boolean shouldPropagateException() {
+        return true;
+    }
+
+    private void requireField(String value, String fieldName, LhScheduleContext context, LhScheduleResult result) {
+        if (StringUtils.isBlank(value)) {
+            throwValidationFailure(context, result, fieldName + " 缺失");
+        }
+    }
+
+    private void throwValidationFailure(LhScheduleContext context, LhScheduleResult result, String detail) {
+        throw new ScheduleException(ScheduleStepEnum.S4_6_RESULT_VALIDATION,
+                ScheduleErrorCode.RESULT_VALIDATION_FAILED,
+                context.getFactoryCode(), context.getBatchNo(),
+                String.format("排程结果校验失败，机台[%s] 物料[%s]：%s",
+                        result.getLhMachineCode(), result.getMaterialCode(), detail));
+    }
+
+    private Date resolveProductionStartTime(LhScheduleResult result) {
+        List<Date> startTimes = new ArrayList<>();
+        if (result.getClass1StartTime() != null) {
+            startTimes.add(result.getClass1StartTime());
+        }
+        if (result.getClass2StartTime() != null) {
+            startTimes.add(result.getClass2StartTime());
+        }
+        if (result.getClass3StartTime() != null) {
+            startTimes.add(result.getClass3StartTime());
+        }
+        if (result.getClass4StartTime() != null) {
+            startTimes.add(result.getClass4StartTime());
+        }
+        if (result.getClass5StartTime() != null) {
+            startTimes.add(result.getClass5StartTime());
+        }
+        if (result.getClass6StartTime() != null) {
+            startTimes.add(result.getClass6StartTime());
+        }
+        if (result.getClass7StartTime() != null) {
+            startTimes.add(result.getClass7StartTime());
+        }
+        if (result.getClass8StartTime() != null) {
+            startTimes.add(result.getClass8StartTime());
+        }
+        if (startTimes.isEmpty()) {
+            return result.getSpecEndTime();
+        }
+        return startTimes.stream().min(Date::compareTo).orElse(result.getSpecEndTime());
+    }
+
+    private RollingMachineState buildInitialState(LhScheduleContext context, String machineCode) {
+        MachineScheduleDTO machine = context.getInitialMachineScheduleMap().get(machineCode);
+        if (machine == null) {
+            machine = context.getMachineScheduleMap().get(machineCode);
+        }
+        RollingMachineState state = new RollingMachineState();
+        if (machine != null) {
+            state.setCurrentMaterialCode(machine.getCurrentMaterialCode());
+            state.setCurrentMaterialDesc(machine.getCurrentMaterialDesc());
+            state.setPreviousSpecCode(machine.getPreviousSpecCode());
+            state.setPreviousProSize(machine.getPreviousProSize());
+            state.setEstimatedEndTime(machine.getEstimatedEndTime());
+        }
+        return state;
+    }
+
+    private void updateRollingState(LhScheduleContext context, RollingMachineState state, LhScheduleResult result) {
+        state.setCurrentMaterialCode(result.getMaterialCode());
+        state.setCurrentMaterialDesc(result.getMaterialDesc());
+        state.setEstimatedEndTime(result.getSpecEndTime());
+        MdmMaterialInfo materialInfo = context.getMaterialInfoMap().get(result.getMaterialCode());
+        if (materialInfo != null) {
+            state.setPreviousSpecCode(materialInfo.getSpecifications());
+            state.setPreviousProSize(materialInfo.getProSize());
+        } else {
+            state.setPreviousSpecCode(result.getSpecCode());
+        }
+    }
+
+    /**
+     * 换模计划滚动前规格状态。
+     */
+    private static class RollingMachineState {
+
+        private String currentMaterialCode;
+        private String currentMaterialDesc;
+        private String previousSpecCode;
+        private String previousProSize;
+        private Date estimatedEndTime;
+
+        public String getCurrentMaterialCode() {
+            return currentMaterialCode;
+        }
+
+        public void setCurrentMaterialCode(String currentMaterialCode) {
+            this.currentMaterialCode = currentMaterialCode;
+        }
+
+        public String getCurrentMaterialDesc() {
+            return currentMaterialDesc;
+        }
+
+        public void setCurrentMaterialDesc(String currentMaterialDesc) {
+            this.currentMaterialDesc = currentMaterialDesc;
+        }
+
+        public String getPreviousSpecCode() {
+            return previousSpecCode;
+        }
+
+        public void setPreviousSpecCode(String previousSpecCode) {
+            this.previousSpecCode = previousSpecCode;
+        }
+
+        public String getPreviousProSize() {
+            return previousProSize;
+        }
+
+        public void setPreviousProSize(String previousProSize) {
+            this.previousProSize = previousProSize;
+        }
+
+        public Date getEstimatedEndTime() {
+            return estimatedEndTime;
+        }
+
+        public void setEstimatedEndTime(Date estimatedEndTime) {
+            this.estimatedEndTime = estimatedEndTime;
+        }
     }
 }

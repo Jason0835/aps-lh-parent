@@ -74,35 +74,20 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         if (previousScheduleList == null || previousScheduleList.isEmpty()) {
             return;
         }
-
-        List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
-        if (CollectionUtils.isEmpty(shifts)) {
-            shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
-        }
-        Integer nightIdx = LhScheduleTimeUtil.findFirstNightShiftIndexWithOffset(shifts, 1);
-        Integer morningT0Idx = LhScheduleTimeUtil.findFirstMorningShiftIndexWithOffset(shifts, 0);
-
-        if (nightIdx == null || morningT0Idx == null) {
-            log.warn("未解析到夜班/T日早班槽位，跳过欠产调整");
-        } else {
-        // 处理前日排程：欠产量来自「归属 T+1 的首个夜班」（与现行三班八段语义一致）
+        Map<String, Integer> carryForwardQtyMap = new LinkedHashMap<>();
         for (LhScheduleResult result : previousScheduleList) {
-            int nightPlanQty = safeInt(ShiftFieldUtil.getShiftPlanQty(result, nightIdx));
-            int nightFinishQty = safeInt(ShiftFieldUtil.getShiftFinishQty(result, nightIdx));
-
-            int deficit = nightPlanQty - nightFinishQty;
-            if (deficit > 0) {
-                int currentMorningPlan = safeInt(ShiftFieldUtil.getShiftPlanQty(result, morningT0Idx));
-                ShiftFieldUtil.setShiftPlanQty(result, morningT0Idx, currentMorningPlan + deficit,
-                        ShiftFieldUtil.getShiftStartTime(result, morningT0Idx),
-                        ShiftFieldUtil.getShiftEndTime(result, morningT0Idx));
-                log.debug("欠产调整: 机台[{}] SKU[{}] 夜班欠产[{}]条, 追加至T日早班",
-                        result.getLhMachineCode(), result.getMaterialCode(), deficit);
+            int plannedQty = ShiftFieldUtil.sumPlanQty(result, LhScheduleConstant.MAX_SHIFT_SLOT_COUNT);
+            int finishedQty = resolveActualFinishedQty(context, result);
+            int diffQty = plannedQty - finishedQty;
+            if (diffQty != 0) {
+                carryForwardQtyMap.merge(result.getMaterialCode(), diffQty, Integer::sum);
+                log.debug("欠产/超产传导: 机台[{}] SKU[{}] 计划[{}] 完成[{}] 净值[{}]",
+                        result.getLhMachineCode(), result.getMaterialCode(), plannedQty, finishedQty, diffQty);
             }
         }
-        }
-
-        log.info("前日排程欠产调整完成, 数量: {}", previousScheduleList.size());
+        context.setCarryForwardQtyMap(carryForwardQtyMap);
+        log.info("前日排程欠产/超产净值归集完成, 记录数: {}, 影响SKU数: {}",
+                previousScheduleList.size(), carryForwardQtyMap.size());
     }
 
     /**
@@ -126,13 +111,13 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
         for (FactoryMonthPlanProductionFinalResult plan : monthPlanList) {
             // 计算硫化余量
-            int surplusQty = calculateSurplusQty(context, plan);
+            SurplusCalculation surplus = calculateSurplusQty(context, plan);
             // 余量为0说明已完成，跳过
-            if (surplusQty <= 0) {
+            if (surplus.getSurplusQty() <= 0) {
                 continue;
             }
 
-            SkuScheduleDTO dto = buildSkuScheduleDTO(context, plan, surplusQty);
+            SkuScheduleDTO dto = buildSkuScheduleDTO(context, plan, surplus);
 
             // 产品结构为空，跳过
             if (StringUtils.isEmpty(plan.getStructureName())) {
@@ -158,21 +143,21 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @param plan    月生产计划记录
      * @return 硫化余量
      */
-    private int calculateSurplusQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
+    private SurplusCalculation calculateSurplusQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
         String materialCode = plan.getMaterialCode();
 
         // 先从月底计划余量Map中获取（仅按物料编号）
         if (StringUtils.isNotEmpty(materialCode)) {
             MdmMonthSurplus monthSurplus = context.getMonthSurplusMap().get(materialCode);
             if (monthSurplus != null && monthSurplus.getPlanSurplusQty() != null) {
-                return monthSurplus.getPlanSurplusQty().intValue();
+                return new SurplusCalculation(monthSurplus.getPlanSurplusQty().intValue(), true);
             }
         }
 
         // 若无余量数据，用月计划总量减去各班次完成量
         int totalPlanQty = plan.getTotalQty() != null ? plan.getTotalQty() : 0;
         int finishedQty = calculateFinishedQty(context, plan);
-        return Math.max(0, totalPlanQty - finishedQty);
+        return new SurplusCalculation(Math.max(0, totalPlanQty - finishedQty), false);
     }
 
     /**
@@ -209,7 +194,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      */
     private SkuScheduleDTO buildSkuScheduleDTO(LhScheduleContext context,
                                                FactoryMonthPlanProductionFinalResult plan,
-                                               int surplusQty) {
+                                               SurplusCalculation surplus) {
         SkuScheduleDTO dto = new SkuScheduleDTO();
         dto.setMaterialCode(plan.getMaterialCode());
         dto.setMaterialDesc(plan.getMaterialDesc());
@@ -224,8 +209,13 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
         // 计划量信息
         dto.setMonthPlanQty(plan.getTotalQty() != null ? plan.getTotalQty() : 0);
-        dto.setSurplusQty(surplusQty);
-        dto.setPendingQty(surplusQty);
+        int carryForwardQty = context.getCarryForwardQtyMap().getOrDefault(plan.getMaterialCode(), 0);
+        int adjustedQty = surplus.getSurplusQty();
+        if (surplus.isFromMonthSurplus()) {
+            adjustedQty = Math.max(0, adjustedQty + carryForwardQty);
+        }
+        dto.setSurplusQty(adjustedQty);
+        dto.setPendingQty(adjustedQty);
         dto.setDailyPlanQty(plan.getDayVulcanizationQty() != null ? plan.getDayVulcanizationQty() : 0);
 
         // 产能信息（从SKU日硫化产能Map获取）
@@ -265,6 +255,30 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         dto.setSkuTag(SkuTagEnum.NORMAL.getCode());
 
         return dto;
+    }
+
+    private int resolveActualFinishedQty(LhScheduleContext context, LhScheduleResult result) {
+        String key = result.getLhMachineCode() + "_" + result.getMaterialCode();
+        LhShiftFinishQty finishQty = context.getShiftFinishQtyMap().get(key);
+        if (finishQty != null) {
+            return safeInt(finishQty.getClass1FinishQty())
+                    + safeInt(finishQty.getClass2FinishQty())
+                    + safeInt(finishQty.getClass3FinishQty())
+                    + safeInt(finishQty.getClass4FinishQty())
+                    + safeInt(finishQty.getClass5FinishQty())
+                    + safeInt(finishQty.getClass6FinishQty())
+                    + safeInt(finishQty.getClass7FinishQty())
+                    + safeInt(finishQty.getClass8FinishQty());
+        }
+        List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
+        if (CollectionUtils.isEmpty(shifts)) {
+            shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        }
+        int finishedQty = 0;
+        for (LhShiftConfigVO shift : shifts) {
+            finishedQty += safeInt(ShiftFieldUtil.getShiftFinishQty(result, shift.getShiftIndex()));
+        }
+        return finishedQty;
     }
 
     /**
@@ -392,6 +406,28 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      */
     private int safeInt(Integer value) {
         return value != null ? value : 0;
+    }
+
+    /**
+     * 余量计算结果。
+     */
+    private static class SurplusCalculation {
+
+        private final int surplusQty;
+        private final boolean fromMonthSurplus;
+
+        private SurplusCalculation(int surplusQty, boolean fromMonthSurplus) {
+            this.surplusQty = surplusQty;
+            this.fromMonthSurplus = fromMonthSurplus;
+        }
+
+        public int getSurplusQty() {
+            return surplusQty;
+        }
+
+        public boolean isFromMonthSurplus() {
+            return fromMonthSurplus;
+        }
     }
 
     @Override

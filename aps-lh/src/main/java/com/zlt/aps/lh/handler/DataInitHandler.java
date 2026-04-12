@@ -7,7 +7,9 @@ import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhParams;
+import com.zlt.aps.lh.api.enums.CleaningTypeEnum;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
+import com.zlt.aps.lh.api.enums.MachineStopTypeEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.engine.chain.DataValidationChain;
 import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
@@ -19,6 +21,7 @@ import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmLhRepairCapsule;
+import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -169,21 +172,55 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             if (context.getMachineOnlineInfoMap().containsKey(machineCode)) {
                 MdmLhMachineOnlineInfo onlineInfo = context.getMachineOnlineInfoMap().get(machineCode);
                 dto.setCurrentMaterialCode(onlineInfo.getMaterialCode());
+                dto.setCurrentMaterialDesc(onlineInfo.getSpecDesc());
+                MdmMaterialInfo currentMaterial = context.getMaterialInfoMap().get(onlineInfo.getMaterialCode());
+                if (currentMaterial != null) {
+                    dto.setCurrentMaterialDesc(currentMaterial.getMaterialDesc());
+                    dto.setPreviousSpecCode(currentMaterial.getSpecifications());
+                    dto.setPreviousProSize(currentMaterial.getProSize());
+                }
             }
 
-            // 初始化设备停机信息（取最近一条计划停机，beginDate最早的为准）
+            // 初始化设备停机与维修信息（取 beginDate 最早的为准）
             for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
                 if (machineCode.equals(planShut.getMachineCode())) {
-                    dto.setPlanStopStartTime(planShut.getBeginDate());
-                    dto.setPlanStopEndTime(planShut.getEndDate());
-                    dto.setStopType(planShut.getMachineStopType());
-                    break;
+                    if (dto.getPlanStopStartTime() == null
+                            || (planShut.getBeginDate() != null && planShut.getBeginDate().before(dto.getPlanStopStartTime()))) {
+                        dto.setPlanStopStartTime(planShut.getBeginDate());
+                        dto.setPlanStopEndTime(planShut.getEndDate());
+                        dto.setStopType(planShut.getMachineStopType());
+                    }
+                    MachineStopTypeEnum stopTypeEnum = MachineStopTypeEnum.getByCode(planShut.getMachineStopType());
+                    if (stopTypeEnum == MachineStopTypeEnum.PLANNED_REPAIR
+                            || stopTypeEnum == MachineStopTypeEnum.TEMPORARY_FAULT) {
+                        dto.setHasRepairPlan(true);
+                        dto.setRepairPlanTime(earlier(dto.getRepairPlanTime(), planShut.getBeginDate()));
+                    }
                 }
             }
 
             // 初始化保养计划
             if (context.getMaintenancePlanMap().containsKey(machineCode)) {
-                dto.setHasMaintenancePlan(true);
+                Date maintenanceTime = LhScheduleTimeUtil.parseFlexibleDateTime(
+                        context.getMaintenancePlanMap().get(machineCode).getOperTime());
+                if (maintenanceTime != null) {
+                    dto.setHasMaintenancePlan(true);
+                    dto.setMaintenancePlanTime(maintenanceTime);
+                }
+            }
+
+            // 初始化清洗计划
+            for (com.zlt.aps.lh.api.domain.entity.LhCleaningPlan cleaningPlan : context.getCleaningPlanList()) {
+                if (!machineCode.equals(cleaningPlan.getLhMachineCode())) {
+                    continue;
+                }
+                if (CleaningTypeEnum.DRY_ICE.getCode().equals(cleaningPlan.getPlanType())) {
+                    dto.setHasDryIceCleaning(true);
+                }
+                if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleaningPlan.getPlanType())) {
+                    dto.setHasSandBlastCleaning(true);
+                }
+                dto.setCleaningPlanTime(earlier(dto.getCleaningPlanTime(), cleaningPlan.getPlanTime()));
             }
 
             // 初始化胶囊使用次数
@@ -195,12 +232,67 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
             // 初始化各班次可用状态（默认全部可用）
             Arrays.fill(dto.getShiftAvailable(), true);
+            dto.setEstimatedEndTime(resolveInitialEstimatedEndTime(context, machineCode));
 
             machineScheduleMap.put(machineCode, dto);
         }
 
         context.setMachineScheduleMap(machineScheduleMap);
+        context.setInitialMachineScheduleMap(copyMachineStateMap(machineScheduleMap));
         log.info("机台排程状态对象封装完成, 机台数量: {}", machineScheduleMap.size());
+    }
+
+    private Date resolveInitialEstimatedEndTime(LhScheduleContext context, String machineCode) {
+        Date latestSpecEndTime = null;
+        for (com.zlt.aps.lh.api.domain.entity.LhScheduleResult result : context.getPreviousScheduleResultList()) {
+            if (!machineCode.equals(result.getLhMachineCode()) || result.getSpecEndTime() == null) {
+                continue;
+            }
+            if (latestSpecEndTime == null || result.getSpecEndTime().after(latestSpecEndTime)) {
+                latestSpecEndTime = result.getSpecEndTime();
+            }
+        }
+        if (latestSpecEndTime != null) {
+            return latestSpecEndTime;
+        }
+        if (context.getMachineOnlineInfoMap().containsKey(machineCode)) {
+            List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
+            if (!shifts.isEmpty() && shifts.get(0).getShiftStartDateTime() != null) {
+                return shifts.get(0).getShiftStartDateTime();
+            }
+        }
+        List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
+        if (!shifts.isEmpty() && shifts.get(0).getShiftStartDateTime() != null) {
+            return shifts.get(0).getShiftStartDateTime();
+        }
+        return context.getScheduleDate();
+    }
+
+    private Map<String, MachineScheduleDTO> copyMachineStateMap(Map<String, MachineScheduleDTO> sourceMap) {
+        Map<String, MachineScheduleDTO> snapshot = new LinkedHashMap<>(sourceMap.size());
+        for (Map.Entry<String, MachineScheduleDTO> entry : sourceMap.entrySet()) {
+            MachineScheduleDTO source = entry.getValue();
+            MachineScheduleDTO copy = new MachineScheduleDTO();
+            copy.setMachineCode(source.getMachineCode());
+            copy.setMachineName(source.getMachineName());
+            copy.setCurrentMaterialCode(source.getCurrentMaterialCode());
+            copy.setCurrentMaterialDesc(source.getCurrentMaterialDesc());
+            copy.setPreviousSpecCode(source.getPreviousSpecCode());
+            copy.setPreviousProSize(source.getPreviousProSize());
+            copy.setEstimatedEndTime(source.getEstimatedEndTime());
+            snapshot.put(entry.getKey(), copy);
+        }
+        return snapshot;
+    }
+
+    private Date earlier(Date current, Date candidate) {
+        if (candidate == null) {
+            return current;
+        }
+        if (current == null || candidate.before(current)) {
+            return candidate;
+        }
+        return current;
     }
 
     @Override

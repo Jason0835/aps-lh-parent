@@ -28,15 +28,33 @@ public abstract class AbsScheduleStepHandler {
         try {
             doHandle(context);
         } catch (ScheduleException e) {
+            if (shouldPropagateException()) {
+                throw e;
+            }
             log.warn("[{}] 排程业务异常: {}", getStepName(), e.getMessage(), e);
             context.interruptSchedule(e.getMessage());
         } catch (Exception e) {
+            if (shouldPropagateException()) {
+                if (e instanceof RuntimeException) {
+                    throw (RuntimeException) e;
+                }
+                throw new RuntimeException(e);
+            }
             log.error("[{}] 执行异常", getStepName(), e);
             context.interruptSchedule(getStepName() + "执行异常: " + e.getMessage());
         } finally {
             long elapsed = System.currentTimeMillis() - startTime;
             log.info("[{}] 执行完成, 耗时: {}ms", getStepName(), elapsed);
         }
+    }
+
+    /**
+     * 是否允许当前处理器直接向上抛出异常。
+     *
+     * @return true 表示不再写入 interrupt 状态，而是让异常继续传播
+     */
+    protected boolean shouldPropagateException() {
+        return false;
     }
 
     /**

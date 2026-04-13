@@ -97,6 +97,13 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
         }
     }
 
+    /**
+     * 构建排程上下文
+     * <p>先解析本次排程配置快照，再按 scheduleDays 计算窗口起点 T 日</p>
+     *
+     * @param request 排程请求
+     * @return 排程上下文
+     */
     private LhScheduleContext buildContext(LhScheduleRequestDTO request) {
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode(request.getFactoryCode());

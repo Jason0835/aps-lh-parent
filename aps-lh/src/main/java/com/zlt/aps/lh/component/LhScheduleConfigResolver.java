@@ -28,6 +28,7 @@ import java.util.Map;
 @Component
 public class LhScheduleConfigResolver {
 
+    /** 参数 Map 预估容量，减少扩容开销 */
     private static final int DEFAULT_PARAM_CAPACITY = 48;
 
     @Resource
@@ -44,6 +45,12 @@ public class LhScheduleConfigResolver {
         context.setScheduleConfig(buildConfig(lhParamsMap));
     }
 
+    /**
+     * 按工厂加载原始硫化参数
+     *
+     * @param factoryCode 工厂编码
+     * @return 原始参数 Map
+     */
     private Map<String, String> loadLhParams(String factoryCode) {
         Map<String, String> lhParamsMap = new HashMap<>(DEFAULT_PARAM_CAPACITY);
         List<LhParams> paramsList = lhParamsMapper.selectList(
@@ -61,9 +68,17 @@ public class LhScheduleConfigResolver {
         return lhParamsMap;
     }
 
+    /**
+     * 生成“已解析配置快照”
+     * <p>每个参数都按“LhParams -> 常量默认值”落地为最终可用值</p>
+     *
+     * @param lhParamsMap 原始参数
+     * @return 已解析配置
+     */
     private LhScheduleConfig buildConfig(Map<String, String> lhParamsMap) {
         Map<String, String> resolvedParamMap = new HashMap<>(DEFAULT_PARAM_CAPACITY);
 
+        // 班次与时间窗口参数
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.NIGHT_START_HOUR, LhScheduleConstant.NIGHT_SHIFT_START_HOUR);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MORNING_START_HOUR, LhScheduleConstant.MORNING_SHIFT_START_HOUR);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.AFTERNOON_START_HOUR, LhScheduleConstant.AFTERNOON_SHIFT_START_HOUR);
@@ -72,6 +87,8 @@ public class LhScheduleConfigResolver {
                 LhScheduleConstant.NO_MOULD_CHANGE_START_HOUR);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.NO_MOULD_CHANGE_END_HOUR,
                 LhScheduleConstant.NO_MOULD_CHANGE_END_HOUR);
+
+        // 换模与首检参数
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.DAILY_MOULD_CHANGE_LIMIT,
                 LhScheduleConstant.DEFAULT_DAILY_MOULD_CHANGE_LIMIT);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MORNING_MOULD_CHANGE_LIMIT,
@@ -88,11 +105,15 @@ public class LhScheduleConfigResolver {
                 LhScheduleConstant.FIRST_INSPECTION_HOURS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MAX_FIRST_INSPECTION_PER_SHIFT,
                 LhScheduleConstant.MAX_FIRST_INSPECTION_PER_SHIFT);
+
+        // 收尾判定参数
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.ENDING_DETECT_DAYS, LhScheduleConstant.DEFAULT_ENDING_DAYS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.STRUCTURE_ENDING_DAYS,
                 LhScheduleConstant.DEFAULT_STRUCTURE_ENDING_DAYS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.ENDING_TIME_TOLERANCE_MINUTES,
                 LhScheduleConstant.DEFAULT_ENDING_TIME_TOLERANCE_MINUTES);
+
+        // 清洗与保养参数
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.SAND_BLAST_WITH_INSPECTION_HOURS,
                 LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
@@ -102,9 +123,13 @@ public class LhScheduleConfigResolver {
                 LhScheduleConstant.MAINTENANCE_START_HOUR);
         putDoubleValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.CAPSULE_PREHEAT_HOURS,
                 LhScheduleConstant.CAPSULE_PREHEAT_HOURS.doubleValue());
+
+        // 排程窗口与设备约束参数
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.SCHEDULE_DAYS, LhScheduleConstant.SCHEDULE_DAYS, 1);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MACHINE_STOP_TIMEOUT_HOURS,
                 LhScheduleConstant.MACHINE_STOP_TIMEOUT_HOURS);
+
+        // 开停产与试制策略参数
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.SHUTDOWN_DAY_MINUS_3_RATE,
                 LhScheduleConstant.SHUTDOWN_DAY_MINUS_3_RATE);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.SHUTDOWN_DAY_MINUS_2_RATE,
@@ -118,10 +143,27 @@ public class LhScheduleConfigResolver {
         return new LhScheduleConfig(resolvedParamMap);
     }
 
+    /**
+     * 解析并写入整型参数
+     *
+     * @param resolvedParamMap 解析后参数
+     * @param lhParamsMap      原始参数
+     * @param paramCode        参数编码
+     * @param defaultValue     默认值
+     */
     private void putIntValue(Map<String, String> resolvedParamMap, Map<String, String> lhParamsMap, String paramCode, int defaultValue) {
         putIntValue(resolvedParamMap, lhParamsMap, paramCode, defaultValue, null);
     }
 
+    /**
+     * 解析并写入整型参数（可选最小值保护）
+     *
+     * @param resolvedParamMap 解析后参数
+     * @param lhParamsMap      原始参数
+     * @param paramCode        参数编码
+     * @param defaultValue     默认值
+     * @param minValue         最小值（null 表示不限制）
+     */
     private void putIntValue(Map<String, String> resolvedParamMap, Map<String, String> lhParamsMap,
             String paramCode, int defaultValue, Integer minValue) {
         int resolvedValue = defaultValue;
@@ -140,6 +182,14 @@ public class LhScheduleConfigResolver {
         resolvedParamMap.put(paramCode, String.valueOf(resolvedValue));
     }
 
+    /**
+     * 解析并写入浮点参数
+     *
+     * @param resolvedParamMap 解析后参数
+     * @param lhParamsMap      原始参数
+     * @param paramCode        参数编码
+     * @param defaultValue     默认值
+     */
     private void putDoubleValue(Map<String, String> resolvedParamMap, Map<String, String> lhParamsMap,
             String paramCode, double defaultValue) {
         double resolvedValue = defaultValue;

@@ -16,8 +16,14 @@ import java.util.Map;
  */
 public class LhScheduleConfig {
 
+    /** 已解析的参数快照（值均为字符串，按需转换） */
     private final Map<String, String> resolvedParamMap;
 
+    /**
+     * 构造配置快照
+     *
+     * @param resolvedParamMap 已解析参数
+     */
     public LhScheduleConfig(Map<String, String> resolvedParamMap) {
         this.resolvedParamMap = new HashMap<>(resolvedParamMap);
     }
@@ -81,6 +87,9 @@ public class LhScheduleConfig {
         }
     }
 
+    /**
+     * 以下为常用业务参数的强类型快捷读取，避免调用方重复传参数编码与默认值。
+     */
     public int getScheduleDays() {
         return Math.max(1, getParamIntValue(LhScheduleParamConstant.SCHEDULE_DAYS, LhScheduleConstant.SCHEDULE_DAYS));
     }

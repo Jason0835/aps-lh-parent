@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.engine.strategy.IProductionShutdownStrategy;
@@ -49,9 +50,13 @@ public class DefaultProductionShutdownStrategy implements IProductionShutdownStr
             if (futureCalendar != null && isShutdownByCalendar(futureCalendar)) {
                 switch (offset) {
                     case 1:
-                        return BigDecimal.valueOf(LhScheduleConstant.SHUTDOWN_DAY_MINUS_1_RATE).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                        return BigDecimal.valueOf(context.getParamIntValue(LhScheduleParamConstant.SHUTDOWN_DAY_MINUS_1_RATE,
+                                        LhScheduleConstant.SHUTDOWN_DAY_MINUS_1_RATE))
+                                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
                     case 2:
-                        return BigDecimal.valueOf(LhScheduleConstant.SHUTDOWN_DAY_MINUS_2_RATE).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                        return BigDecimal.valueOf(context.getParamIntValue(LhScheduleParamConstant.SHUTDOWN_DAY_MINUS_2_RATE,
+                                        LhScheduleConstant.SHUTDOWN_DAY_MINUS_2_RATE))
+                                .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
                     default:
                         break;
                 }
@@ -87,7 +92,9 @@ public class DefaultProductionShutdownStrategy implements IProductionShutdownStr
 
         // 开产首日约50%产能
         if (isStartupDay(context, machineCode, targetDate)) {
-            int adjusted = (int) (originalCapacity * LhScheduleConstant.STARTUP_FIRST_DAY_RATE / 100.0);
+            int startupRate = context.getParamIntValue(LhScheduleParamConstant.STARTUP_FIRST_DAY_RATE,
+                    LhScheduleConstant.STARTUP_FIRST_DAY_RATE);
+            int adjusted = (int) (originalCapacity * startupRate / 100.0);
             log.debug("开产首日产能调整, 机台: {}, 原始: {}, 调整后: {}", machineCode, originalCapacity, adjusted);
             return adjusted;
         }

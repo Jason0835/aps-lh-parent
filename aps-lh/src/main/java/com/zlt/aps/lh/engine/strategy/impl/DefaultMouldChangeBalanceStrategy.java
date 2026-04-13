@@ -3,7 +3,6 @@
  */
 package com.zlt.aps.lh.engine.strategy.impl;
 
-import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
@@ -112,14 +111,14 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
     }
 
     private int getDailyLimit(LhScheduleContext context) {
-        return context.getParamIntValue("DAILY_MOULD_CHANGE_LIMIT", LhScheduleConstant.DEFAULT_DAILY_MOULD_CHANGE_LIMIT);
+        return LhScheduleTimeUtil.getDailyMouldChangeLimit(context);
     }
 
     private int getMorningLimit(LhScheduleContext context) {
-        return context.getParamIntValue("MORNING_MOULD_CHANGE_LIMIT", LhScheduleConstant.DEFAULT_MORNING_MOULD_CHANGE_LIMIT);
+        return LhScheduleTimeUtil.getMorningMouldChangeLimit(context);
     }
 
     private int getAfternoonLimit(LhScheduleContext context) {
-        return context.getParamIntValue("AFTERNOON_MOULD_CHANGE_LIMIT", LhScheduleConstant.DEFAULT_AFTERNOON_MOULD_CHANGE_LIMIT);
+        return LhScheduleTimeUtil.getAfternoonMouldChangeLimit(context);
     }
 }

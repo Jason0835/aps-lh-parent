@@ -19,11 +19,12 @@ public interface ICapacityCalculateStrategy {
      * 计算硫化班产
      * <p>公式: (班次时间-非生产作业时间) / 硫化时间 向下取整 * 模数</p>
      *
+     * @param context       排程上下文
      * @param lhTimeSeconds 硫化时间(秒)
      * @param mouldQty      模数
      * @return 班产量
      */
-    int calculateShiftCapacity(int lhTimeSeconds, int mouldQty);
+    int calculateShiftCapacity(LhScheduleContext context, int lhTimeSeconds, int mouldQty);
 
     /**
      * 计算开产时间

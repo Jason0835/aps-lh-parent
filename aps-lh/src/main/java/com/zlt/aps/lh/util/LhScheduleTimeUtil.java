@@ -22,6 +22,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 硫化排程时间工具类
@@ -33,86 +34,6 @@ public final class LhScheduleTimeUtil {
 
     private static final ZoneId DEFAULT_ZONE = ZoneId.systemDefault();
 
-    /**
-     * 参数代码 - 夜班开始小时
-     */
-    public static final String PARAM_NIGHT_START_HOUR = "NIGHT_START_HOUR";
-    
-    /**
-     * 参数代码 - 早班开始小时
-     */
-    public static final String PARAM_MORNING_START_HOUR = "MORNING_START_HOUR";
-    
-    /**
-     * 参数代码 - 中班开始小时
-     */
-    public static final String PARAM_AFTERNOON_START_HOUR = "AFTERNOON_START_HOUR";
-    
-    /**
-     * 参数代码 - 每班时长（小时）
-     */
-    public static final String PARAM_SHIFT_DURATION_HOURS = "SHIFT_DURATION_HOURS";
-    
-    /**
-     * 参数代码 - 禁止换模开始小时
-     */
-    public static final String PARAM_NO_MOULD_CHANGE_START = "NO_MOULD_CHANGE_START_HOUR";
-    
-    /**
-     * 参数代码 - 换模含预热时间（小时）
-     */
-    public static final String PARAM_MOULD_CHANGE_TOTAL_HOURS = "MOULD_CHANGE_TOTAL_HOURS";
-    
-    /**
-     * 参数代码 - 首检时间（小时）
-     */
-    public static final String PARAM_FIRST_INSPECTION_HOURS = "FIRST_INSPECTION_HOURS";
-    
-    /**
-     * 参数代码 - 每日换模上限
-     */
-    public static final String PARAM_DAILY_MOULD_CHANGE_LIMIT = "DAILY_MOULD_CHANGE_LIMIT";
-    
-    /**
-     * 参数代码 - 早班换模上限
-     */
-    public static final String PARAM_MORNING_MOULD_CHANGE_LIMIT = "MORNING_MOULD_CHANGE_LIMIT";
-    
-    /**
-     * 参数代码 - 中班换模上限
-     */
-    public static final String PARAM_AFTERNOON_MOULD_CHANGE_LIMIT = "AFTERNOON_MOULD_CHANGE_LIMIT";
-    
-    /**
-     * 参数代码 - 收尾判定天数（默认 3 天=9 班，但触发收尾标注是 3 天内）
-     */
-    public static final String PARAM_ENDING_DETECT_DAYS = "ENDING_DETECT_DAYS";
-    
-    /**
-     * 参数代码 - 结构收尾预判天数
-     */
-    public static final String PARAM_STRUCTURE_ENDING_DAYS = "STRUCTURE_ENDING_DAYS";
-    
-    /**
-     * 参数代码 - 机台收尾时间容差（分钟）
-     */
-    public static final String PARAM_ENDING_TOLERANCE_MINUTES = "ENDING_TIME_TOLERANCE_MINUTES";
-
-    /**
-     * 参数代码 - 保养耗时（小时）
-     */
-    public static final String PARAM_MAINTENANCE_DURATION_HOURS = "MAINTENANCE_DURATION_HOURS";
-
-    /**
-     * 参数代码 - 胶囊上机预热时间（小时，2.5h）
-     */
-    public static final String PARAM_CAPSULE_PREHEAT_HOURS = "CAPSULE_PREHEAT_HOURS";
-
-    /**
-     * 参数代码 - 排程天数（覆盖日历窗口 T～T+N-1）
-     */
-    public static final String PARAM_SCHEDULE_DAYS = "SCHEDULE_DAYS";
-
     private LhScheduleTimeUtil() {
     }
 
@@ -123,11 +44,10 @@ public final class LhScheduleTimeUtil {
      * @return 天数，至少为 1
      */
     public static int getScheduleDays(LhScheduleContext context) {
-        if (context == null) {
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
             return Math.max(1, LhScheduleConstant.SCHEDULE_DAYS);
         }
-        int days = context.getParamIntValue(PARAM_SCHEDULE_DAYS, LhScheduleConstant.SCHEDULE_DAYS);
-        return Math.max(1, days);
+        return context.getScheduleConfig().getScheduleDays();
     }
 
     /**
@@ -263,7 +183,10 @@ public final class LhScheduleTimeUtil {
      * @return 夜班开始小时
      */
     public static int getNightStartHour(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_NIGHT_START_HOUR, LhScheduleConstant.NIGHT_SHIFT_START_HOUR);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.NIGHT_SHIFT_START_HOUR;
+        }
+        return context.getScheduleConfig().getNightStartHour();
     }
 
     /**
@@ -273,7 +196,10 @@ public final class LhScheduleTimeUtil {
      * @return 早班开始小时
      */
     public static int getMorningStartHour(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_MORNING_START_HOUR, LhScheduleConstant.MORNING_SHIFT_START_HOUR);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.MORNING_SHIFT_START_HOUR;
+        }
+        return context.getScheduleConfig().getMorningStartHour();
     }
 
     /**
@@ -283,7 +209,10 @@ public final class LhScheduleTimeUtil {
      * @return 中班开始小时
      */
     public static int getAfternoonStartHour(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_AFTERNOON_START_HOUR, LhScheduleConstant.AFTERNOON_SHIFT_START_HOUR);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.AFTERNOON_SHIFT_START_HOUR;
+        }
+        return context.getScheduleConfig().getAfternoonStartHour();
     }
 
     /**
@@ -293,7 +222,10 @@ public final class LhScheduleTimeUtil {
      * @return 每班时长（小时）
      */
     public static int getShiftDurationHours(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_SHIFT_DURATION_HOURS, LhScheduleConstant.SHIFT_DURATION_HOURS);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.SHIFT_DURATION_HOURS;
+        }
+        return context.getScheduleConfig().getShiftDurationHours();
     }
 
     /**
@@ -303,7 +235,10 @@ public final class LhScheduleTimeUtil {
      * @return 换模总时长（小时）
      */
     public static int getMouldChangeTotalHours(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_MOULD_CHANGE_TOTAL_HOURS, LhScheduleConstant.MOULD_CHANGE_TOTAL_HOURS);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.MOULD_CHANGE_TOTAL_HOURS;
+        }
+        return context.getScheduleConfig().getMouldChangeTotalHours();
     }
 
     /**
@@ -313,7 +248,10 @@ public final class LhScheduleTimeUtil {
      * @return 首检时间（小时）
      */
     public static int getFirstInspectionHours(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_FIRST_INSPECTION_HOURS, LhScheduleConstant.FIRST_INSPECTION_HOURS);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.FIRST_INSPECTION_HOURS;
+        }
+        return context.getScheduleConfig().getFirstInspectionHours();
     }
 
     /**
@@ -323,7 +261,10 @@ public final class LhScheduleTimeUtil {
      * @return 禁止换模开始小时（默认20点）
      */
     public static int getNoMouldChangeStartHour(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_NO_MOULD_CHANGE_START, LhScheduleConstant.NO_MOULD_CHANGE_START_HOUR);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.NO_MOULD_CHANGE_START_HOUR;
+        }
+        return context.getScheduleConfig().getNoMouldChangeStartHour();
     }
 
     /**
@@ -333,7 +274,10 @@ public final class LhScheduleTimeUtil {
      * @return 每日换模总上限（默认15台）
      */
     public static int getDailyMouldChangeLimit(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_DAILY_MOULD_CHANGE_LIMIT, LhScheduleConstant.DEFAULT_DAILY_MOULD_CHANGE_LIMIT);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.DEFAULT_DAILY_MOULD_CHANGE_LIMIT;
+        }
+        return context.getScheduleConfig().getDailyMouldChangeLimit();
     }
 
     /**
@@ -343,7 +287,10 @@ public final class LhScheduleTimeUtil {
      * @return 早班换模上限（默认8台）
      */
     public static int getMorningMouldChangeLimit(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_MORNING_MOULD_CHANGE_LIMIT, LhScheduleConstant.DEFAULT_MORNING_MOULD_CHANGE_LIMIT);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.DEFAULT_MORNING_MOULD_CHANGE_LIMIT;
+        }
+        return context.getScheduleConfig().getMorningMouldChangeLimit();
     }
 
     /**
@@ -353,7 +300,10 @@ public final class LhScheduleTimeUtil {
      * @return 中班换模上限（默认7台）
      */
     public static int getAfternoonMouldChangeLimit(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_AFTERNOON_MOULD_CHANGE_LIMIT, LhScheduleConstant.DEFAULT_AFTERNOON_MOULD_CHANGE_LIMIT);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.DEFAULT_AFTERNOON_MOULD_CHANGE_LIMIT;
+        }
+        return context.getScheduleConfig().getAfternoonMouldChangeLimit();
     }
 
     /**
@@ -363,7 +313,10 @@ public final class LhScheduleTimeUtil {
      * @return 收尾判定天数
      */
     public static int getEndingDetectDays(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_ENDING_DETECT_DAYS, LhScheduleConstant.DEFAULT_ENDING_DAYS);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.DEFAULT_ENDING_DAYS;
+        }
+        return context.getScheduleConfig().getEndingDetectDays();
     }
 
     /**
@@ -373,7 +326,10 @@ public final class LhScheduleTimeUtil {
      * @return 收尾时间容差（分钟，默认20分钟）
      */
     public static int getEndingToleranceMinutes(LhScheduleContext context) {
-        return context.getParamIntValue(PARAM_ENDING_TOLERANCE_MINUTES, LhScheduleConstant.DEFAULT_ENDING_TIME_TOLERANCE_MINUTES);
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.DEFAULT_ENDING_TIME_TOLERANCE_MINUTES;
+        }
+        return context.getScheduleConfig().getEndingTimeToleranceMinutes();
     }
 
     /**

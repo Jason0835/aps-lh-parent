@@ -3,7 +3,6 @@
  */
 package com.zlt.aps.lh.engine.strategy.impl;
 
-import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
@@ -220,7 +219,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                 .min(Comparator.naturalOrder())
                 .orElse(null);
 
-        int toleranceMinutes = LhScheduleConstant.DEFAULT_ENDING_TIME_TOLERANCE_MINUTES;
+        int toleranceMinutes = LhScheduleTimeUtil.getEndingToleranceMinutes(context);
 
         candidates.sort(
                 // 同规格优先

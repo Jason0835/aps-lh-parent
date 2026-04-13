@@ -4,6 +4,7 @@
 package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
@@ -34,7 +35,8 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
             return null;
         }
 
-        int maxPerShift = context.getParamIntValue("MAX_FIRST_INSPECTION_PER_SHIFT", LhScheduleConstant.MAX_FIRST_INSPECTION_PER_SHIFT);
+        int maxPerShift = context.getParamIntValue(LhScheduleParamConstant.MAX_FIRST_INSPECTION_PER_SHIFT,
+                LhScheduleConstant.MAX_FIRST_INSPECTION_PER_SHIFT);
 
         // 首检时间 = 换模完成时间（上机后的首检）
         Date inspectionTime = mouldChangeTime;
@@ -87,7 +89,7 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
      * <p>中班可安排首检的时间窗口：14:00-20:00（禁止换模开始时间之前），需能完成换模+首检</p>
      */
     private boolean isAfternoonWindowValid(LhScheduleContext context, Date inspectionTime) {
-        int noMouldChangeStartHour = LhScheduleConstant.NO_MOULD_CHANGE_START_HOUR;
+        int noMouldChangeStartHour = LhScheduleTimeUtil.getNoMouldChangeStartHour(context);
         // 首检需在20:00前开始
         java.util.Calendar cal = java.util.Calendar.getInstance();
         cal.setTime(inspectionTime);

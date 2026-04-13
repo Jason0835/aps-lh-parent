@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
@@ -46,7 +47,7 @@ public class DefaultTrialProductionStrategy implements ITrialProductionStrategy 
         if (targetDate == null) {
             return true;
         }
-        int limit = LhScheduleConstant.TRIAL_DAILY_LIMIT;
+        int limit = context.getParamIntValue(LhScheduleParamConstant.TRIAL_DAILY_LIMIT, LhScheduleConstant.TRIAL_DAILY_LIMIT);
         long trialCount = context.getScheduleResultList().stream()
                 .filter(r -> "1".equals(r.getIsTrial()))
                 .filter(r -> isSameDay(r.getScheduleDate(), targetDate))

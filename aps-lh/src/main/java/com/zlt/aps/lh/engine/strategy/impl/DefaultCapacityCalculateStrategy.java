@@ -4,6 +4,7 @@
 package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
@@ -26,12 +27,12 @@ import java.util.Date;
 public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrategy {
 
     @Override
-    public int calculateShiftCapacity(int lhTimeSeconds, int mouldQty) {
+    public int calculateShiftCapacity(LhScheduleContext context, int lhTimeSeconds, int mouldQty) {
         if (lhTimeSeconds <= 0 || mouldQty <= 0) {
             return 0;
         }
         // 计算公式：(班次时间秒数 / 硫化时间秒数) 向下取整 * 模数
-        int shiftSeconds = LhScheduleConstant.SHIFT_DURATION_HOURS * 3600;
+        int shiftSeconds = LhScheduleTimeUtil.getShiftDurationHours(context) * 3600;
         return (shiftSeconds / lhTimeSeconds) * mouldQty;
     }
 
@@ -112,11 +113,13 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
             return null;
         }
 
-        int maintenanceStartHour = LhScheduleConstant.MAINTENANCE_START_HOUR;
+        int maintenanceStartHour = context.getParamIntValue(LhScheduleParamConstant.MAINTENANCE_START_HOUR,
+                LhScheduleConstant.MAINTENANCE_START_HOUR);
         Date maintenanceStart = LhScheduleTimeUtil.buildTime(maintenancePlanDate, maintenanceStartHour, 0, 0);
 
         // 保养时间7小时
-        int maintenanceDurationHours = LhScheduleConstant.MAINTENANCE_DURATION_HOURS;
+        int maintenanceDurationHours = context.getParamIntValue(LhScheduleParamConstant.MAINTENANCE_DURATION_HOURS,
+                LhScheduleConstant.MAINTENANCE_DURATION_HOURS);
         Date maintenanceEnd = LhScheduleTimeUtil.addHours(maintenanceStart, maintenanceDurationHours);
 
         // 语义为机台保养完成后的就绪时间
@@ -147,7 +150,9 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
         }
 
         // 维修固定从8:00开始
-        Date repairStart = LhScheduleTimeUtil.buildTime(repairPlanTime, LhScheduleConstant.MAINTENANCE_START_HOUR, 0, 0);
+        int maintenanceStartHour = context.getParamIntValue(LhScheduleParamConstant.MAINTENANCE_START_HOUR,
+                LhScheduleConstant.MAINTENANCE_START_HOUR);
+        Date repairStart = LhScheduleTimeUtil.buildTime(repairPlanTime, maintenanceStartHour, 0, 0);
 
         // 从设备停机计划中获取维修时长（暂用8小时作为默认）
         int repairDurationHours = 8;
@@ -181,12 +186,16 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
         }
 
         if (machineDTO.isHasSandBlastCleaning()) {
-            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
+            int durationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_WITH_INSPECTION_HOURS,
                     LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
+            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
+                    durationHours);
         }
         if (machineDTO.isHasDryIceCleaning()) {
-            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
+            int durationHours = context.getParamIntValue(LhScheduleParamConstant.DRY_ICE_DURATION_HOURS,
                     LhScheduleConstant.DRY_ICE_DURATION_HOURS);
+            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
+                    durationHours);
         }
         return null;
     }

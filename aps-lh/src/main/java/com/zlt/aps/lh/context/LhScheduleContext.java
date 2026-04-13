@@ -26,6 +26,7 @@ import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.*;
+import java.util.Objects;
 
 /**
  * 硫化排程上下文
@@ -54,6 +55,8 @@ public class LhScheduleContext {
     private String monthPlanVersion;
     /** 月计划排产版本 */
     private String productionVersion;
+    /** 本次排程配置快照 */
+    private LhScheduleConfig scheduleConfig;
 
     // ========== 硫化参数(从LhParams加载) ==========
 
@@ -165,6 +168,9 @@ public class LhScheduleContext {
      * @return 参数值
      */
     public String getParamValue(String paramCode, String defaultValue) {
+        if (Objects.nonNull(scheduleConfig)) {
+            return scheduleConfig.getParamValue(paramCode, defaultValue);
+        }
         return lhParamsMap.getOrDefault(paramCode, defaultValue);
     }
 
@@ -176,8 +182,11 @@ public class LhScheduleContext {
      * @return 参数值(整数)
      */
     public int getParamIntValue(String paramCode, int defaultValue) {
+        if (Objects.nonNull(scheduleConfig)) {
+            return scheduleConfig.getParamIntValue(paramCode, defaultValue);
+        }
         String value = lhParamsMap.get(paramCode);
-        if (value == null || value.trim().isEmpty()) {
+        if (StringUtils.isEmpty(value)) {
             return defaultValue;
         }
         try {

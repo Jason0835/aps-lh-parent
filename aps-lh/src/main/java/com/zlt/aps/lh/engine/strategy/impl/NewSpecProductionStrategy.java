@@ -292,7 +292,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             if (startTime.equals(effectiveStart)) {
                 shiftMaxQty = capacityCalculate.calculateFirstShiftQty(effectiveStart, shift.getShiftEndDateTime(), lhTimeSeconds, mouldQty);
             } else {
-                shiftMaxQty = capacityCalculate.calculateShiftCapacity(lhTimeSeconds, mouldQty);
+                shiftMaxQty = capacityCalculate.calculateShiftCapacity(context, lhTimeSeconds, mouldQty);
             }
 
             int shiftQty = Math.min(remaining, shiftMaxQty);

@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
+import com.zlt.aps.lh.api.enums.FactoryCodeEnum;
 import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
 import com.zlt.aps.lh.component.LhScheduleConfigResolver;
 import com.zlt.aps.lh.component.ScheduleExecutionGuard;
@@ -114,7 +115,10 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
      */
     private LhScheduleContext buildContext(LhScheduleRequestDTO request) {
         LhScheduleContext context = new LhScheduleContext();
-        context.setFactoryCode(request.getFactoryCode());
+        String factoryCode = request.getFactoryCode();
+        context.setFactoryCode(factoryCode);
+        // 工厂名称来源于工厂枚举：116=越南，117=泰国
+        context.setFactoryName(FactoryCodeEnum.getFactoryNameByCode(factoryCode));
         // 请求日期为排程目标日
         Date target = LhScheduleTimeUtil.clearTime(
                 request.getScheduleDate() != null ? request.getScheduleDate() : new Date());

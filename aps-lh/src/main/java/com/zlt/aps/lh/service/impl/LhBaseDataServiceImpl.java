@@ -44,6 +44,7 @@ import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -70,6 +71,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /** 排产版本已定稿（与 MpFactoryProductionVersion.isFinal 一致） */
     private static final String PRODUCTION_VERSION_IS_FINAL = "1";
+
+    /** 查询最新排产版本时返回前两条，用于判断是否存在多条数据 */
+    private static final String FINAL_PRODUCTION_VERSION_LIMIT_TWO = "LIMIT 2";
 
     @Resource
     private FactoryMonthPlanProductionFinalResultMapper monthPlanMapper;
@@ -224,39 +228,61 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param month       月份（1-12）
      */
     private void loadFinalProductionVersion(LhScheduleContext context, String factoryCode, int year, int month) {
-        Long total = mpFactoryProductionVersionMapper.selectCount(wrapFinalProductionVersion(factoryCode, year, month));
-        if (total == null || total == 0) {
-            log.error("定稿排产版本无数据, 工厂: {}, 年: {}, 月: {}", factoryCode, year, month);
-            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT, ScheduleErrorCode.DATA_INCOMPLETE,
-                    String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
-            return;
-        }
-        if (total > 1) {
-            log.warn("定稿排产版本多条(共{}条)，取更新时间最新一条, 工厂: {}, 年: {}, 月: {}",
-                    total, factoryCode, year, month);
-        }
+        // 仅查询前两条：第一条用于取值，第二条用于判断是否存在多条记录
         List<MpFactoryProductionVersion> list = mpFactoryProductionVersionMapper.selectList(
                 wrapFinalProductionVersion(factoryCode, year, month)
                         .orderByDesc(MpFactoryProductionVersion::getUpdateTime)
                         .orderByDesc(MpFactoryProductionVersion::getId)
-                        .last("LIMIT 1"));
-        if (list == null || list.isEmpty()) {
-            log.error("定稿排产版本查询最新一条无结果, 工厂: {}, 年: {}, 月: {}", factoryCode, year, month);
-            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT, ScheduleErrorCode.DATA_INCOMPLETE,
-                    String.format("工厂%s、年%d、月%d没定稿数据", factoryCode, year, month));
+                        .last(FINAL_PRODUCTION_VERSION_LIMIT_TWO));
+        String locationText = formatFactoryYearMonth(context.getFactoryDisplayName(), year, month);
+        if (CollectionUtils.isEmpty(list)) {
+            log.error("定稿排产版本无数据, 工厂: {}, 年: {}, 月: {}", factoryCode, year, month);
+            interruptByDataIncomplete(context, String.format("%s 未找到定稿排产版本数据", locationText));
             return;
+        }
+        if (list.size() > 1) {
+            log.warn("定稿排产版本存在多条，已按更新时间最新取值, 工厂: {}, 年: {}, 月: {}",
+                    factoryCode, year, month);
         }
         MpFactoryProductionVersion row = list.get(0);
         String pv = row.getProductionVersion();
-        if (pv == null || pv.isEmpty()) {
+        if (StringUtils.isEmpty(pv)) {
             log.error("定稿排产版本号为空, 工厂: {}, 年: {}, 月: {}, id: {}",
                     factoryCode, year, month, row.getId());
-            ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT, ScheduleErrorCode.DATA_INCOMPLETE,
-                    String.format("定稿排产版本记录中排产版本号为空，工厂=%s 年=%d 月=%d", factoryCode, year, month));
+            interruptByDataIncomplete(context, String.format("%s 的定稿排产版本号为空", locationText));
             return;
         }
         context.setProductionVersion(pv);
         log.debug("定稿排产版本加载完成, productionVersion: {}", pv);
+    }
+
+    /**
+     * 中断排程并返回基础数据不完整错误
+     *
+     * @param context 排程上下文
+     * @param message 异常消息
+     * @return
+     */
+    private void interruptByDataIncomplete(LhScheduleContext context, String message) {
+        ScheduleDomainExceptionHelper.interrupt(
+                context,
+                ScheduleStepEnum.S4_2_DATA_INIT,
+                ScheduleErrorCode.DATA_INCOMPLETE,
+                message
+        );
+    }
+
+    /**
+     * 统一格式化异常提示中的工厂与年月信息
+     *
+     * @param factoryName 分厂名称
+     * @param year        年份
+     * @param month       月份（1-12）
+     * @return
+     */
+    private String formatFactoryYearMonth(String factoryName, int year, int month) {
+        String yearMonthText = String.format("%04d-%02d", year, month);
+        return String.format("工厂【%s】 计划月份【%s】", factoryName, yearMonthText);
     }
 
     /** 定稿排产版本：工厂 + 年月 + 已定稿 + 未删除 */

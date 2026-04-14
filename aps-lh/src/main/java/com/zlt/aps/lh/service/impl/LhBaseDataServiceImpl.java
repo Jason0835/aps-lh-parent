@@ -202,7 +202,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      */
     private void loadPreviousScheduleResults(LhScheduleContext context, String factoryCode, Date targetDate) {
         Date previousDate = LhScheduleTimeUtil.addDays(targetDate, -1);
-        List<LhScheduleResult> list = lhScheduleResultMapper.selectPreviousSchedule(previousDate, factoryCode);
+        List<LhScheduleResult> list = lhScheduleResultMapper.selectList(new LambdaQueryWrapper<LhScheduleResult>()
+                .eq(LhScheduleResult::getFactoryCode, factoryCode)
+                .eq(LhScheduleResult::getScheduleDate, previousDate)
+                .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         if (list == null || list.isEmpty()) {
             log.info("未找到前日排程数据, 日期: {}", LhScheduleTimeUtil.getDateStr(previousDate));
             context.setPreviousScheduleResultList(new ArrayList<>());

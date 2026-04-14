@@ -1,5 +1,6 @@
 package com.zlt.aps.lh.mapper;
 
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
@@ -12,15 +13,7 @@ import java.util.List;
  * @author APS
  */
 @Mapper
-public interface LhScheduleProcessLogMapper {
-
-    /**
-     * 根据批次号删除日志
-     *
-     * @param batchNo 批次号
-     * @return 删除记录数
-     */
-    int deleteByBatchNo(@Param("batchNo") String batchNo);
+public interface LhScheduleProcessLogMapper extends BaseMapper<LhScheduleProcessLog> {
 
     /**
      * 批量插入排程过程日志
@@ -29,12 +22,4 @@ public interface LhScheduleProcessLogMapper {
      * @return 插入记录数
      */
     int insertBatch(@Param("list") List<LhScheduleProcessLog> list);
-
-    /**
-     * 根据批次号查询日志
-     *
-     * @param batchNo 批次号
-     * @return 日志列表
-     */
-    List<LhScheduleProcessLog> selectByBatchNo(@Param("batchNo") String batchNo);
 }

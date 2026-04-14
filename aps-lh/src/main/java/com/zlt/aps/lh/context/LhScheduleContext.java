@@ -41,6 +41,8 @@ public class LhScheduleContext {
 
     /** 分厂编号 */
     private String factoryCode;
+    /** 分厂名称 */
+    private String factoryName;
     /** 排程目标日（与请求体日期一致，如业务上的 T+2） */
     private Date scheduleTargetDate;
     /**
@@ -204,6 +206,19 @@ public class LhScheduleContext {
     public void interruptSchedule(String reason) {
         this.interrupted = true;
         this.interruptReason = reason;
+    }
+
+    /**
+     * 获取工厂展示名称
+     * <p>优先使用工厂名称，未设置时回退工厂编号。</p>
+     *
+     * @return 工厂展示名称
+     */
+    public String getFactoryDisplayName() {
+        if (StringUtils.isNotEmpty(factoryName)) {
+            return factoryName;
+        }
+        return factoryCode;
     }
 
 }

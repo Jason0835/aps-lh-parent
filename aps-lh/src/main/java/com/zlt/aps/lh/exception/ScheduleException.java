@@ -113,12 +113,6 @@ public class ScheduleException extends RuntimeException {
             sb.append(errorCode.getCode()).append(": ");
         }
         sb.append(super.getMessage());
-        if (StringUtils.isNotEmpty(factoryCode)) {
-            sb.append(", factory=").append(factoryCode);
-        }
-        if (StringUtils.isNotEmpty(batchNo)) {
-            sb.append(", batchNo=").append(batchNo);
-        }
         return sb.toString();
     }
 }

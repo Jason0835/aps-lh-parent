@@ -20,7 +20,8 @@ public class MouldRelationValidator implements IDataValidator {
     public boolean validate(LhScheduleContext context) {
         if (context.getSkuMouldRelMap() == null || context.getSkuMouldRelMap().isEmpty()) {
             log.warn("SKU与模具关系数据为空, 工厂: {}", context.getFactoryCode());
-            context.addValidationError("[" + getValidatorName() + "] SKU与模具关系数据为空, 工厂: " + context.getFactoryCode());
+            context.addValidationError("[" + getValidatorName() + "] SKU与模具关系数据为空, 工厂: "
+                    + context.getFactoryDisplayName());
             return false;
         }
         long missingMouldCount = context.getMonthPlanList().stream()
@@ -29,7 +30,8 @@ public class MouldRelationValidator implements IDataValidator {
                 .count();
         if (missingMouldCount > 0) {
             log.warn("有{}个月计划SKU缺少模具关系数据（可能正常，如续作时已有模具）", missingMouldCount);
-            context.addValidationError("[" + getValidatorName() + "] 月计划SKU缺少模具关系数据, 工厂: " + context.getFactoryCode());
+            context.addValidationError("[" + getValidatorName() + "] 月计划SKU缺少模具关系数据, 工厂: "
+                    + context.getFactoryDisplayName());
             return false;
         }
         log.info("模具关系校验通过, SKU模具关系数: {}", context.getSkuMouldRelMap().size());

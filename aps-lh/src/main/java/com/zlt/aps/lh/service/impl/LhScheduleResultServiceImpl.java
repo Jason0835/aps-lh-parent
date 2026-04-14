@@ -31,12 +31,18 @@ public class LhScheduleResultServiceImpl implements ILhScheduleResultService {
 
     @Override
     public List<LhScheduleResult> selectByDateAndFactory(Date scheduleDate, String factoryCode) {
-        return mapper.selectByDateAndFactory(scheduleDate, factoryCode);
+        return mapper.selectList(new LambdaQueryWrapper<LhScheduleResult>()
+                .eq(LhScheduleResult::getFactoryCode, factoryCode)
+                .eq(LhScheduleResult::getScheduleDate, scheduleDate)
+                .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
     }
 
     @Override
     public List<LhScheduleResult> selectPreviousSchedule(Date scheduleDate, String factoryCode) {
-        return mapper.selectPreviousSchedule(scheduleDate, factoryCode);
+        return mapper.selectList(new LambdaQueryWrapper<LhScheduleResult>()
+                .eq(LhScheduleResult::getFactoryCode, factoryCode)
+                .eq(LhScheduleResult::getScheduleDate, scheduleDate)
+                .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
     }
 
     @Override

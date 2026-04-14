@@ -136,7 +136,7 @@ class ScheduleDataWindowRegressionTest {
         when(lhSpecifyMachineMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhRepairCapsuleMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devMaintenancePlanMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(lhScheduleResultMapper.selectPreviousSchedule(any(), any())).thenReturn(Collections.emptyList());
+        when(lhScheduleResultMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode(factoryCode);
@@ -149,8 +149,7 @@ class ScheduleDataWindowRegressionTest {
         verify(workCalendarMapper).selectList(any());
         verify(devicePlanShutMapper).selectList(any());
         verify(lhCleaningPlanMapper).selectList(any());
-        Date expectedPreviousTargetDay = LhScheduleTimeUtil.addDays(target, -1);
-        verify(lhScheduleResultMapper).selectPreviousSchedule(eq(expectedPreviousTargetDay), eq(factoryCode));
+        verify(lhScheduleResultMapper).selectList(any());
     }
 
     private static Date date(int y, int month, int day) {

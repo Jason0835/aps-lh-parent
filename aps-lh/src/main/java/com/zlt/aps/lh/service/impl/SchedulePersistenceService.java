@@ -2,6 +2,7 @@ package com.zlt.aps.lh.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
@@ -102,7 +103,9 @@ public class SchedulePersistenceService {
 
         int deletedLogCount = 0;
         for (String batchNo : oldBatchNos) {
-            deletedLogCount += processLogMapper.deleteByBatchNo(batchNo);
+            deletedLogCount += processLogMapper.delete(new LambdaQueryWrapper<LhScheduleProcessLog>()
+                    .eq(LhScheduleProcessLog::getBatchNo, batchNo)
+                    .eq(LhScheduleProcessLog::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         }
 
         if (!context.getScheduleResultList().isEmpty()) {

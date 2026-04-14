@@ -14,8 +14,8 @@ import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhRepairCapsule;
+import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhRepairCapsule;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
@@ -88,11 +88,11 @@ public class LhScheduleContext {
     /** 物料信息Map, key=materialCode */
     private Map<String, MdmMaterialInfo> materialInfoMap = new HashMap<>();
     /** MES硫化在机信息Map, key=machineCode */
-    private Map<String, MdmLhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>();
+    private Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>();
     /** 硫化定点机台Map, key=specCode */
     private Map<String, List<LhSpecifyMachine>> specifyMachineMap = new HashMap<>();
     /** 硫化机胶囊已使用次数Map, key=machineCode */
-    private Map<String, MdmLhRepairCapsule> capsuleUsageMap = new HashMap<>();
+    private Map<String, LhRepairCapsule> capsuleUsageMap = new HashMap<>();
     /** 设备保养计划Map, key=devCode */
     private Map<String, MdmDevMaintenancePlan> maintenancePlanMap = new HashMap<>();
 

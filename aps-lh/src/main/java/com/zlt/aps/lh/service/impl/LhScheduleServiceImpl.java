@@ -52,7 +52,8 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
 
     @Override
     public LhScheduleResponseDTO executeSchedule(LhScheduleRequestDTO request) {
-        log.info("接收排程请求, 工厂: {}, 日期: {}", request.getFactoryCode(), request.getScheduleDate());
+        log.info("接收排程请求, 工厂: {}, 日期: {}",
+                request.getFactoryCode(), LhScheduleTimeUtil.formatDate(request.getScheduleDate()));
         LhScheduleContext context = buildContext(request);
         String lockToken = null;
         try {
@@ -60,10 +61,11 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
             return scheduleExecutor.execute(context);
         } catch (ScheduleException e) {
             log.warn("排程请求被拒绝, 工厂: {}, 日期: {}, 原因: {}",
-                    context.getFactoryCode(), context.getScheduleTargetDate(), e.getMessage());
+                    context.getFactoryCode(), LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()), e.getMessage());
             return LhScheduleResponseDTO.fail(context.getBatchNo(), e.getMessage());
         } catch (Exception e) {
-            log.error("排程服务入口异常, 工厂: {}, 日期: {}", context.getFactoryCode(), context.getScheduleTargetDate(), e);
+            log.error("排程服务入口异常, 工厂: {}, 日期: {}",
+                    context.getFactoryCode(), LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()), e);
             return LhScheduleResponseDTO.fail(context.getBatchNo(), "排程执行异常: " + e.getMessage());
         } finally {
             scheduleExecutionGuard.release(context.getFactoryCode(), context.getScheduleTargetDate(), lockToken);

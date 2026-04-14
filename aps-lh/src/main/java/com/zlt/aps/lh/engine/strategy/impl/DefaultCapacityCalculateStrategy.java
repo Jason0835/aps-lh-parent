@@ -62,7 +62,8 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
             maxStartTime = cleaningStartTime;
         }
 
-        log.debug("计算机台准备就绪时间, 机台: {}, 收尾时间: {}, 就绪时间: {}", machineCode, endingTime, maxStartTime);
+        log.debug("计算机台准备就绪时间, 机台: {}, 收尾时间: {}, 就绪时间: {}",
+                machineCode, LhScheduleTimeUtil.formatDateTime(endingTime), LhScheduleTimeUtil.formatDateTime(maxStartTime));
         return maxStartTime;
     }
 

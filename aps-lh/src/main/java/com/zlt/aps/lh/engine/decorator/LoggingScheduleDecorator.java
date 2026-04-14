@@ -2,6 +2,7 @@ package com.zlt.aps.lh.engine.decorator;
 
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -21,7 +22,9 @@ public class LoggingScheduleDecorator extends AbsScheduleExecutorDecorator {
     public LhScheduleResponseDTO execute(LhScheduleContext context) {
         log.info("====== [日志装饰器] 排程执行开始 ======");
         log.info("工厂编号: {}", context.getFactoryCode());
-        log.info("排程目标日: {}, T日: {}", context.getScheduleTargetDate(), context.getScheduleDate());
+        log.info("排程目标日: {}, T日: {}",
+                LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()),
+                LhScheduleTimeUtil.formatDate(context.getScheduleDate()));
         log.info("批次号: {}", context.getBatchNo());
 
         LhScheduleResponseDTO response = super.execute(context);

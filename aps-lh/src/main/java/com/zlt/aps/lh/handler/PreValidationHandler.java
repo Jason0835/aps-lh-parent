@@ -46,7 +46,7 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
         String factoryCode = context.getFactoryCode();
         int releasedCount = scheduleResultService.countReleasedByDate(targetDate, factoryCode);
         if (releasedCount > 0) {
-            log.warn("排程被拒绝: 日期[{}]已有已发布排程, 数量: {}", LhScheduleTimeUtil.getDateStr(targetDate), releasedCount);
+            log.warn("排程被拒绝: 日期[{}]已有已发布排程, 数量: {}", LhScheduleTimeUtil.formatDate(targetDate), releasedCount);
             throw new ScheduleException(ScheduleStepEnum.S4_1_PRE_VALIDATION, ScheduleErrorCode.MES_RELEASED,
                     factoryCode, context.getBatchNo(),
                     "该日期排程已下发MES，请先撤销发布后再重新排程。排程日期: "

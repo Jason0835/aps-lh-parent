@@ -15,8 +15,8 @@ import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.service.ILhShiftConfigService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhRepairCapsule;
+import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhRepairCapsule;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -70,7 +70,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         if (result.isFailed()) {
             log.warn("数据校验未通过，共 {} 条错误，明细: {}", result.getErrors().size(), result.getFormattedErrors());
             ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT,
-                    ScheduleErrorCode.DATA_INCOMPLETE, result.getSummaryMessage());
+                    ScheduleErrorCode.DATA_INCOMPLETE, result.getSummaryMessage(), result.getErrors());
             return;
         }
 
@@ -127,7 +127,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
             // 初始化在产规格（来自MES在机信息）
             if (context.getMachineOnlineInfoMap().containsKey(machineCode)) {
-                MdmLhMachineOnlineInfo onlineInfo = context.getMachineOnlineInfoMap().get(machineCode);
+                LhMachineOnlineInfo onlineInfo = context.getMachineOnlineInfoMap().get(machineCode);
                 dto.setCurrentMaterialCode(onlineInfo.getMaterialCode());
                 dto.setCurrentMaterialDesc(onlineInfo.getSpecDesc());
                 MdmMaterialInfo currentMaterial = context.getMaterialInfoMap().get(onlineInfo.getMaterialCode());
@@ -182,7 +182,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
             // 初始化胶囊使用次数
             if (context.getCapsuleUsageMap().containsKey(machineCode)) {
-                MdmLhRepairCapsule capsule = context.getCapsuleUsageMap().get(machineCode);
+                LhRepairCapsule capsule = context.getCapsuleUsageMap().get(machineCode);
                 dto.setCapsuleUsageCount(capsule.getReplaceCapsuleCount() != null ? capsule.getReplaceCapsuleCount() : 0);
                 dto.setCapsuleUsageCount2(capsule.getReplaceCapsuleCount2() != null ? capsule.getReplaceCapsuleCount2() : 0);
             }

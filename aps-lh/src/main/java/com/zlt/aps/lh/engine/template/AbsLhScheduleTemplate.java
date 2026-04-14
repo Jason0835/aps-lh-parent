@@ -4,6 +4,7 @@ import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.exception.ScheduleException;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 
@@ -33,7 +34,9 @@ public abstract class AbsLhScheduleTemplate {
     public final LhScheduleResponseDTO execute(LhScheduleContext context) {
         long startTime = System.currentTimeMillis();
         log.info("========== 硫化排程开始, 工厂:{}, 目标日:{}, T日:{} ==========",
-                context.getFactoryCode(), context.getScheduleTargetDate(), context.getScheduleDate());
+                context.getFactoryCode(),
+                LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()),
+                LhScheduleTimeUtil.formatDate(context.getScheduleDate()));
         try {
             // S4.1 前置校验与数据清理
             context.setCurrentStep(ScheduleStepEnum.S4_1_PRE_VALIDATION.getCode());

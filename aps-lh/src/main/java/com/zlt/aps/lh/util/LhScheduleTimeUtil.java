@@ -695,6 +695,32 @@ public final class LhScheduleTimeUtil {
     }
 
     /**
+     * 格式化日期（yyyy-MM-dd）。
+     *
+     * @param date 日期
+     * @return 格式化字符串，入参为null时返回null
+     */
+    public static String formatDate(Date date) {
+        if (Objects.isNull(date)) {
+            return null;
+        }
+        return DateUtil.format(date, DatePattern.NORM_DATE_PATTERN);
+    }
+
+    /**
+     * 格式化日期时间（yyyy-MM-dd HH:mm:ss）。
+     *
+     * @param date 日期时间
+     * @return 格式化字符串，入参为null时返回null
+     */
+    public static String formatDateTime(Date date) {
+        if (Objects.isNull(date)) {
+            return null;
+        }
+        return DateUtil.format(date, DatePattern.NORM_DATETIME_PATTERN);
+    }
+
+    /**
      * 按当前班次列表初始化上下文中的班次运行态 Map（key=班次索引，顺序与班次列表一致）
      *
      * @param context 排程上下文

@@ -85,7 +85,8 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
             adjustedTime = getNextMorningShiftStart(context, adjustedTime);
         }
 
-        log.warn("换模均衡分配失败，无可用换模班次, 原始时间: {}", endingTime);
+        log.warn("换模均衡分配失败，无可用换模班次, 原始时间: {}",
+                LhScheduleTimeUtil.formatDateTime(endingTime));
         return null;
     }
 

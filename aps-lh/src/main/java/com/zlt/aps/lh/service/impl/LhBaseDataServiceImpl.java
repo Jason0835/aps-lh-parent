@@ -17,8 +17,8 @@ import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
-import com.zlt.aps.lh.mapper.MdmLhMachineOnlineInfoMapper;
-import com.zlt.aps.lh.mapper.MdmLhRepairCapsuleMapper;
+import com.zlt.aps.lh.mapper.LhMachineOnlineInfoMapper;
+import com.zlt.aps.lh.mapper.LhRepairCapsuleMapper;
 import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
 import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
@@ -30,8 +30,8 @@ import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhRepairCapsule;
+import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhRepairCapsule;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
@@ -109,13 +109,13 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     private MdmMaterialInfoMapper mdmMaterialInfoMapper;
 
     @Resource
-    private MdmLhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
+    private LhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
 
     @Resource
     private LhSpecifyMachineMapper lhSpecifyMachineMapper;
 
     @Resource
-    private MdmLhRepairCapsuleMapper lhRepairCapsuleMapper;
+    private LhRepairCapsuleMapper lhRepairCapsuleMapper;
 
     @Resource
     private MdmDevMaintenancePlanMapper devMaintenancePlanMapper;
@@ -193,7 +193,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 16. 加载前日硫化排程结果
         loadPreviousScheduleResults(context, factoryCode, targetDate);
 
-        log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}", factoryCode, targetDate, scheduleDate);
+        log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}",
+                factoryCode, LhScheduleTimeUtil.formatDate(targetDate), LhScheduleTimeUtil.formatDate(scheduleDate));
     }
 
     /**
@@ -211,12 +212,12 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                 .eq(LhScheduleResult::getScheduleDate, previousDate)
                 .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         if (list == null || list.isEmpty()) {
-            log.info("未找到前日排程数据, 日期: {}", LhScheduleTimeUtil.getDateStr(previousDate));
+            log.info("未找到前日排程数据, 日期: {}", LhScheduleTimeUtil.formatDate(previousDate));
             context.setPreviousScheduleResultList(new ArrayList<>());
             return;
         }
         context.setPreviousScheduleResultList(list);
-        log.info("前日排程基础数据加载完成, 数量: {}, 日期: {}", list.size(), LhScheduleTimeUtil.getDateStr(previousDate));
+        log.info("前日排程基础数据加载完成, 数量: {}, 日期: {}", list.size(), LhScheduleTimeUtil.formatDate(previousDate));
     }
 
     /**
@@ -539,17 +540,17 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     private void loadMachineOnlineInfo(LhScheduleContext context, String factoryCode, Date onlineDate) {
         Date onlineDay = LhScheduleTimeUtil.clearTime(onlineDate);
         Date onlineDayNext = LhScheduleTimeUtil.addDays(onlineDay, 1);
-        List<MdmLhMachineOnlineInfo> machineOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
-                new LambdaQueryWrapper<MdmLhMachineOnlineInfo>()
-                        .eq(MdmLhMachineOnlineInfo::getFactoryCode, factoryCode)
-                        .ge(MdmLhMachineOnlineInfo::getOnlineDate, onlineDay)
-                        .lt(MdmLhMachineOnlineInfo::getOnlineDate, onlineDayNext)
-                        .and(w -> w.eq(MdmLhMachineOnlineInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
+        List<LhMachineOnlineInfo> machineOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
+                new LambdaQueryWrapper<LhMachineOnlineInfo>()
+                        .eq(LhMachineOnlineInfo::getFactoryCode, factoryCode)
+                        .ge(LhMachineOnlineInfo::getOnlineDate, onlineDay)
+                        .lt(LhMachineOnlineInfo::getOnlineDate, onlineDayNext)
+                        .and(w -> w.eq(LhMachineOnlineInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
                                 .or()
-                                .isNull(MdmLhMachineOnlineInfo::getIsDelete)));
-        Map<String, MdmLhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>(32);
+                                .isNull(LhMachineOnlineInfo::getIsDelete)));
+        Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>(32);
         if (machineOnlineInfoList != null) {
-            for (MdmLhMachineOnlineInfo onlineInfo : machineOnlineInfoList) {
+            for (LhMachineOnlineInfo onlineInfo : machineOnlineInfoList) {
                 if (onlineInfo.getLhCode() != null) {
                     machineOnlineInfoMap.put(onlineInfo.getLhCode(), onlineInfo);
                 }
@@ -590,13 +591,13 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode 分厂编号
      */
     private void loadCapsuleUsage(LhScheduleContext context, String factoryCode) {
-        List<MdmLhRepairCapsule> capsuleUsageList = lhRepairCapsuleMapper.selectList(
-                new LambdaQueryWrapper<MdmLhRepairCapsule>()
-                        .eq(MdmLhRepairCapsule::getFactoryCode, factoryCode)
-                        .eq(MdmLhRepairCapsule::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
-        Map<String, MdmLhRepairCapsule> capsuleUsageMap = new HashMap<>(32);
+        List<LhRepairCapsule> capsuleUsageList = lhRepairCapsuleMapper.selectList(
+                new LambdaQueryWrapper<LhRepairCapsule>()
+                        .eq(LhRepairCapsule::getFactoryCode, factoryCode)
+                        .eq(LhRepairCapsule::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        Map<String, LhRepairCapsule> capsuleUsageMap = new HashMap<>(32);
         if (capsuleUsageList != null) {
-            for (MdmLhRepairCapsule capsule : capsuleUsageList) {
+            for (LhRepairCapsule capsule : capsuleUsageList) {
                 if (capsule.getLhCode() != null) {
                     capsuleUsageMap.put(capsule.getLhCode(), capsule);
                 }

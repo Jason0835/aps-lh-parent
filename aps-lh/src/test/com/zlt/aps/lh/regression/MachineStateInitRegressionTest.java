@@ -9,7 +9,7 @@ import com.zlt.aps.lh.handler.DataInitHandler;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -44,7 +44,7 @@ class MachineStateInitRegressionTest {
         context.setMachineInfoMap(new LinkedHashMap<>());
         context.getMachineInfoMap().put("M1", machineInfo);
 
-        MdmLhMachineOnlineInfo onlineInfo = new MdmLhMachineOnlineInfo();
+        LhMachineOnlineInfo onlineInfo = new LhMachineOnlineInfo();
         onlineInfo.setLhCode("M1");
         onlineInfo.setMaterialCode("MAT-1");
         onlineInfo.setSpecDesc("在线描述");

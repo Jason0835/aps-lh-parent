@@ -11,7 +11,7 @@ import com.zlt.aps.lh.api.enums.SkuTagEnum;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
-import com.zlt.aps.mdm.api.domain.entity.MdmLhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
@@ -388,9 +388,9 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         if (materialCode == null) {
             return null;
         }
-        for (Map.Entry<String, MdmLhMachineOnlineInfo> entry
+        for (Map.Entry<String, LhMachineOnlineInfo> entry
                 : context.getMachineOnlineInfoMap().entrySet()) {
-            MdmLhMachineOnlineInfo onlineInfo = entry.getValue();
+            LhMachineOnlineInfo onlineInfo = entry.getValue();
             if (materialCode.equals(onlineInfo.getMaterialCode())) {
                 return entry.getKey();
             }

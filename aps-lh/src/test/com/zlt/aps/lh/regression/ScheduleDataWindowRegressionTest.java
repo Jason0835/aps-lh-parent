@@ -12,8 +12,8 @@ import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
-import com.zlt.aps.lh.mapper.MdmLhMachineOnlineInfoMapper;
-import com.zlt.aps.lh.mapper.MdmLhRepairCapsuleMapper;
+import com.zlt.aps.lh.mapper.LhMachineOnlineInfoMapper;
+import com.zlt.aps.lh.mapper.LhRepairCapsuleMapper;
 import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
 import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
@@ -69,11 +69,11 @@ class ScheduleDataWindowRegressionTest {
     @Mock
     private MdmMaterialInfoMapper mdmMaterialInfoMapper;
     @Mock
-    private MdmLhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
+    private LhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
     @Mock
     private LhSpecifyMachineMapper lhSpecifyMachineMapper;
     @Mock
-    private MdmLhRepairCapsuleMapper lhRepairCapsuleMapper;
+    private LhRepairCapsuleMapper lhRepairCapsuleMapper;
     @Mock
     private MdmDevMaintenancePlanMapper devMaintenancePlanMapper;
     @Mock

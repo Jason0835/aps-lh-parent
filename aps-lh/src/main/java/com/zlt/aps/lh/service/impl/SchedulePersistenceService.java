@@ -122,7 +122,7 @@ public class SchedulePersistenceService {
         }
 
         log.info("目标日排程原子替换完成, 工厂: {}, 日期: {}, 删除结果: {}, 删除未排: {}, 删除换模: {}, 删除日志: {}, 新结果: {}, 新未排: {}, 新换模: {}, 新日志: {}",
-                factoryCode, LhScheduleTimeUtil.getDateStr(targetDate),
+                factoryCode, LhScheduleTimeUtil.formatDate(targetDate),
                 deletedResultCount, deletedUnscheduledCount, deletedMouldPlanCount, deletedLogCount,
                 context.getScheduleResultList().size(), context.getUnscheduledResultList().size(),
                 context.getMouldChangePlanList().size(), context.getScheduleLogList().size());

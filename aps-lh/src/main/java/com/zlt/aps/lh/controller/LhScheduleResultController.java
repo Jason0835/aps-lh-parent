@@ -3,6 +3,7 @@ package com.zlt.aps.lh.controller;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.service.ILhScheduleService;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.extern.slf4j.Slf4j;
@@ -37,7 +38,8 @@ public class LhScheduleResultController {
     @PostMapping("/execute")
     @ApiOperation("执行自动排程")
     public LhScheduleResponseDTO executeSchedule(@RequestBody LhScheduleRequestDTO request) {
-        log.info("收到排程请求, 工厂: {}, 日期: {}", request.getFactoryCode(), request.getScheduleDate());
+        log.info("收到排程请求, 工厂: {}, 日期: {}",
+                request.getFactoryCode(), LhScheduleTimeUtil.formatDate(request.getScheduleDate()));
         return lhScheduleService.executeSchedule(request);
     }
 

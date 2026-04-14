@@ -177,7 +177,11 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 iterator.remove();
                 log.debug("新增排产完成, SKU: {}, 机台: {}, 机台就绪: {}, 换模开始: {}, 换模结束: {}, 首检开始: {}, 开产时间: {}",
                         sku.getMaterialCode(), bestMachine.getMachineCode(),
-                        machineReadyTime, mouldChangeStartTime, mouldChangeCompleteTime, inspectionTime, productionStartTime);
+                        LhScheduleTimeUtil.formatDateTime(machineReadyTime),
+                        LhScheduleTimeUtil.formatDateTime(mouldChangeStartTime),
+                        LhScheduleTimeUtil.formatDateTime(mouldChangeCompleteTime),
+                        LhScheduleTimeUtil.formatDateTime(inspectionTime),
+                        LhScheduleTimeUtil.formatDateTime(productionStartTime));
             } else {
                 addUnscheduledResult(context, sku, "排程窗口内无可用产能");
                 iterator.remove();

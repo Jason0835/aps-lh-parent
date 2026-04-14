@@ -80,7 +80,8 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
             inspectionTime = getNextDayMorningStart(context, inspectionTime);
         }
 
-        log.warn("首检均衡分配失败，无可用班次, 机台: {}, 换模时间: {}", machineCode, mouldChangeTime);
+        log.warn("首检均衡分配失败，无可用班次, 机台: {}, 换模时间: {}",
+                machineCode, LhScheduleTimeUtil.formatDateTime(mouldChangeTime));
         return null;
     }
 

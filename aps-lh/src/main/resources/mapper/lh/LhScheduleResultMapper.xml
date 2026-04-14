@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zlt.aps.lh.mapper.LhScheduleResultMapper">
+
+    <insert id="insertBatch">
+        INSERT INTO T_LH_SCHEDULE_RESULT (
+            FACTORY_CODE, BATCH_NO, ORDER_NO, LH_MACHINE_CODE, LEFT_RIGHT_MOULD,
+            LH_MACHINE_NAME, MATERIAL_CODE, SPEC_CODE, EMBRYO_CODE, STRUCTURE_NAME,
+            MATERIAL_DESC, MAIN_MATERIAL_DESC, EMBRYO_STOCK, SPEC_DESC, LH_TIME,
+            DAILY_PLAN_QTY, SCHEDULE_DATE, SPEC_END_TIME, PRODUCTION_STATUS,
+            CLASS1_PLAN_QTY, CLASS1_START_TIME, CLASS1_END_TIME, CLASS1_ANALYSIS, CLASS1_FINISH_QTY,
+            CLASS2_PLAN_QTY, CLASS2_START_TIME, CLASS2_END_TIME, CLASS2_ANALYSIS, CLASS2_FINISH_QTY,
+            CLASS3_PLAN_QTY, CLASS3_START_TIME, CLASS3_END_TIME, CLASS3_ANALYSIS, CLASS3_FINISH_QTY,
+            CLASS4_PLAN_QTY, CLASS4_START_TIME, CLASS4_END_TIME, CLASS4_ANALYSIS, CLASS4_FINISH_QTY,
+            CLASS5_PLAN_QTY, CLASS5_START_TIME, CLASS5_END_TIME, CLASS5_ANALYSIS, CLASS5_FINISH_QTY,
+            CLASS6_PLAN_QTY, CLASS6_START_TIME, CLASS6_END_TIME, CLASS6_ANALYSIS, CLASS6_FINISH_QTY,
+            CLASS7_PLAN_QTY, CLASS7_START_TIME, CLASS7_END_TIME, CLASS7_ANALYSIS, CLASS7_FINISH_QTY,
+            CLASS8_PLAN_QTY, CLASS8_START_TIME, CLASS8_END_TIME, CLASS8_ANALYSIS, CLASS8_FINISH_QTY,
+            IS_DELIVERY, IS_RELEASE, PUBLISH_SUCCESS_COUNT, NEWEST_PUBLISH_TIME,
+            DATA_SOURCE, MOULD_QTY, SINGLE_MOULD_SHIFT_QTY, MOULD_INFO, MOULD_METHOD,
+            CONSTRUCTION_STAGE, EMBRYO_NO, TEXT_NO, LH_NO, MONTH_PLAN_VERSION,
+            MACHINE_ORDER, IS_TRIAL, REAL_SCHEDULE_DATE, TDAY_SPEC_END_TIME,
+            IS_FIRST, MOULD_SURPLUS_QTY, IS_END, PRODUCTION_VERSION, MOULD_CODE,
+            IS_SPLIT, SCHEDULE_ORDER, SCHEDULE_TYPE, IS_CHANGE_MOULD, TOTAL_DAILY_PLAN_QTY,
+            CREATE_BY, CREATE_TIME, UPDATE_BY, UPDATE_TIME, REMARK, IS_DELETE
+        ) VALUES
+        <foreach collection="list" item="item" separator=",">
+            (
+                #{item.factoryCode}, #{item.batchNo}, #{item.orderNo}, #{item.lhMachineCode}, #{item.leftRightMould},
+                #{item.lhMachineName}, #{item.materialCode}, #{item.specCode}, #{item.embryoCode}, #{item.structureName},
+                #{item.materialDesc}, #{item.mainMaterialDesc}, #{item.embryoStock}, #{item.specDesc}, #{item.lhTime},
+                #{item.dailyPlanQty}, #{item.scheduleDate}, #{item.specEndTime}, #{item.productionStatus},
+                #{item.class1PlanQty}, #{item.class1StartTime}, #{item.class1EndTime}, #{item.class1Analysis}, #{item.class1FinishQty},
+                #{item.class2PlanQty}, #{item.class2StartTime}, #{item.class2EndTime}, #{item.class2Analysis}, #{item.class2FinishQty},
+                #{item.class3PlanQty}, #{item.class3StartTime}, #{item.class3EndTime}, #{item.class3Analysis}, #{item.class3FinishQty},
+                #{item.class4PlanQty}, #{item.class4StartTime}, #{item.class4EndTime}, #{item.class4Analysis}, #{item.class4FinishQty},
+                #{item.class5PlanQty}, #{item.class5StartTime}, #{item.class5EndTime}, #{item.class5Analysis}, #{item.class5FinishQty},
+                #{item.class6PlanQty}, #{item.class6StartTime}, #{item.class6EndTime}, #{item.class6Analysis}, #{item.class6FinishQty},
+                #{item.class7PlanQty}, #{item.class7StartTime}, #{item.class7EndTime}, #{item.class7Analysis}, #{item.class7FinishQty},
+                #{item.class8PlanQty}, #{item.class8StartTime}, #{item.class8EndTime}, #{item.class8Analysis}, #{item.class8FinishQty},
+                #{item.isDelivery}, #{item.isRelease}, #{item.publishSuccessCount}, #{item.newestPublishTime},
+                #{item.dataSource}, #{item.mouldQty}, #{item.singleMouldShiftQty}, #{item.mouldInfo}, #{item.mouldMethod},
+                #{item.constructionStage}, #{item.embryoNo}, #{item.textNo}, #{item.lhNo}, #{item.monthPlanVersion},
+                #{item.machineOrder}, #{item.isTrial}, #{item.realScheduleDate}, #{item.tdaySpecEndTime},
+                #{item.isFirst}, #{item.mouldSurplusQty}, #{item.isEnd}, #{item.productionVersion}, #{item.mouldCode},
+                #{item.isSplit}, #{item.scheduleOrder}, #{item.scheduleType}, #{item.isChangeMould}, #{item.totalDailyPlanQty},
+                #{item.createBy}, #{item.createTime}, #{item.updateBy}, #{item.updateTime}, #{item.remark}, #{item.isDelete}
+            )
+        </foreach>
+    </insert>
+
+</mapper>

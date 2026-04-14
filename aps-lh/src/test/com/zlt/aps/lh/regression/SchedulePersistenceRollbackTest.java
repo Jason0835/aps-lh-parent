@@ -71,12 +71,12 @@ class SchedulePersistenceRollbackTest {
         when(scheduleResultMapper.delete(any())).thenReturn(1);
         when(unscheduledResultMapper.delete(any())).thenReturn(0);
         when(mouldChangePlanMapper.delete(any())).thenReturn(0);
-        when(processLogMapper.deleteByBatchNo("OLD-BATCH")).thenReturn(1);
+        when(processLogMapper.delete(any())).thenReturn(1);
         when(scheduleResultMapper.insertBatch(any())).thenThrow(new RuntimeException("insert failed"));
 
         assertThrows(RuntimeException.class, () -> schedulePersistenceService.replaceScheduleAtomically(context));
 
-        verify(processLogMapper).deleteByBatchNo("OLD-BATCH");
+        verify(processLogMapper).delete(any());
         verify(unscheduledResultMapper, never()).insertBatch(any());
         verify(mouldChangePlanMapper, never()).insertBatch(any());
         verify(processLogMapper, never()).insertBatch(any());

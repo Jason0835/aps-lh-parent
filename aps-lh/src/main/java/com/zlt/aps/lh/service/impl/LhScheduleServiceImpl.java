@@ -1,8 +1,11 @@
 package com.zlt.aps.lh.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleRequestDTO;
 import com.zlt.aps.lh.api.domain.dto.LhScheduleResponseDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ReleaseStatusEnum;
 import com.zlt.aps.lh.component.ScheduleExecutionGuard;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -71,7 +74,9 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
         log.info("发布排程结果, 批次号: {}", batchNo);
         try {
             // 1. 查询批次号对应的排程结果
-            List<LhScheduleResult> results = scheduleResultMapper.selectByBatchNo(batchNo);
+            List<LhScheduleResult> results = scheduleResultMapper.selectList(new LambdaQueryWrapper<LhScheduleResult>()
+                    .eq(LhScheduleResult::getBatchNo, batchNo)
+                    .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
             if (results == null || results.isEmpty()) {
                 return LhScheduleResponseDTO.fail(batchNo, "批次号[" + batchNo + "]对应的排程结果不存在");
             }
@@ -80,7 +85,10 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
             for (LhScheduleResult result : results) {
                 result.setIsRelease(ReleaseStatusEnum.RELEASED.getCode());
             }
-            scheduleResultMapper.updateReleaseStatus(batchNo, ReleaseStatusEnum.RELEASED.getCode());
+            scheduleResultMapper.update(null, new LambdaUpdateWrapper<LhScheduleResult>()
+                    .set(LhScheduleResult::getIsRelease, ReleaseStatusEnum.RELEASED.getCode())
+                    .eq(LhScheduleResult::getBatchNo, batchNo)
+                    .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
 
             // 3. 发布排程结果发布事件（通知MES系统）
             LhScheduleContext publishContext = new LhScheduleContext();

@@ -1,6 +1,5 @@
 package com.zlt.aps.lh.engine.chain.validators;
 
-import cn.hutool.core.collection.CollectionUtil;
 import com.zlt.aps.lh.api.constant.LhDataValidationGroupConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.enums.ValidationPolicyEnum;
@@ -24,6 +23,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 public class SkuCapacityValidator implements IDataValidator {
+    private static final String VALIDATOR_KEY = "skuCapacityValidator";
     private static final String SKU_DELIMITER = "、";
     private static final String INVALID_TIME_ERROR_TEMPLATE = "[%s] 物料编码 %s 对应的硫化时间无效(须为正数)";
 
@@ -71,6 +71,16 @@ public class SkuCapacityValidator implements IDataValidator {
     @Override
     public String getValidatorName() {
         return "SKU日硫化产能校验";
+    }
+
+    /**
+     * 获取校验器唯一标识
+     *
+     * @return 校验器唯一标识
+     */
+    @Override
+    public String getValidatorKey() {
+        return VALIDATOR_KEY;
     }
 
     @Override

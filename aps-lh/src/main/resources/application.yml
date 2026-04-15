@@ -51,3 +51,10 @@ logging:
   level:
     com.zlt.aps: debug
     com.zlt.aps.lh.mapper: debug
+
+aps:
+  lh:
+    validation:
+      validators:
+        # monthPlanValidator: false
+        # machineInfoValidator: false

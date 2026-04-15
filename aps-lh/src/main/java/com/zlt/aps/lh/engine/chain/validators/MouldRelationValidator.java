@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 public class MouldRelationValidator implements IDataValidator {
+    private static final String VALIDATOR_KEY = "mouldRelationValidator";
 
     @Override
     public boolean validate(LhScheduleContext context) {
@@ -41,6 +42,16 @@ public class MouldRelationValidator implements IDataValidator {
     @Override
     public String getValidatorName() {
         return "SKU与模具关系校验";
+    }
+
+    /**
+     * 获取校验器唯一标识
+     *
+     * @return 校验器唯一标识
+     */
+    @Override
+    public String getValidatorKey() {
+        return VALIDATOR_KEY;
     }
 
     @Override

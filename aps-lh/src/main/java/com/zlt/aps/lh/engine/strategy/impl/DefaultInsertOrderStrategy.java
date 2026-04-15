@@ -5,6 +5,7 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.engine.strategy.IInsertOrderStrategy;
+import com.zlt.aps.lh.util.MachineStatusUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -58,7 +59,7 @@ public class DefaultInsertOrderStrategy implements IInsertOrderStrategy {
         String machineCode = insertOrder.getContinuousMachineCode();
         if (machineCode != null) {
             MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
-            if (machine == null || !"0".equals(machine.getStatus())) {
+            if (machine == null || !MachineStatusUtil.isEnabled(machine.getStatus())) {
                 log.warn("插单指定机台不可用, 物料: {}, 机台: {}", insertOrder.getMaterialCode(), machineCode);
                 return false;
             }
@@ -99,7 +100,7 @@ public class DefaultInsertOrderStrategy implements IInsertOrderStrategy {
                 continue;
             }
             MachineScheduleDTO machine = context.getMachineScheduleMap().get(specify.getMachineCode());
-            if (machine != null && "0".equals(machine.getStatus())) {
+            if (machine != null && MachineStatusUtil.isEnabled(machine.getStatus())) {
                 return specify.getMachineCode();
             }
         }

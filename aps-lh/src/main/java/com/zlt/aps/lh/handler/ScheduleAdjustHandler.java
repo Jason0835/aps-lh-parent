@@ -189,7 +189,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      *
      * @param context    排程上下文
      * @param plan       月生产计划记录
-     * @param surplusQty 硫化余量
+     * @param surplus 硫化余量
      * @return SKU排程DTO
      */
     private SkuScheduleDTO buildSkuScheduleDTO(LhScheduleContext context,

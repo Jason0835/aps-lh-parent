@@ -6,6 +6,7 @@ import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.MachineStatusUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -72,7 +73,7 @@ public class DefaultTrialProductionStrategy implements ITrialProductionStrategy 
             if (!"1".equals(specify.getJobType())) {
                 com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO machine =
                         context.getMachineScheduleMap().get(specify.getMachineCode());
-                if (machine != null && "0".equals(machine.getStatus())) {
+                if (machine != null && MachineStatusUtil.isEnabled(machine.getStatus())) {
                     log.debug("试制量试机台匹配, SKU: {}, 机台: {}", trialSku.getMaterialCode(), specify.getMachineCode());
                     return specify.getMachineCode();
                 }

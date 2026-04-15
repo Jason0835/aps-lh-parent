@@ -15,7 +15,7 @@ DB_CONFIG = {
 
 # ====================== 配置项 ======================
 SQL_FILE_PATH = "table_structure_data.sql"  # SQL文件路径
-BATCH_COMMIT_SIZE = 50  # 批量提交大小
+BATCH_COMMIT_SIZE = 100  # 批量提交大小
 
 # ====================== 专业SQL解析+执行（终极修复） ======================
 def execute_sql_file():

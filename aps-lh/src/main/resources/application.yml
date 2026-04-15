@@ -55,6 +55,7 @@ logging:
 aps:
   lh:
     validation:
-      validators:
-        # monthPlanValidator: false
-        # machineInfoValidator: false
+      validators: {}
+      # validators:
+      #   monthPlanValidator: false
+      #   machineInfoValidator: false

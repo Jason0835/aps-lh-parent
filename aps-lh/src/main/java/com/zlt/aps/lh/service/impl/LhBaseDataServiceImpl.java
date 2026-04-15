@@ -67,7 +67,7 @@ import java.util.Map;
 public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /** 机台启用状态，对应字典 sys_enable_disable */
-    private static final String MACHINE_STATUS_ENABLED = "0";
+    private static final String MACHINE_STATUS_ENABLED = "1";
 
     /** 排产版本已定稿（与 MpFactoryProductionVersion.isFinal 一致） */
     private static final String PRODUCTION_VERSION_IS_FINAL = "1";
@@ -617,7 +617,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         List<MdmDevMaintenancePlan> maintenancePlanList = devMaintenancePlanMapper.selectList(
                 new LambdaQueryWrapper<MdmDevMaintenancePlan>()
                         .eq(MdmDevMaintenancePlan::getFactoryCode, factoryCode)
-                        .eq(MdmDevMaintenancePlan::getDelFlag, DeleteFlagEnum.NORMAL.getCode()));
+                        .eq(MdmDevMaintenancePlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmDevMaintenancePlan> maintenancePlanMap = new HashMap<>(32);
         if (maintenancePlanList != null) {
             for (MdmDevMaintenancePlan plan : maintenancePlanList) {

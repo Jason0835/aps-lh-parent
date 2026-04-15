@@ -1,11 +1,20 @@
 package com.zlt.aps.lh.engine.chain.validators;
 
+import cn.hutool.core.collection.CollectionUtil;
 import com.zlt.aps.lh.api.constant.LhDataValidationGroupConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.enums.ValidationPolicyEnum;
 import com.zlt.aps.lh.engine.chain.IDataValidator;
+import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * SKU日硫化产能校验器
@@ -15,6 +24,8 @@ import org.springframework.stereotype.Component;
 @Slf4j
 @Component
 public class SkuCapacityValidator implements IDataValidator {
+    private static final String SKU_DELIMITER = "、";
+    private static final String INVALID_TIME_ERROR_TEMPLATE = "[%s] 物料编码 %s 对应的硫化时间无效(须为正数)";
 
     @Override
     public boolean validate(LhScheduleContext context) {
@@ -33,12 +44,25 @@ public class SkuCapacityValidator implements IDataValidator {
             context.addValidationError("[" + getValidatorName() + "] 有 " + missingCapacityCount + " 个月计划SKU缺少硫化产能数据");
             return false;
         }
-        long invalidTimeCount = context.getSkuLhCapacityMap().values().stream()
-                .filter(c -> c.getVulcanizationTime() == null || c.getVulcanizationTime() <= 0)
-                .count();
-        if (invalidTimeCount > 0) {
-            log.warn("有{}条SKU产能记录的硫化时间无效", invalidTimeCount);
-            context.addValidationError("[" + getValidatorName() + "] 有 " + invalidTimeCount + " 条SKU产能记录的硫化时间无效(须为正数)");
+        // 仅校验月计划中出现的SKU，保持首现顺序用于稳定错误展示
+        Set<String> monthPlanSkuSet = context.getMonthPlanList().stream()
+                .map(p -> p.getMaterialCode())
+                .filter(StringUtils::isNotEmpty)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<String> invalidSkuList = monthPlanSkuSet.stream()
+                .filter(materialCode -> {
+                    MdmSkuLhCapacity skuLhCapacity = context.getSkuLhCapacityMap().get(materialCode);
+                    if (Objects.isNull(skuLhCapacity)) {
+                        return true;
+                    }
+                    return Objects.isNull(skuLhCapacity.getVulcanizationTime())
+                            || skuLhCapacity.getVulcanizationTime() <= 0;
+                })
+                .collect(Collectors.toList());
+        if (!invalidSkuList.isEmpty()) {
+            String invalidSkuText = String.join(SKU_DELIMITER, invalidSkuList);
+            log.warn("月计划SKU硫化时间无效, 工厂: {}, 物料编码: {}", context.getFactoryCode(), invalidSkuText);
+            context.addValidationError(String.format(INVALID_TIME_ERROR_TEMPLATE, getValidatorName(), invalidSkuText));
             return false;
         }
         return true;

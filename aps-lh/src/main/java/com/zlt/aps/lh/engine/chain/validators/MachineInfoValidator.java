@@ -4,6 +4,7 @@ import com.zlt.aps.lh.api.constant.LhDataValidationGroupConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.enums.ValidationPolicyEnum;
 import com.zlt.aps.lh.engine.chain.IDataValidator;
+import com.zlt.aps.lh.util.MachineStatusUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -26,7 +27,7 @@ public class MachineInfoValidator implements IDataValidator {
             return false;
         }
         long enabledCount = context.getMachineInfoMap().values().stream()
-                .filter(m -> "1".equals(m.getStatus()))
+                .filter(m -> MachineStatusUtil.isEnabled(m.getStatus()))
                 .count();
         if (enabledCount == 0) {
             log.warn("无启用状态的硫化机台, 工厂: {}", context.getFactoryCode());

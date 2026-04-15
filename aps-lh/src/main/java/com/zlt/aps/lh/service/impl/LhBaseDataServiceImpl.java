@@ -28,6 +28,7 @@ import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.MachineStatusUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
@@ -65,9 +66,6 @@ import java.util.Map;
 @Slf4j
 @Service
 public class LhBaseDataServiceImpl implements ILhBaseDataService {
-
-    /** 机台启用状态，对应字典 sys_enable_disable */
-    private static final String MACHINE_STATUS_ENABLED = "1";
 
     /** 排产版本已定稿（与 MpFactoryProductionVersion.isFinal 一致） */
     private static final String PRODUCTION_VERSION_IS_FINAL = "1";
@@ -413,7 +411,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         List<LhMachineInfo> list = lhMachineInfoMapper.selectList(
                 new LambdaQueryWrapper<LhMachineInfo>()
                         .eq(LhMachineInfo::getFactoryCode, factoryCode)
-                        .eq(LhMachineInfo::getStatus, MACHINE_STATUS_ENABLED)
+                        .eq(LhMachineInfo::getStatus, MachineStatusUtil.STATUS_ENABLED)
                         .eq(LhMachineInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
                         .orderByAsc(LhMachineInfo::getMachineOrder));
         Map<String, LhMachineInfo> machineInfoMap = new LinkedHashMap<>(32);

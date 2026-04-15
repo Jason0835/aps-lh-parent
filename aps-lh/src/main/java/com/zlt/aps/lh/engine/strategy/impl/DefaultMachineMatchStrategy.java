@@ -10,6 +10,7 @@ import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
+import com.zlt.aps.lh.util.MachineStatusUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -33,9 +34,6 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component
 public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
-
-    /** 机台启用状态 */
-    private static final String STATUS_ENABLED = "0";
 
     /** 定点机台不可作业标记 */
     private static final String JOB_TYPE_FORBIDDEN = "1";
@@ -63,7 +61,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                 continue;
             }
             // 过滤禁用状态
-            if (!STATUS_ENABLED.equals(machine.getStatus())) {
+            if (!MachineStatusUtil.isEnabled(machine.getStatus())) {
                 continue;
             }
             // 寸口范围匹配

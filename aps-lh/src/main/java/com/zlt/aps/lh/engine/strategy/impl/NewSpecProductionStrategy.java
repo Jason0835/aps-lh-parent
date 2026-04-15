@@ -10,6 +10,7 @@ import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
+import com.zlt.aps.lh.api.enums.NewSpecFailReasonEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
@@ -20,6 +21,7 @@ import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -27,10 +29,12 @@ import javax.annotation.Resource;
 
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -129,55 +133,76 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            // 2. 按候选顺序逐台尝试，避免第一候选机台无产能时直接误判未排产
+            // 2. 基于策略选择最优机台，失败后排除并继续选择下一台
             boolean scheduled = false;
-            String failReason = "机台选择失败";
-            for (MachineScheduleDTO candidateMachine : candidates) {
+            NewSpecFailReasonEnum failReason = NewSpecFailReasonEnum.MACHINE_SELECTION_FAILED;
+            Set<String> excludedMachineCodes = new HashSet<>(candidates.size());
+            while (true) {
+                MachineScheduleDTO candidateMachine = machineMatch.selectBestMachine(
+                        context, sku, candidates, excludedMachineCodes);
                 if (candidateMachine == null) {
-                    continue;
+                    break;
+                }
+                String machineCode = candidateMachine.getMachineCode();
+                if (StringUtils.isEmpty(machineCode)) {
+                    failReason = selectHigherPriorityFailReason(
+                            failReason, NewSpecFailReasonEnum.MACHINE_SELECTION_FAILED);
+                    break;
                 }
 
+                // 3. 计算机台可开工时间（考虑机台当前预计完工和能力策略约束）
                 Date endingTime = candidateMachine.getEstimatedEndTime() != null
                         ? candidateMachine.getEstimatedEndTime() : new Date();
                 Date machineReadyTime = capacityCalculate.calculateStartTime(context,
-                        candidateMachine.getMachineCode(), endingTime);
+                        machineCode, endingTime);
 
+                // 4. 先分配换模窗口，失败则继续尝试下一台候选机台
                 Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineReadyTime);
                 if (mouldChangeStartTime == null) {
-                    failReason = selectHigherPriorityFailReason(failReason, "换模班次分配失败");
+                    excludedMachineCodes.add(machineCode);
+                    failReason = selectHigherPriorityFailReason(
+                            failReason, NewSpecFailReasonEnum.MOULD_CHANGE_SHIFT_ALLOCATE_FAILED);
                     continue;
                 }
 
+                // 5. 换模完成后分配首检窗口，若失败需回滚已占用换模资源
                 Date mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
                         mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
                 Date inspectionTime = inspectionBalance.allocateInspection(context,
-                        candidateMachine.getMachineCode(), mouldChangeCompleteTime);
+                        machineCode, mouldChangeCompleteTime);
                 if (inspectionTime == null) {
                     mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
-                    failReason = selectHigherPriorityFailReason(failReason, "首检班次分配失败");
+                    excludedMachineCodes.add(machineCode);
+                    failReason = selectHigherPriorityFailReason(
+                            failReason, NewSpecFailReasonEnum.FIRST_INSPECTION_SHIFT_ALLOCATE_FAILED);
                     continue;
                 }
 
+                // 6. 基于首检完成时间生成新增规格排产结果，并校验当日是否有有效产能
                 Date productionStartTime = LhScheduleTimeUtil.addHours(
                         inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, productionStartTime, mouldChangeStartTime,
                         mouldChangeCompleteTime, shifts, capacityCalculate);
                 if (result == null || result.getTotalDailyPlanQty() == null || result.getTotalDailyPlanQty() <= 0) {
+                    // 无有效产能时回滚首检和换模占用，避免影响后续SKU排产
                     inspectionBalance.rollbackInspection(context, inspectionTime);
                     mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
-                    failReason = selectHigherPriorityFailReason(failReason, "排程窗口内无可用产能");
+                    excludedMachineCodes.add(machineCode);
+                    failReason = selectHigherPriorityFailReason(
+                            failReason, NewSpecFailReasonEnum.NO_CAPACITY_IN_SCHEDULE_WINDOW);
                     continue;
                 }
 
+                // 7. 排产成功后落地结果并刷新机台状态，当前SKU结束尝试
                 context.getScheduleResultList().add(result);
                 updateMachineState(context, candidateMachine, sku, result);
-                registerMachineAssignment(context, candidateMachine.getMachineCode(), result);
+                registerMachineAssignment(context, machineCode, result);
                 scheduledCount++;
                 iterator.remove();
                 scheduled = true;
                 log.debug("新增排产完成, SKU: {}, 机台: {}, 机台就绪: {}, 换模开始: {}, 换模结束: {}, 首检开始: {}, 开产时间: {}",
-                        sku.getMaterialCode(), candidateMachine.getMachineCode(),
+                        sku.getMaterialCode(), machineCode,
                         LhScheduleTimeUtil.formatDateTime(machineReadyTime),
                         LhScheduleTimeUtil.formatDateTime(mouldChangeStartTime),
                         LhScheduleTimeUtil.formatDateTime(mouldChangeCompleteTime),
@@ -187,7 +212,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             }
 
             if (!scheduled) {
-                addUnscheduledResult(context, sku, failReason, unscheduledReasonCountMap);
+                // 所有候选机台都失败，记录未排产原因并移出待排队列
+                addUnscheduledResult(context, sku, failReason.getDescription(), unscheduledReasonCountMap);
                 iterator.remove();
             }
         }
@@ -204,31 +230,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
      * @param candidateReason 新候选失败原因
      * @return 优先级更高的失败原因
      */
-    private String selectHigherPriorityFailReason(String currentReason, String candidateReason) {
-        return getFailReasonPriority(candidateReason) >= getFailReasonPriority(currentReason)
+    private NewSpecFailReasonEnum selectHigherPriorityFailReason(NewSpecFailReasonEnum currentReason,
+                                                                 NewSpecFailReasonEnum candidateReason) {
+        return candidateReason.getPriority() >= currentReason.getPriority()
                 ? candidateReason : currentReason;
-    }
-
-    /**
-     * 失败原因优先级：窗口无产能 > 首检失败 > 换模失败 > 机台选择失败。
-     *
-     * @param reason 失败原因
-     * @return 优先级数值
-     */
-    private int getFailReasonPriority(String reason) {
-        if ("排程窗口内无可用产能".equals(reason)) {
-            return 4;
-        }
-        if ("首检班次分配失败".equals(reason)) {
-            return 3;
-        }
-        if ("换模班次分配失败".equals(reason)) {
-            return 2;
-        }
-        if ("机台选择失败".equals(reason)) {
-            return 1;
-        }
-        return 0;
     }
 
     // ==================== 私有辅助方法 ====================

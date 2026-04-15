@@ -13,7 +13,9 @@ import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.util.MachineStatusUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -83,11 +85,24 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
     }
 
     @Override
-    public MachineScheduleDTO selectBestMachine(List<MachineScheduleDTO> candidates, SkuScheduleDTO sku) {
-        if (candidates == null || candidates.isEmpty()) {
+    public MachineScheduleDTO selectBestMachine(LhScheduleContext context,
+                                                SkuScheduleDTO sku,
+                                                List<MachineScheduleDTO> candidates,
+                                                Set<String> excludedMachineCodes) {
+        if (CollectionUtils.isEmpty(candidates)) {
             return null;
         }
-        return candidates.get(0);
+        for (MachineScheduleDTO candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            String machineCode = candidate.getMachineCode();
+            if (CollectionUtils.isEmpty(excludedMachineCodes) || StringUtils.isEmpty(machineCode)
+                    || !excludedMachineCodes.contains(machineCode)) {
+                return candidate;
+            }
+        }
+        return null;
     }
 
     /**

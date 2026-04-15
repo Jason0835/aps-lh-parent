@@ -71,8 +71,7 @@ class NewSpecTimelineRegressionTest {
 
         when(orderNoGenerator.generateOrderNo(any())).thenReturn("LHGD20260411001");
         when(machineMatchStrategy.matchMachines(any(), any())).thenReturn(Collections.singletonList(machine));
-        when(machineMatchStrategy.selectBestMachine(any(), any())).thenReturn(machine);
-        when(mouldChangeBalanceStrategy.hasCapacity(any(), any())).thenReturn(true);
+        when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any())).thenReturn(machine);
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any())).thenReturn(dateTime(2026, 4, 11, 8, 0));
         when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any())).thenReturn(dateTime(2026, 4, 11, 8, 0));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))

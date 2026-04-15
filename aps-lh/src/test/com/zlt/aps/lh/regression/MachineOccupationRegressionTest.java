@@ -72,8 +72,20 @@ class MachineOccupationRegressionTest {
 
         when(orderNoGenerator.generateOrderNo(any())).thenReturn("LHGD-1", "LHGD-2");
         when(machineMatchStrategy.matchMachines(any(), any())).thenReturn(Collections.singletonList(machine));
-        when(machineMatchStrategy.selectBestMachine(any(), any())).thenAnswer(invocation -> invocation.getArgument(0, java.util.List.class).get(0));
-        when(mouldChangeBalanceStrategy.hasCapacity(any(), any())).thenReturn(true);
+        when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    java.util.List<MachineScheduleDTO> candidates = invocation.getArgument(2, java.util.List.class);
+                    java.util.Set<String> excludedMachineCodes = invocation.getArgument(3, java.util.Set.class);
+                    if (candidates == null || candidates.isEmpty()) {
+                        return null;
+                    }
+                    for (MachineScheduleDTO candidate : candidates) {
+                        if (candidate != null && !excludedMachineCodes.contains(candidate.getMachineCode())) {
+                            return candidate;
+                        }
+                    }
+                    return null;
+                });
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
         when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any()))

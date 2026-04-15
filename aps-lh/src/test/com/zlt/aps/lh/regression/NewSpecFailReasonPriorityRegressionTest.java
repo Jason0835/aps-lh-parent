@@ -2,6 +2,7 @@ package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
@@ -21,12 +22,12 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * 新增排产回归：首选机台窗口内无产能时，应继续尝试后续候选机台，避免直接误判未排产。
+ * 新增排产失败原因回归：多候选机台失败时，应保留优先级更高的阻塞原因。
  */
-class NewSpecProductionStrategyRegressionTest {
+class NewSpecFailReasonPriorityRegressionTest {
 
     @Test
-    void scheduleNewSpecs_shouldFallbackToNextCandidateWhenFirstMachineHasNoCapacity() throws Exception {
+    void scheduleNewSpecs_shouldKeepHighestPriorityFailReason() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectOrderNoGenerator(strategy);
 
@@ -34,20 +35,20 @@ class NewSpecProductionStrategyRegressionTest {
         SkuScheduleDTO sku = buildSku();
         context.getNewSpecSkuList().add(sku);
 
+        MachineScheduleDTO mouldFailMachine = new MachineScheduleDTO();
+        mouldFailMachine.setMachineCode("M-MOULD-FAIL");
+        mouldFailMachine.setMachineName("换模失败机台");
+        mouldFailMachine.setEstimatedEndTime(dateTime(2026, 4, 19, 6, 0));
+
         MachineScheduleDTO noCapacityMachine = new MachineScheduleDTO();
         noCapacityMachine.setMachineCode("M-NO-CAP");
         noCapacityMachine.setMachineName("无产能机台");
-        noCapacityMachine.setEstimatedEndTime(dateTime(2026, 4, 19, 21, 30));
-
-        MachineScheduleDTO availableMachine = new MachineScheduleDTO();
-        availableMachine.setMachineCode("M-OK");
-        availableMachine.setMachineName("可排机台");
-        availableMachine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+        noCapacityMachine.setEstimatedEndTime(dateTime(2026, 4, 19, 7, 0));
 
         IMachineMatchStrategy machineMatchStrategy = new IMachineMatchStrategy() {
             @Override
             public java.util.List<MachineScheduleDTO> matchMachines(LhScheduleContext ctx, SkuScheduleDTO scheduleSku) {
-                return Arrays.asList(noCapacityMachine, availableMachine);
+                return Arrays.asList(mouldFailMachine, noCapacityMachine);
             }
 
             @Override
@@ -67,6 +68,9 @@ class NewSpecProductionStrategyRegressionTest {
             }
         };
 
+        Date mouldFailReadyTime = dateTime(2026, 4, 19, 8, 0);
+        Date noCapacityReadyTime = dateTime(2026, 4, 19, 9, 0);
+
         IMouldChangeBalanceStrategy mouldChangeBalanceStrategy = new IMouldChangeBalanceStrategy() {
             @Override
             public boolean hasCapacity(LhScheduleContext ctx, Date targetDate) {
@@ -75,6 +79,9 @@ class NewSpecProductionStrategyRegressionTest {
 
             @Override
             public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+                if (mouldFailReadyTime.equals(endingTime)) {
+                    return null;
+                }
                 return endingTime;
             }
 
@@ -90,36 +97,41 @@ class NewSpecProductionStrategyRegressionTest {
         ICapacityCalculateStrategy capacityCalculateStrategy = new ICapacityCalculateStrategy() {
             @Override
             public int calculateShiftCapacity(LhScheduleContext ctx, int lhTimeSeconds, int mouldQty) {
-                return 1;
+                return 0;
             }
 
             @Override
             public Date calculateStartTime(LhScheduleContext ctx, String machineCode, Date endingTime) {
-                return endingTime;
+                if ("M-MOULD-FAIL".equals(machineCode)) {
+                    return mouldFailReadyTime;
+                }
+                return noCapacityReadyTime;
             }
 
             @Override
             public int calculateFirstShiftQty(Date startTime, Date shiftEndTime, int lhTimeSeconds, int mouldQty) {
-                return startTime.before(shiftEndTime) ? 1 : 0;
+                return 0;
             }
 
             @Override
             public int calculateDailyCapacity(int lhTimeSeconds, int mouldQty) {
-                return 1;
+                return 0;
             }
         };
 
         strategy.scheduleNewSpecs(context, machineMatchStrategy, mouldChangeBalanceStrategy,
                 inspectionBalanceStrategy, capacityCalculateStrategy);
 
-        assertEquals(1, context.getScheduleResultList().size(), "第一候选机台无产能时，应继续尝试后续候选机台");
-        assertEquals(0, context.getUnscheduledResultList().size(), "存在后续可排机台时，不应生成未排产记录");
-        assertEquals("M-OK", context.getScheduleResultList().get(0).getLhMachineCode());
+        assertEquals(0, context.getScheduleResultList().size(), "两个候选机台都失败时不应产出排产结果");
+        assertEquals(1, context.getUnscheduledResultList().size(), "应生成1条未排产记录");
+        LhUnscheduledResult unscheduledResult = context.getUnscheduledResultList().get(0);
+        assertEquals("排程窗口内无可用产能", unscheduledResult.getUnscheduledReason(),
+                "应选择优先级更高的失败原因");
     }
 
     private LhScheduleContext buildContext() {
         LhScheduleContext context = new LhScheduleContext();
-        Date scheduleDate = dateTime(2026, 4, 17, 0, 0);
+        Date scheduleDate = dateTime(2026, 4, 19, 0, 0);
         context.setFactoryCode("116");
         context.setBatchNo("TEST-BATCH");
         context.setScheduleDate(scheduleDate);

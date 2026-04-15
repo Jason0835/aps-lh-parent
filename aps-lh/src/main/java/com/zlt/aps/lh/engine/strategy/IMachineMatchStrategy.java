@@ -8,6 +8,7 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 机台匹配策略接口
@@ -33,9 +34,14 @@ public interface IMachineMatchStrategy {
     /**
      * 从候选机台中选择最优机台
      *
+     * @param context 排程上下文
+     * @param sku 待排产SKU
      * @param candidates 候选机台列表
-     * @param sku        待排产SKU
+     * @param excludedMachineCodes 已尝试失败需排除的机台编码集合
      * @return 最优机台, 无候选时返回null
      */
-    MachineScheduleDTO selectBestMachine(List<MachineScheduleDTO> candidates, SkuScheduleDTO sku);
+    MachineScheduleDTO selectBestMachine(LhScheduleContext context,
+                                         SkuScheduleDTO sku,
+                                         List<MachineScheduleDTO> candidates,
+                                         Set<String> excludedMachineCodes);
 }

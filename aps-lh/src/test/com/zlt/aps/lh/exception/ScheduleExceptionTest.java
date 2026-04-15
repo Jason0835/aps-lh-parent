@@ -99,6 +99,7 @@ class ScheduleExceptionTest {
         assertTrue(message.contains("1. 缺少月计划"));
         assertTrue(message.contains("2. 缺少工作日历"));
         assertTrue(message.contains("3. 缺少机台信息"));
+        assertFalse(message.contains("<br/>"));
     }
 
     @Test

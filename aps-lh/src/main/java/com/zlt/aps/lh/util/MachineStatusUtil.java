@@ -10,7 +10,7 @@ import org.apache.commons.lang3.StringUtils;
  */
 public final class MachineStatusUtil {
 
-    /** 启用状态码（字典：sys_enable_disable） */
+    /** 启用状态码（字典：sys_enable_disable，1-启用，0-停用） */
     public static final String STATUS_ENABLED = "1";
 
     private MachineStatusUtil() {

@@ -28,6 +28,7 @@ import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -113,6 +114,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         log.info("新增排产 - 执行新增规格排产, 新增SKU数: {}", context.getNewSpecSkuList().size());
 
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        int scheduledCount = 0;
+        Map<String, Integer> unscheduledReasonCountMap = new LinkedHashMap<>(8);
 
         Iterator<SkuScheduleDTO> iterator = context.getNewSpecSkuList().iterator();
         while (iterator.hasNext()) {
@@ -121,72 +124,111 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             // 1. 匹配候选机台
             List<MachineScheduleDTO> candidates = machineMatch.matchMachines(context, sku);
             if (candidates.isEmpty()) {
-                addUnscheduledResult(context, sku, "无可用硫化机台");
+                addUnscheduledResult(context, sku, "无可用硫化机台", unscheduledReasonCountMap);
                 iterator.remove();
                 continue;
             }
 
-            // 2. 选择最优机台
-            MachineScheduleDTO bestMachine = machineMatch.selectBestMachine(candidates, sku);
-            if (bestMachine == null) {
-                addUnscheduledResult(context, sku, "机台选择失败");
-                iterator.remove();
-                continue;
-            }
+            // 2. 按候选顺序逐台尝试，避免第一候选机台无产能时直接误判未排产
+            boolean scheduled = false;
+            String failReason = "机台选择失败";
+            for (MachineScheduleDTO candidateMachine : candidates) {
+                if (candidateMachine == null) {
+                    continue;
+                }
 
-            // 3. 计算机台准备就绪时间
-            Date endingTime = bestMachine.getEstimatedEndTime() != null ? bestMachine.getEstimatedEndTime() : new Date();
-            Date machineReadyTime = capacityCalculate.calculateStartTime(context, bestMachine.getMachineCode(), endingTime);
+                Date endingTime = candidateMachine.getEstimatedEndTime() != null
+                        ? candidateMachine.getEstimatedEndTime() : new Date();
+                Date machineReadyTime = capacityCalculate.calculateStartTime(context,
+                        candidateMachine.getMachineCode(), endingTime);
 
-            // 4. 检查换模能力
-            if (!mouldChangeBalance.hasCapacity(context, machineReadyTime)) {
-                addUnscheduledResult(context, sku, "换模能力不足，已达当日换模上限");
-                iterator.remove();
-                continue;
-            }
+                Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineReadyTime);
+                if (mouldChangeStartTime == null) {
+                    failReason = selectHigherPriorityFailReason(failReason, "换模班次分配失败");
+                    continue;
+                }
 
-            // 5. 分配换模班次（返回换模开始时间）
-            Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineReadyTime);
-            if (mouldChangeStartTime == null) {
-                addUnscheduledResult(context, sku, "换模班次分配失败");
-                iterator.remove();
-                continue;
-            }
-            Date mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
-                    mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
+                Date mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
+                        mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
+                Date inspectionTime = inspectionBalance.allocateInspection(context,
+                        candidateMachine.getMachineCode(), mouldChangeCompleteTime);
+                if (inspectionTime == null) {
+                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    failReason = selectHigherPriorityFailReason(failReason, "首检班次分配失败");
+                    continue;
+                }
 
-            // 6. 分配首检时间
-            Date inspectionTime = inspectionBalance.allocateInspection(context, bestMachine.getMachineCode(), mouldChangeCompleteTime);
-            if (inspectionTime == null) {
-                addUnscheduledResult(context, sku, "首检班次分配失败");
-                iterator.remove();
-                continue;
-            }
+                Date productionStartTime = LhScheduleTimeUtil.addHours(
+                        inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
+                LhScheduleResult result = buildNewSpecScheduleResult(
+                        context, candidateMachine, sku, productionStartTime, mouldChangeStartTime,
+                        mouldChangeCompleteTime, shifts, capacityCalculate);
+                if (result == null || result.getTotalDailyPlanQty() == null || result.getTotalDailyPlanQty() <= 0) {
+                    inspectionBalance.rollbackInspection(context, inspectionTime);
+                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    failReason = selectHigherPriorityFailReason(failReason, "排程窗口内无可用产能");
+                    continue;
+                }
 
-            // 7. 计算开产时间（首检结束后开产）
-            Date productionStartTime = LhScheduleTimeUtil.addHours(
-                    inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
-
-            // 8. 构建排程结果，按班次分配计划量
-            LhScheduleResult result = buildNewSpecScheduleResult(
-                    context, bestMachine, sku, productionStartTime, mouldChangeStartTime, mouldChangeCompleteTime, shifts, capacityCalculate);
-            if (result != null && result.getTotalDailyPlanQty() != null && result.getTotalDailyPlanQty() > 0) {
                 context.getScheduleResultList().add(result);
-                updateMachineState(context, bestMachine, sku, result);
-                registerMachineAssignment(context, bestMachine.getMachineCode(), result);
+                updateMachineState(context, candidateMachine, sku, result);
+                registerMachineAssignment(context, candidateMachine.getMachineCode(), result);
+                scheduledCount++;
                 iterator.remove();
+                scheduled = true;
                 log.debug("新增排产完成, SKU: {}, 机台: {}, 机台就绪: {}, 换模开始: {}, 换模结束: {}, 首检开始: {}, 开产时间: {}",
-                        sku.getMaterialCode(), bestMachine.getMachineCode(),
+                        sku.getMaterialCode(), candidateMachine.getMachineCode(),
                         LhScheduleTimeUtil.formatDateTime(machineReadyTime),
                         LhScheduleTimeUtil.formatDateTime(mouldChangeStartTime),
                         LhScheduleTimeUtil.formatDateTime(mouldChangeCompleteTime),
                         LhScheduleTimeUtil.formatDateTime(inspectionTime),
                         LhScheduleTimeUtil.formatDateTime(productionStartTime));
-            } else {
-                addUnscheduledResult(context, sku, "排程窗口内无可用产能");
+                break;
+            }
+
+            if (!scheduled) {
+                addUnscheduledResult(context, sku, failReason, unscheduledReasonCountMap);
                 iterator.remove();
             }
         }
+        log.info("新增排产完成, 成功: {}, 未排: {}, 原因分布: {}",
+                scheduledCount,
+                unscheduledReasonCountMap.values().stream().mapToInt(Integer::intValue).sum(),
+                unscheduledReasonCountMap);
+    }
+
+    /**
+     * 选择优先级更高的失败原因，便于保留最接近真实阻塞点的未排产原因。
+     *
+     * @param currentReason 当前失败原因
+     * @param candidateReason 新候选失败原因
+     * @return 优先级更高的失败原因
+     */
+    private String selectHigherPriorityFailReason(String currentReason, String candidateReason) {
+        return getFailReasonPriority(candidateReason) >= getFailReasonPriority(currentReason)
+                ? candidateReason : currentReason;
+    }
+
+    /**
+     * 失败原因优先级：窗口无产能 > 首检失败 > 换模失败 > 机台选择失败。
+     *
+     * @param reason 失败原因
+     * @return 优先级数值
+     */
+    private int getFailReasonPriority(String reason) {
+        if ("排程窗口内无可用产能".equals(reason)) {
+            return 4;
+        }
+        if ("首检班次分配失败".equals(reason)) {
+            return 3;
+        }
+        if ("换模班次分配失败".equals(reason)) {
+            return 2;
+        }
+        if ("机台选择失败".equals(reason)) {
+            return 1;
+        }
+        return 0;
     }
 
     // ==================== 私有辅助方法 ====================
@@ -408,6 +450,15 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         unscheduled.setIsDelete(0);
         context.getUnscheduledResultList().add(unscheduled);
         log.debug("新增SKU未排产, SKU: {}, 原因: {}", sku.getMaterialCode(), reason);
+    }
+
+    /**
+     * 添加未排产记录并累计原因分布
+     */
+    private void addUnscheduledResult(LhScheduleContext context, SkuScheduleDTO sku, String reason,
+                                      Map<String, Integer> reasonCountMap) {
+        addUnscheduledResult(context, sku, reason);
+        reasonCountMap.merge(reason, 1, Integer::sum);
     }
 
     /**

@@ -69,7 +69,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                 continue;
             }
             // 检查模具与机台兼容性（模数不超过机台最大模台数）
-            if (!isMouldCompatible(skuMouldCodes, machine, occupiedMouldCodes)) {
+            if (!isMouldCompatible(sku, skuMouldCodes, machine, occupiedMouldCodes)) {
                 continue;
             }
             candidates.add(machine);
@@ -140,12 +140,13 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
     /**
      * 检查模具是否与机台兼容（模数不超限且模具未被占用）
      */
-    private boolean isMouldCompatible(List<String> skuMouldCodes, MachineScheduleDTO machine, Set<String> occupiedMouldCodes) {
+    private boolean isMouldCompatible(SkuScheduleDTO sku, List<String> skuMouldCodes, MachineScheduleDTO machine, Set<String> occupiedMouldCodes) {
         if (skuMouldCodes.isEmpty()) {
             return true;
         }
-        // 模数不能超过机台最大模台数
-        if (skuMouldCodes.size() > machine.getMaxMoldNum()) {
+        // 模数不能超过机台最大模台数（按SKU实际用模数判断，不按关系条数判断）
+        int requiredMouldQty = sku != null && sku.getMouldQty() > 0 ? sku.getMouldQty() : 1;
+        if (requiredMouldQty > machine.getMaxMoldNum()) {
             return false;
         }
         // 检查模具是否已被占用（共用模冲突）

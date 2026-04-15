@@ -91,6 +91,25 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
     }
 
     @Override
+    public void rollbackMouldChange(LhScheduleContext context, Date allocatedTime) {
+        if (context == null || allocatedTime == null) {
+            return;
+        }
+        String dateKey = formatDateKey(allocatedTime);
+        int[] counts = context.getDailyMouldChangeCountMap().get(dateKey);
+        if (counts == null) {
+            return;
+        }
+        if (LhScheduleTimeUtil.isMorningShift(context, allocatedTime) && counts[IDX_MORNING] > 0) {
+            counts[IDX_MORNING]--;
+            return;
+        }
+        if (LhScheduleTimeUtil.isAfternoonShift(context, allocatedTime) && counts[IDX_AFTERNOON] > 0) {
+            counts[IDX_AFTERNOON]--;
+        }
+    }
+
+    @Override
     public int getRemainingCapacity(LhScheduleContext context, Date targetDate) {
         String dateKey = formatDateKey(targetDate);
         int[] counts = context.getDailyMouldChangeCountMap().getOrDefault(dateKey, new int[]{0, 0});

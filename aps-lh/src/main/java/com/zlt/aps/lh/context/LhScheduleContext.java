@@ -12,7 +12,7 @@ import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
-import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
+import com.zlt.aps.mp.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhRepairCapsule;

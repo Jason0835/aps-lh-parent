@@ -38,10 +38,6 @@ public class MdmDevMaintenancePlan extends BaseEntity implements Serializable {
     @TableField(value = "FIRST_WASH_TIME")
     private String firstWashTime;
 
-    @ApiModelProperty(value = "删除标识：0-正常，1-已删除")
-    @TableField(value = "DEL_FLAG")
-    private Integer delFlag;
-
     @ApiModelProperty(value = "版本号")
     @TableField(value = "DATA_VERSION")
     private String dataVersion;

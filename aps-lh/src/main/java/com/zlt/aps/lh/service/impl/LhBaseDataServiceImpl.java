@@ -617,7 +617,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         List<MdmDevMaintenancePlan> maintenancePlanList = devMaintenancePlanMapper.selectList(
                 new LambdaQueryWrapper<MdmDevMaintenancePlan>()
                         .eq(MdmDevMaintenancePlan::getFactoryCode, factoryCode)
-                        .eq(MdmDevMaintenancePlan::getDelFlag, DeleteFlagEnum.NORMAL.getCode()));
+                        .eq(MdmDevMaintenancePlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmDevMaintenancePlan> maintenancePlanMap = new HashMap<>(32);
         if (maintenancePlanList != null) {
             for (MdmDevMaintenancePlan plan : maintenancePlanList) {

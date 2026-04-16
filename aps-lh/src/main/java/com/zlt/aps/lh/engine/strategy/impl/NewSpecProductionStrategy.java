@@ -4,6 +4,7 @@
 package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
@@ -49,6 +50,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
     @Resource
     private OrderNoGenerator orderNoGenerator;
+    @Resource
+    private LocalSearchMachineAllocatorStrategy localSearchMachineAllocator;
 
     @Override
     public String getStrategyType() {
@@ -133,13 +136,26 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
+            // 1.1 小规模候选机台场景下，优先使用局部搜索给出首选机台
+            MachineScheduleDTO preferredMachine = selectPreferredMachineByLocalSearch(
+                    context, sku, candidates, shifts, machineMatch, mouldChangeBalance, inspectionBalance, capacityCalculate);
+            boolean preferredMachineTried = false;
+
             // 2. 基于策略选择最优机台，失败后排除并继续选择下一台
             boolean scheduled = false;
             NewSpecFailReasonEnum failReason = NewSpecFailReasonEnum.MACHINE_SELECTION_FAILED;
             Set<String> excludedMachineCodes = new HashSet<>(candidates.size());
             while (true) {
-                MachineScheduleDTO candidateMachine = machineMatch.selectBestMachine(
-                        context, sku, candidates, excludedMachineCodes);
+                MachineScheduleDTO candidateMachine;
+                if (!preferredMachineTried && preferredMachine != null
+                        && StringUtils.isNotEmpty(preferredMachine.getMachineCode())
+                        && !excludedMachineCodes.contains(preferredMachine.getMachineCode())) {
+                    candidateMachine = preferredMachine;
+                    preferredMachineTried = true;
+                } else {
+                    candidateMachine = machineMatch.selectBestMachine(
+                            context, sku, candidates, excludedMachineCodes);
+                }
                 if (candidateMachine == null) {
                     break;
                 }
@@ -234,6 +250,77 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                                  NewSpecFailReasonEnum candidateReason) {
         return candidateReason.getPriority() >= currentReason.getPriority()
                 ? candidateReason : currentReason;
+    }
+
+    /**
+     * 使用局部搜索选择当前SKU的首选机台。
+     * <p>若配置关闭、阈值不命中或搜索失败，返回null并自动回退原贪心流程。</p>
+     *
+     * @param context 排程上下文
+     * @param currentSku 当前SKU
+     * @param candidates 候选机台
+     * @param shifts 排程班次窗口
+     * @param machineMatch 机台匹配策略
+     * @param mouldChangeBalance 换模均衡策略
+     * @param inspectionBalance 首检均衡策略
+     * @param capacityCalculate 产能计算策略
+     * @return 局部搜索首选机台；无法给出时返回null
+     */
+    private MachineScheduleDTO selectPreferredMachineByLocalSearch(LhScheduleContext context,
+                                                                   SkuScheduleDTO currentSku,
+                                                                   List<MachineScheduleDTO> candidates,
+                                                                   List<LhShiftConfigVO> shifts,
+                                                                   IMachineMatchStrategy machineMatch,
+                                                                   IMouldChangeBalanceStrategy mouldChangeBalance,
+                                                                   IFirstInspectionBalanceStrategy inspectionBalance,
+                                                                   ICapacityCalculateStrategy capacityCalculate) {
+        if (!shouldUseLocalSearch(context, candidates)) {
+            return null;
+        }
+        List<SkuScheduleDTO> windowSkuList = buildLocalSearchWindow(context, currentSku);
+        if (CollectionUtils.isEmpty(windowSkuList)) {
+            return null;
+        }
+        return localSearchMachineAllocator.selectBestMachine(
+                context, windowSkuList, candidates, shifts, machineMatch, mouldChangeBalance, inspectionBalance, capacityCalculate);
+    }
+
+    /**
+     * 判断是否启用局部搜索。
+     *
+     * @param context 排程上下文
+     * @param candidates 候选机台列表
+     * @return true-启用，false-不启用
+     */
+    private boolean shouldUseLocalSearch(LhScheduleContext context, List<MachineScheduleDTO> candidates) {
+        if (CollectionUtils.isEmpty(candidates)) {
+            return false;
+        }
+        LhScheduleConfig scheduleConfig = context.getScheduleConfig();
+        if (scheduleConfig == null || !scheduleConfig.isLocalSearchEnabled()) {
+            return false;
+        }
+        return candidates.size() < scheduleConfig.getLocalSearchMachineThreshold();
+    }
+
+    /**
+     * 构建局部搜索窗口（当前SKU + 后续若干SKU）。
+     *
+     * @param context 排程上下文
+     * @param currentSku 当前SKU
+     * @return 局部搜索SKU窗口
+     */
+    private List<SkuScheduleDTO> buildLocalSearchWindow(LhScheduleContext context, SkuScheduleDTO currentSku) {
+        List<SkuScheduleDTO> allNewSkuList = context.getNewSpecSkuList();
+        int skuIndex = allNewSkuList.indexOf(currentSku);
+        if (skuIndex < 0) {
+            List<SkuScheduleDTO> fallbackList = new ArrayList<>(1);
+            fallbackList.add(currentSku);
+            return fallbackList;
+        }
+        int depth = context.getScheduleConfig() != null ? context.getScheduleConfig().getLocalSearchDepth() : 1;
+        int endIndex = Math.min(allNewSkuList.size(), skuIndex + depth);
+        return new ArrayList<>(allNewSkuList.subList(skuIndex, endIndex));
     }
 
     // ==================== 私有辅助方法 ====================

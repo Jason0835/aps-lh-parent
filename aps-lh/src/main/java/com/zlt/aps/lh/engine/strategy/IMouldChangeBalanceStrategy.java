@@ -35,6 +35,16 @@ public interface IMouldChangeBalanceStrategy {
     Date allocateMouldChange(LhScheduleContext context, Date endingTime);
 
     /**
+     * 回滚已占用的换模班次配额。
+     *
+     * @param context 排程上下文
+     * @param allocatedTime 已分配的换模开始时间
+     */
+    default void rollbackMouldChange(LhScheduleContext context, Date allocatedTime) {
+        // 默认无需处理
+    }
+
+    /**
      * 获取指定日期剩余换模能力
      *
      * @param context    排程上下文

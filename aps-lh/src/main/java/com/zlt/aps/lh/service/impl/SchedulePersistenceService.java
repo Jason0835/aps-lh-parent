@@ -25,6 +25,7 @@ import javax.annotation.Resource;
 import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -38,6 +39,8 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class SchedulePersistenceService {
+
+    private static final String DEFAULT_OPERATOR = "system";
 
     @Resource
     private LhScheduleResultMapper scheduleResultMapper;
@@ -109,6 +112,8 @@ public class SchedulePersistenceService {
         }
 
         if (!context.getScheduleResultList().isEmpty()) {
+            // 为排程结果补齐审计字段
+            fillScheduleResultAuditInfo(context, context.getScheduleResultList());
             scheduleResultMapper.insertBatch(context.getScheduleResultList());
         }
         if (!context.getUnscheduledResultList().isEmpty()) {
@@ -126,5 +131,43 @@ public class SchedulePersistenceService {
                 deletedResultCount, deletedUnscheduledCount, deletedMouldPlanCount, deletedLogCount,
                 context.getScheduleResultList().size(), context.getUnscheduledResultList().size(),
                 context.getMouldChangePlanList().size(), context.getScheduleLogList().size());
+    }
+
+    /**
+     * 为排程结果补齐审计字段。
+     *
+     * @param context 排程上下文
+     * @param scheduleResults 排程结果列表
+     */
+    private void fillScheduleResultAuditInfo(LhScheduleContext context, List<LhScheduleResult> scheduleResults) {
+        Date now = new Date();
+        String operator = resolveOperator(context);
+        for (LhScheduleResult scheduleResult : scheduleResults) {
+            if (Objects.isNull(scheduleResult.getCreateTime())) {
+                scheduleResult.setCreateTime(now);
+            }
+            if (Objects.isNull(scheduleResult.getUpdateTime())) {
+                scheduleResult.setUpdateTime(now);
+            }
+            if (StringUtils.isEmpty(scheduleResult.getCreateBy())) {
+                scheduleResult.setCreateBy(operator);
+            }
+            if (StringUtils.isEmpty(scheduleResult.getUpdateBy())) {
+                scheduleResult.setUpdateBy(operator);
+            }
+        }
+    }
+
+    /**
+     * 获取审计字段操作人。
+     *
+     * @param context 排程上下文
+     * @return 操作人
+     */
+    private String resolveOperator(LhScheduleContext context) {
+        if (Objects.nonNull(context) && StringUtils.isNotEmpty(context.getOperator())) {
+            return context.getOperator();
+        }
+        return DEFAULT_OPERATOR;
     }
 }

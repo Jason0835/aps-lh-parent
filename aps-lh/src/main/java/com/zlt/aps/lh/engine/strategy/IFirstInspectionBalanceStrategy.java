@@ -34,4 +34,14 @@ public interface IFirstInspectionBalanceStrategy {
      * @return 分配后的首检开始时间
      */
     Date allocateInspection(LhScheduleContext context, String machineCode, Date mouldChangeTime);
+
+    /**
+     * 回滚已占用的首检班次配额。
+     *
+     * @param context 排程上下文
+     * @param inspectionTime 已分配的首检时间
+     */
+    default void rollbackInspection(LhScheduleContext context, Date inspectionTime) {
+        // 默认无需处理
+    }
 }

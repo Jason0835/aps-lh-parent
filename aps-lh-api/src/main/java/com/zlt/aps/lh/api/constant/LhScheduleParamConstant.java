@@ -98,4 +98,12 @@ public final class LhScheduleParamConstant {
     public static final String TRIAL_DAILY_LIMIT = "TRIAL_DAILY_LIMIT";
     /** 模具交替计划天数 */
     public static final String MOULD_CHANGE_PLAN_DAYS = "MOULD_CHANGE_PLAN_DAYS";
+    /** 局部搜索开关（0-关闭，1-开启） */
+    public static final String ENABLE_LOCAL_SEARCH = "ENABLE_LOCAL_SEARCH";
+    /** 局部搜索候选机台阈值（小于该值时启用） */
+    public static final String LOCAL_SEARCH_MACHINE_THRESHOLD = "LOCAL_SEARCH_MACHINE_THRESHOLD";
+    /** 局部搜索深度（包含当前SKU） */
+    public static final String LOCAL_SEARCH_DEPTH = "LOCAL_SEARCH_DEPTH";
+    /** 局部搜索单次耗时预算（毫秒） */
+    public static final String LOCAL_SEARCH_TIME_BUDGET_MS = "LOCAL_SEARCH_TIME_BUDGET_MS";
 }

@@ -20,6 +20,7 @@ import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
 import com.zlt.aps.lh.mapper.LhMachineOnlineInfoMapper;
 import com.zlt.aps.lh.mapper.LhRepairCapsuleMapper;
 import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
+import com.zlt.aps.lh.mapper.MdmModelInfoMapper;
 import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
@@ -29,11 +30,12 @@ import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.util.MachineStatusUtil;
-import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
+import com.zlt.aps.mp.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhRepairCapsule;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
+import com.zlt.aps.mdm.api.domain.entity.MdmModelInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
@@ -90,6 +92,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     @Resource
     private MdmSkuMouldRelMapper skuMouldRelMapper;
+
+    @Resource
+    private MdmModelInfoMapper mdmModelInfoMapper;
 
     @Resource
     private LhMachineInfoMapper lhMachineInfoMapper;
@@ -160,35 +165,38 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 6. 加载SKU与模具关系
         loadSkuMouldRel(context, factoryCode);
 
-        // 7. 加载硫化机台信息
+        // 7. 加载模具台账
+        loadModelInfo(context, factoryCode);
+
+        // 8. 加载硫化机台信息
         loadMachineInfo(context, factoryCode);
 
-        // 8. 加载模具清洗计划
+        // 9. 加载模具清洗计划
         loadCleaningPlan(context, factoryCode, startDate, endDate);
 
-        // 9. 加载月底计划余量
+        // 10. 加载月底计划余量
         loadMonthSurplus(context, factoryCode, year, month);
 
-        // 10. 加载各班次完成量
+        // 11. 加载各班次完成量
         loadShiftFinishQty(context, factoryCode, scheduleDate);
 
-        // 11. 加载物料信息
+        // 12. 加载物料信息
         loadMaterialInfo(context, factoryCode);
 
-        // 12. 加载MES硫化在机信息（取T-1日在机信息）
+        // 13. 加载MES硫化在机信息（取T-1日在机信息）
         Date previousDay = LhScheduleTimeUtil.addDays(startDate, -1);
         loadMachineOnlineInfo(context, factoryCode, previousDay);
 
-        // 13. 加载硫化定点机台
+        // 14. 加载硫化定点机台
         loadSpecifyMachine(context, factoryCode);
 
-        // 14. 加载硫化机胶囊已使用次数
+        // 15. 加载硫化机胶囊已使用次数
         loadCapsuleUsage(context, factoryCode);
 
-        // 15. 加载设备保养计划
+        // 16. 加载设备保养计划
         loadMaintenancePlan(context, factoryCode);
 
-        // 16. 加载前日硫化排程结果
+        // 17. 加载前日硫化排程结果
         loadPreviousScheduleResults(context, factoryCode, targetDate);
 
         log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}",
@@ -399,6 +407,29 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         }
         context.setSkuMouldRelMap(skuMouldRelMap);
         log.debug("SKU与模具关系加载完成, SKU数量: {}", skuMouldRelMap.size());
+    }
+
+    /**
+     * 加载模具台账，按模具号建立Map
+     *
+     * @param context     排程上下文
+     * @param factoryCode 分厂编号
+     */
+    private void loadModelInfo(LhScheduleContext context, String factoryCode) {
+        List<MdmModelInfo> modelInfoList = mdmModelInfoMapper.selectList(
+                new LambdaQueryWrapper<MdmModelInfo>()
+                        .eq(MdmModelInfo::getFactoryCode, factoryCode)
+                        .eq(MdmModelInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        Map<String, MdmModelInfo> modelInfoMap = new HashMap<>(128);
+        if (!CollectionUtils.isEmpty(modelInfoList)) {
+            for (MdmModelInfo modelInfo : modelInfoList) {
+                if (StringUtils.isNotEmpty(modelInfo.getMouldCode())) {
+                    modelInfoMap.put(modelInfo.getMouldCode(), modelInfo);
+                }
+            }
+        }
+        context.setModelInfoMap(modelInfoMap);
+        log.debug("模具台账加载完成, 模具数量: {}", modelInfoMap.size());
     }
 
     /**

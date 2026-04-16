@@ -225,11 +225,9 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             int lhTimeSeconds = plan.getCuringTime() != null ? plan.getCuringTime() : 3600;
             dto.setLhTimeSeconds(lhTimeSeconds);
             dto.setShiftCapacity(capacity.getClassCapacity() != null ? capacity.getClassCapacity() : 0);
-            dto.setMouldQty(1);
         } else {
             // 无产能数据时使用默认值
             dto.setLhTimeSeconds(3600);
-            dto.setMouldQty(1);
         }
 
         // 填充日硫化产能

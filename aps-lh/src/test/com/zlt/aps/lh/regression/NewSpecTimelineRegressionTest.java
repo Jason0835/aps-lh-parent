@@ -11,6 +11,7 @@ import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.NewSpecProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -27,7 +28,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -71,13 +71,11 @@ class NewSpecTimelineRegressionTest {
 
         when(orderNoGenerator.generateOrderNo(any())).thenReturn("LHGD20260411001");
         when(machineMatchStrategy.matchMachines(any(), any())).thenReturn(Collections.singletonList(machine));
-        when(machineMatchStrategy.selectBestMachine(any(), any())).thenReturn(machine);
-        when(mouldChangeBalanceStrategy.hasCapacity(any(), any())).thenReturn(true);
+        when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any())).thenReturn(machine);
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any())).thenReturn(dateTime(2026, 4, 11, 8, 0));
         when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any())).thenReturn(dateTime(2026, 4, 11, 8, 0));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 16, 0));
-        when(capacityCalculateStrategy.calculateFirstShiftQty(any(), any(), anyInt(), anyInt())).thenReturn(5);
         strategy.scheduleNewSpecs(context, machineMatchStrategy, mouldChangeBalanceStrategy,
                 inspectionBalanceStrategy, capacityCalculateStrategy);
 
@@ -92,6 +90,49 @@ class NewSpecTimelineRegressionTest {
         assertEquals("MAT-NEW", machine.getCurrentMaterialCode());
         assertEquals("SPEC-NEW", machine.getPreviousSpecCode());
         assertEquals(result.getSpecEndTime(), machine.getEstimatedEndTime());
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldUseMachineMouldQtyAndDeductPartialShiftQty() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = machine("M1", "FC-M1", dateTime(2026, 4, 10, 20, 0));
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.getMachineScheduleMap().put("M1", machine);
+
+        SkuScheduleDTO sku = newSku("MAT-CAP", "SPEC-CAP", "18", 17);
+        sku.setLhTimeSeconds(3060);
+        sku.setShiftCapacity(16);
+        context.getNewSpecSkuList().add(sku);
+
+        MdmSkuLhCapacity capacity = new MdmSkuLhCapacity();
+        capacity.setMaterialCode("MAT-CAP");
+        capacity.setClassCapacity(16);
+        context.getSkuLhCapacityMap().put("MAT-CAP", capacity);
+
+        MdmSkuMouldRel rel = new MdmSkuMouldRel();
+        rel.setMouldCode("MOULD-02");
+        context.getSkuMouldRelMap().put("MAT-CAP", Collections.singletonList(rel));
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("LHGD20260411002");
+        when(machineMatchStrategy.matchMachines(any(), any())).thenReturn(Collections.singletonList(machine));
+        when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any())).thenReturn(machine);
+        when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
+                .thenReturn(dateTime(2026, 4, 10, 22, 0));
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any()))
+                .thenReturn(dateTime(2026, 4, 10, 22, 0));
+        when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
+                .thenReturn(dateTime(2026, 4, 11, 6, 0));
+
+        strategy.scheduleNewSpecs(context, machineMatchStrategy, mouldChangeBalanceStrategy,
+                inspectionBalanceStrategy, capacityCalculateStrategy);
+
+        assertEquals(1, context.getScheduleResultList().size());
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals(2, result.getMouldQty());
+        assertEquals(16, result.getSingleMouldShiftQty());
+        assertEquals(14, result.getClass1PlanQty());
+        assertEquals(3, result.getClass2PlanQty());
+        assertEquals(dateTime(2026, 4, 11, 7, 0), result.getClass1StartTime());
     }
 
     private LhScheduleContext newContext() {

@@ -7,7 +7,7 @@ import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.handler.DataInitHandler;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
-import com.zlt.aps.mdm.api.domain.entity.MdmDevMaintenancePlan;
+import com.zlt.aps.mp.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;

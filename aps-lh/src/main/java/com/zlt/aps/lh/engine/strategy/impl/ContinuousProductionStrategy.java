@@ -18,6 +18,8 @@ import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
+import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import lombok.extern.slf4j.Slf4j;
@@ -84,7 +86,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
             // 创建排程结果并分配到各班次
-            LhScheduleResult result = buildScheduleResult(context, machine, typeBlockSku, startTime, shifts, false);
+            int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
+            typeBlockSku.setMouldQty(machineMouldQty);
+            LhScheduleResult result = buildScheduleResult(
+                    context, machine, typeBlockSku, startTime, shifts, machineMouldQty, false);
             if (result != null) {
                 context.getScheduleResultList().add(result);
                 registerMachineAssignment(context, machine.getMachineCode(), result);
@@ -112,7 +117,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
             // 创建排程结果（续作从班次1开始）
             Date startTime = shifts.isEmpty() ? new Date() : shifts.get(0).getShiftStartDateTime();
-            LhScheduleResult result = buildScheduleResult(context, machine, sku, startTime, shifts, isEnding);
+            int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
+            sku.setMouldQty(machineMouldQty);
+            LhScheduleResult result = buildScheduleResult(
+                    context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
             if (result != null) {
                 result.setScheduleType("01");
                 result.setIsEnd(isEnding ? "1" : "0");
@@ -287,6 +295,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                                   SkuScheduleDTO sku,
                                                   Date startTime,
                                                   List<LhShiftConfigVO> shifts,
+                                                  int mouldQty,
                                                   boolean isEnding) {
         LhScheduleResult result = new LhScheduleResult();
         result.setFactoryCode(context.getFactoryCode());
@@ -302,7 +311,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setStructureName(sku.getStructureName());
         result.setScheduleDate(context.getScheduleTargetDate());
         result.setLhTime(sku.getLhTimeSeconds());
-        result.setMouldQty(sku.getMouldQty());
+        result.setMouldQty(mouldQty);
+        result.setSingleMouldShiftQty(SingleMouldShiftQtyUtil.resolveSingleMouldShiftQty(context, sku, mouldQty));
         result.setDailyPlanQty(sku.getDailyPlanQty());
         result.setMouldSurplusQty(sku.getSurplusQty());
         result.setIsEnd(isEnding ? "1" : "0");
@@ -326,10 +336,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
         // 按班次分配计划量
         int remaining = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
-        remaining = distributeToShifts(context, result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), remaining);
+        remaining = distributeToShifts(context, result, shifts, startTime,
+                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining);
 
         // 设置收尾时间（最后一个有计划量班次的结束时间）
-        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), sku.getMouldQty(), remaining, isEnding);
+        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), mouldQty, remaining, isEnding);
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
 
@@ -350,6 +361,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                    LhScheduleResult result,
                                    List<LhShiftConfigVO> shifts,
                                    Date startTime,
+                                   int shiftCapacity,
                                    int lhTimeSeconds,
                                    int mouldQty,
                                    int remaining) {
@@ -381,7 +393,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            int shiftMaxQty = (int) (availableSeconds / lhTimeSeconds) * mouldQty;
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+                    shift, effectiveStart, shiftCapacity, lhTimeSeconds, mouldQty);
+            if (shiftMaxQty <= 0) {
+                continue;
+            }
             int shiftQty = Math.min(remaining, shiftMaxQty);
 
             setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getShiftEndDateTime());
@@ -423,7 +439,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             Integer planQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
             if (planQty != null && planQty > 0 && lhTimeSeconds > 0 && mouldQty > 0) {
                 // 收尾时间 = 该班次开始时间 + (计划量/模数) * 硫化时间
-                long secondsNeeded = (long) (planQty / mouldQty) * lhTimeSeconds;
+                long secondsNeeded = (long) Math.ceil((double) planQty / mouldQty) * lhTimeSeconds;
                 Date shiftStart = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
                 if (shiftStart != null) {
                     return new Date(shiftStart.getTime() + secondsNeeded * 1000L);
@@ -447,25 +463,61 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * 重新在班次间均衡分配计划量（用于allocateShiftPlanQty后续调整）
      */
     private void redistributeShiftQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
-        if (result.getLhTime() == null || result.getLhTime() <= 0 || result.getMouldQty() == null) {
+        if (CollectionUtils.isEmpty(shifts)
+                || result.getLhTime() == null
+                || result.getLhTime() <= 0
+                || result.getTotalDailyPlanQty() == null
+                || result.getTotalDailyPlanQty() <= 0) {
             return;
         }
-        int shiftSeconds = !shifts.isEmpty() && shifts.get(0).getDurationMinutes() > 0
-                ? shifts.get(0).getDurationMinutes() * 60
-                : 8 * 3600;
-        int shiftCapacity = (shiftSeconds / result.getLhTime()) * result.getMouldQty();
-        int totalQty = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
-        int remaining = totalQty;
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
+                result.getMouldQty() != null ? result.getMouldQty() : 0);
+        int shiftCapacity = result.getSingleMouldShiftQty() != null ? result.getSingleMouldShiftQty() : 0;
+        int remaining = result.getTotalDailyPlanQty();
+        Date cursorStartTime = resolveRedistributeStartTime(result, shifts);
 
         for (LhShiftConfigVO shift : shifts) {
             if (remaining <= 0) {
                 setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
                 continue;
             }
-            int shiftQty = Math.min(remaining, shiftCapacity);
-            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, shift.getShiftStartDateTime(), shift.getShiftEndDateTime());
+            if (cursorStartTime != null
+                    && !cursorStartTime.before(shift.getShiftEndDateTime())
+                    && shift != shifts.get(shifts.size() - 1)) {
+                setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
+                continue;
+            }
+            Date shiftStartTime = shift.getShiftStartDateTime();
+            Date effectiveStartTime = cursorStartTime != null && cursorStartTime.after(shiftStartTime)
+                    ? cursorStartTime : shiftStartTime;
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+                    shift, effectiveStartTime, shiftCapacity, result.getLhTime(), mouldQty);
+            if (shiftMaxQty <= 0) {
+                setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
+                continue;
+            }
+            int shiftQty = Math.min(remaining, shiftMaxQty);
+            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStartTime, shift.getShiftEndDateTime());
             remaining -= shiftQty;
+            cursorStartTime = shift.getShiftEndDateTime();
         }
+    }
+
+    /**
+     * 获取结果当前的首个开产时间，供续作班次重分配时保留残班起点。
+     *
+     * @param result 排程结果
+     * @param shifts 班次列表
+     * @return 首个有效开产时间
+     */
+    private Date resolveRedistributeStartTime(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+        for (LhShiftConfigVO shift : shifts) {
+            Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
+            if (shiftStartTime != null) {
+                return shiftStartTime;
+            }
+        }
+        return shifts.get(0).getShiftStartDateTime();
     }
 
     /**

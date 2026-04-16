@@ -85,6 +85,25 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
         return null;
     }
 
+    @Override
+    public void rollbackInspection(LhScheduleContext context, Date inspectionTime) {
+        if (context == null || inspectionTime == null) {
+            return;
+        }
+        String dateKey = formatDateKey(inspectionTime);
+        int[] counts = context.getDailyFirstInspectionCountMap().get(dateKey);
+        if (counts == null) {
+            return;
+        }
+        if (LhScheduleTimeUtil.isMorningShift(context, inspectionTime) && counts[IDX_MORNING] > 0) {
+            counts[IDX_MORNING]--;
+            return;
+        }
+        if (LhScheduleTimeUtil.isAfternoonShift(context, inspectionTime) && counts[IDX_AFTERNOON] > 0) {
+            counts[IDX_AFTERNOON]--;
+        }
+    }
+
     /**
      * 中班时间窗口有效性检查
      * <p>中班可安排首检的时间窗口：14:00-20:00（禁止换模开始时间之前），需能完成换模+首检</p>

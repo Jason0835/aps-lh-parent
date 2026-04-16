@@ -58,6 +58,8 @@ public class LhScheduleContext {
     private String monthPlanVersion;
     /** 月计划排产版本 */
     private String productionVersion;
+    /** 操作人 */
+    private String operator;
     /** 本次排程配置快照 */
     private LhScheduleConfig scheduleConfig;
 

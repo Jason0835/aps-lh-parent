@@ -20,6 +20,7 @@ import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -352,6 +353,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setScheduleDate(context.getScheduleTargetDate());
         result.setLhTime(sku.getLhTimeSeconds());
         result.setMouldQty(sku.getMouldQty());
+        result.setSingleMouldShiftQty(SingleMouldShiftQtyUtil.resolveSingleMouldShiftQty(context, sku));
         result.setDailyPlanQty(sku.getDailyPlanQty());
         result.setMouldSurplusQty(sku.getSurplusQty());
         result.setIsEnd("0");

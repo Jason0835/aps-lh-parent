@@ -154,6 +154,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     @Override
     public void adjustEmbryoStock(LhScheduleContext context) {
         log.info("续作排产 - 胎胚库存调整");
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         // 收尾SKU优先占用胎胚库存，普通SKU再按顺序扣减
         Map<String, Integer> embryoStockMap = buildEmbryoStockMap(context);
@@ -161,13 +162,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         // 先处理收尾SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if ("1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(result, embryoStockMap);
+                adjustResultByEmbryoStock(result, embryoStockMap, shifts);
             }
         }
         // 再处理普通SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if (!"1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(result, embryoStockMap);
+                adjustResultByEmbryoStock(result, embryoStockMap, shifts);
             }
         }
     }
@@ -175,6 +176,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     @Override
     public void scheduleReduceMould(LhScheduleContext context) {
         log.info("续作排产 - 降模排产");
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         // 按materialCode分组找出同SKU多机台情况
         Map<String, List<LhScheduleResult>> skuResultMap = new HashMap<>();
@@ -190,15 +192,15 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            int surplusQty = 0;
+            int targetQty = 0;
             SkuScheduleDTO skuDto = findSkuDto(context, entry.getKey());
             if (skuDto != null) {
-                surplusQty = skuDto.getSurplusQty();
+                targetQty = skuDto.getPendingQty() > 0 ? skuDto.getPendingQty() : skuDto.getWindowPlanQty();
             }
 
-            // 总计划量超过余量时才降模
-            int totalPlanQty = skuResults.stream().mapToInt(r -> r.getTotalDailyPlanQty() != null ? r.getTotalDailyPlanQty() : 0).sum();
-            if (totalPlanQty <= surplusQty) {
+            // 总计划量超过当前窗口待排量时才降模
+            int totalPlanQty = skuResults.stream().mapToInt(ShiftFieldUtil::resolveScheduledQty).sum();
+            if (targetQty <= 0 || totalPlanQty <= targetQty) {
                 continue;
             }
 
@@ -208,13 +210,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 return m != null ? m.getCapsuleUsageCount() : 0;
             }));
 
-            int remaining = surplusQty;
+            int remaining = targetQty;
             for (LhScheduleResult result : skuResults) {
-                int allocation = Math.min(remaining, result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0);
-                result.setTotalDailyPlanQty(allocation);
+                int allocation = Math.min(remaining, ShiftFieldUtil.resolveScheduledQty(result));
+                redistributeShiftQty(result, shifts, allocation);
                 remaining -= allocation;
-                if (remaining <= 0) {
-                    // 该机台降为0：标记为收尾并更新结束时间
+                if (allocation <= 0) {
+                    // 当前结果已被完全降为0，保留收尾标记，避免后续继续参与续作产量判断。
                     result.setIsEnd("1");
                 }
             }
@@ -313,7 +315,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setLhTime(sku.getLhTimeSeconds());
         result.setMouldQty(mouldQty);
         result.setSingleMouldShiftQty(SingleMouldShiftQtyUtil.resolveSingleMouldShiftQty(context, sku, mouldQty));
-        result.setDailyPlanQty(sku.getDailyPlanQty());
+        result.setDailyPlanQty(0);
+        result.setTotalDailyPlanQty(sku.getMonthPlanQty());
         result.setMouldSurplusQty(sku.getSurplusQty());
         result.setIsEnd(isEnding ? "1" : "0");
         result.setIsDelivery(sku.isDeliveryLocked() ? "1" : "0");
@@ -335,17 +338,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setOrderNo(orderNo);
 
         // 按班次分配计划量
-        int remaining = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
-        remaining = distributeToShifts(context, result, shifts, startTime,
+        int remaining = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining);
 
-        // 设置收尾时间（最后一个有计划量班次的结束时间）
-        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), mouldQty, remaining, isEnding);
-        result.setSpecEndTime(specEndTime);
-        result.setTdaySpecEndTime(specEndTime);
-
-        int totalQty = calcTotalPlanQty(result, shifts);
-        result.setTotalDailyPlanQty(totalQty);
+        refreshResultSummary(result, shifts);
         result.setRealScheduleDate(context.getScheduleDate());
         result.setProductionStatus("0");
 
@@ -428,7 +425,6 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                  List<LhShiftConfigVO> shifts,
                                  int lhTimeSeconds,
                                  int mouldQty,
-                                 int remainingUnscheduled,
                                  boolean isEnding) {
         if (!isEnding) {
             return null;
@@ -463,17 +459,33 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * 重新在班次间均衡分配计划量（用于allocateShiftPlanQty后续调整）
      */
     private void redistributeShiftQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+        redistributeShiftQty(result, shifts, ShiftFieldUtil.resolveScheduledQty(result));
+    }
+
+    /**
+     * 按指定目标量重新在班次间均衡分配计划量。
+     *
+     * @param result 排程结果
+     * @param shifts 班次列表
+     * @param targetQty 目标计划量
+     */
+    private void redistributeShiftQty(LhScheduleResult result, List<LhShiftConfigVO> shifts, int targetQty) {
         if (CollectionUtils.isEmpty(shifts)
                 || result.getLhTime() == null
-                || result.getLhTime() <= 0
-                || result.getTotalDailyPlanQty() == null
-                || result.getTotalDailyPlanQty() <= 0) {
+                || result.getLhTime() <= 0) {
             return;
         }
+
+        if (targetQty <= 0) {
+            clearShiftPlanQty(result, shifts);
+            refreshResultSummary(result, shifts);
+            return;
+        }
+
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
                 result.getMouldQty() != null ? result.getMouldQty() : 0);
         int shiftCapacity = result.getSingleMouldShiftQty() != null ? result.getSingleMouldShiftQty() : 0;
-        int remaining = result.getTotalDailyPlanQty();
+        int remaining = targetQty;
         Date cursorStartTime = resolveRedistributeStartTime(result, shifts);
 
         for (LhShiftConfigVO shift : shifts) {
@@ -501,6 +513,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             remaining -= shiftQty;
             cursorStartTime = shift.getShiftEndDateTime();
         }
+        refreshResultSummary(result, shifts);
     }
 
     /**
@@ -543,7 +556,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 根据胎胚库存调整排程结果的计划量
      */
-    private void adjustResultByEmbryoStock(LhScheduleResult result, Map<String, Integer> embryoStockMap) {
+    private void adjustResultByEmbryoStock(LhScheduleResult result,
+                                           Map<String, Integer> embryoStockMap,
+                                           List<LhShiftConfigVO> shifts) {
         String embryoCode = result.getEmbryoCode();
         if (embryoCode == null) {
             return;
@@ -552,14 +567,45 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (stock == null || stock < 0) {
             return;
         }
-        int totalPlan = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
+        int totalPlan = ShiftFieldUtil.resolveScheduledQty(result);
         if (totalPlan <= stock) {
             embryoStockMap.put(embryoCode, stock - totalPlan);
         } else {
             // 库存不足，削减计划量
-            result.setTotalDailyPlanQty(stock);
+            redistributeShiftQty(result, shifts, stock);
             embryoStockMap.put(embryoCode, 0);
         }
+    }
+
+    /**
+     * 清空结果行的班次计划量。
+     *
+     * @param result 排程结果
+     * @param shifts 班次列表
+     */
+    private void clearShiftPlanQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+        for (LhShiftConfigVO shift : shifts) {
+            setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
+        }
+    }
+
+    /**
+     * 刷新结果行的汇总计划量和收尾时间。
+     *
+     * @param result 排程结果
+     * @param shifts 班次列表
+     */
+    private void refreshResultSummary(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+        if (result == null) {
+            return;
+        }
+        ShiftFieldUtil.syncDailyPlanQty(result);
+        int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
+                result.getMouldQty() != null ? result.getMouldQty() : 0);
+        Date specEndTime = calcSpecEndTime(result, shifts, lhTimeSeconds, mouldQty, "1".equals(result.getIsEnd()));
+        result.setSpecEndTime(specEndTime);
+        result.setTdaySpecEndTime(specEndTime);
     }
 
     /**

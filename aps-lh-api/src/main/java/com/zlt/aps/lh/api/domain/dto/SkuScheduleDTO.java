@@ -44,6 +44,8 @@ public class SkuScheduleDTO {
     private int finishedQty;
     /** 硫化余量 = 月度计划量 - 已完成合格量 */
     private int surplusQty;
+    /** 排程窗口计划量（窗口内各日计划量之和） */
+    private int windowPlanQty;
     /** T日计划量 */
     private int dailyPlanQty;
     /** 待排产量(排程过程中动态递减) */

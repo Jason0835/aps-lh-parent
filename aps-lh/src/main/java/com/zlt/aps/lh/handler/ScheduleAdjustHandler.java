@@ -4,11 +4,13 @@ import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
+import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.api.enums.SkuTagEnum;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
+import com.zlt.aps.lh.util.MonthPlanDayQtyUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
@@ -37,6 +39,11 @@ import java.util.Map;
 @Slf4j
 @Component
 public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
+
+    /** 无计划量未排产提示 */
+    private static final String NO_PLAN_QTY_REASON_TEMPLATE = "物料：%s 没有计划量，不进行排产";
+    /** 无窗口计划量但存在欠产结转提示 */
+    private static final String CARRY_FORWARD_ONLY_WARN_TEMPLATE = "物料：%s 当前排程窗口没有计划量，但存在欠产结转[%d]，按欠产继续排产";
 
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
@@ -112,16 +119,22 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         for (FactoryMonthPlanProductionFinalResult plan : monthPlanList) {
             // 计算硫化余量
             SurplusCalculation surplus = calculateSurplusQty(context, plan);
-            // 余量为0说明已完成，跳过
-            if (surplus.getSurplusQty() <= 0) {
-                continue;
-            }
-
             SkuScheduleDTO dto = buildSkuScheduleDTO(context, plan, surplus);
 
             // 产品结构为空，跳过
             if (StringUtils.isEmpty(plan.getStructureName())) {
                 continue;
+            }
+
+            // 排程窗口没有计划量，且也没有正向欠产时，直接记未排产并跳过。
+            if (dto.getWindowPlanQty() <= 0 && dto.getPendingQty() <= 0) {
+                addNoPlanUnscheduledResult(context, dto);
+                continue;
+            }
+
+            // 排程窗口没有计划量但存在正向欠产时，允许继续排产，并给出明确告警。
+            if (dto.getWindowPlanQty() <= 0 && dto.getPendingQty() > 0) {
+                log.warn(String.format(CARRY_FORWARD_ONLY_WARN_TEMPLATE, dto.getMaterialCode(), dto.getPendingQty()));
             }
 
             structureSkuMap.computeIfAbsent(plan.getStructureName(), k -> new ArrayList<>()).add(dto);
@@ -209,13 +222,13 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
         // 计划量信息
         dto.setMonthPlanQty(plan.getTotalQty() != null ? plan.getTotalQty() : 0);
-        int carryForwardQty = context.getCarryForwardQtyMap().getOrDefault(plan.getMaterialCode(), 0);
-        int adjustedQty = surplus.getSurplusQty();
-        if (surplus.isFromMonthSurplus()) {
-            adjustedQty = Math.max(0, adjustedQty + carryForwardQty);
-        }
-        dto.setSurplusQty(adjustedQty);
-        dto.setPendingQty(adjustedQty);
+        dto.setFinishedQty(Math.max(0, dto.getMonthPlanQty() - surplus.getSurplusQty()));
+        int carryForwardQty = Math.max(0, context.getCarryForwardQtyMap().getOrDefault(plan.getMaterialCode(), 0));
+        int windowPlanQty = MonthPlanDayQtyUtil.resolveWindowPlanQty(
+                plan, context.getScheduleDate(), context.getScheduleTargetDate());
+        dto.setWindowPlanQty(windowPlanQty);
+        dto.setSurplusQty(surplus.getSurplusQty());
+        dto.setPendingQty(windowPlanQty + carryForwardQty);
         dto.setDailyPlanQty(plan.getDayVulcanizationQty() != null ? plan.getDayVulcanizationQty() : 0);
 
         // 产能信息（从SKU日硫化产能Map获取）
@@ -253,6 +266,36 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         dto.setSkuTag(SkuTagEnum.NORMAL.getCode());
 
         return dto;
+    }
+
+    /**
+     * 追加“无计划量不排产”的未排结果。
+     *
+     * @param context 排程上下文
+     * @param sku SKU排程DTO
+     */
+    private void addNoPlanUnscheduledResult(LhScheduleContext context, SkuScheduleDTO sku) {
+        String reason = String.format(NO_PLAN_QTY_REASON_TEMPLATE, sku.getMaterialCode());
+        log.warn(reason);
+
+        LhUnscheduledResult unscheduled = new LhUnscheduledResult();
+        unscheduled.setFactoryCode(context.getFactoryCode());
+        unscheduled.setBatchNo(context.getBatchNo());
+        unscheduled.setScheduleDate(context.getScheduleTargetDate());
+        unscheduled.setMonthPlanVersion(sku.getMonthPlanVersion());
+        unscheduled.setProductionVersion(sku.getProductionVersion());
+        unscheduled.setMaterialCode(sku.getMaterialCode());
+        unscheduled.setStructureName(sku.getStructureName());
+        unscheduled.setMaterialDesc(sku.getMaterialDesc());
+        unscheduled.setMainMaterialDesc(sku.getMainMaterialDesc());
+        unscheduled.setSpecCode(sku.getSpecCode());
+        unscheduled.setEmbryoCode(sku.getEmbryoCode());
+        unscheduled.setUnscheduledQty(0);
+        unscheduled.setUnscheduledReason(reason);
+        unscheduled.setMouldQty(sku.getMouldQty());
+        unscheduled.setDataSource("0");
+        unscheduled.setIsDelete(0);
+        context.getUnscheduledResultList().add(unscheduled);
     }
 
     private int resolveActualFinishedQty(LhScheduleContext context, LhScheduleResult result) {

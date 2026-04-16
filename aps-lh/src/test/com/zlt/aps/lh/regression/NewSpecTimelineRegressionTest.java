@@ -130,6 +130,8 @@ class NewSpecTimelineRegressionTest {
         LhScheduleResult result = context.getScheduleResultList().get(0);
         assertEquals(2, result.getMouldQty());
         assertEquals(16, result.getSingleMouldShiftQty());
+        assertEquals(17, result.getDailyPlanQty());
+        assertEquals(50, result.getTotalDailyPlanQty());
         assertEquals(14, result.getClass1PlanQty());
         assertEquals(3, result.getClass2PlanQty());
         assertEquals(dateTime(2026, 4, 11, 7, 0), result.getClass1StartTime());
@@ -162,6 +164,8 @@ class NewSpecTimelineRegressionTest {
         dto.setStructureName("S1");
         dto.setSpecCode(specCode);
         dto.setProSize(proSize);
+        dto.setMonthPlanQty(50);
+        dto.setWindowPlanQty(pendingQty);
         dto.setPendingQty(pendingQty);
         dto.setDailyPlanQty(pendingQty);
         dto.setLhTimeSeconds(3600);

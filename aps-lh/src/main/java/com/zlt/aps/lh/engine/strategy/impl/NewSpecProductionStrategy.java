@@ -99,12 +99,12 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             if (sku == null || sku.getEmbryoStock() < 0) {
                 continue;
             }
-            int totalPlan = result.getTotalDailyPlanQty() != null ? result.getTotalDailyPlanQty() : 0;
+            int totalPlan = ShiftFieldUtil.resolveScheduledQty(result);
             if (totalPlan > sku.getEmbryoStock()) {
                 // 库存不足，按比例削减各班次计划量
                 double ratio = (double) sku.getEmbryoStock() / totalPlan;
                 scaleShiftPlanQty(context, result, ratio);
-                result.setTotalDailyPlanQty(sku.getEmbryoStock());
+                refreshResultSummary(context, result);
             }
         }
     }
@@ -203,7 +203,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, productionStartTime, mouldChangeStartTime,
                         mouldChangeCompleteTime, shifts, machineMouldQty);
-                if (result == null || result.getTotalDailyPlanQty() == null || result.getTotalDailyPlanQty() <= 0) {
+                if (result == null || result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
                     // 无有效产能时回滚首检和换模占用，避免影响后续SKU排产
                     inspectionBalance.rollbackInspection(context, inspectionTime);
                     mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
@@ -357,7 +357,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setLhTime(sku.getLhTimeSeconds());
         result.setMouldQty(mouldQty);
         result.setSingleMouldShiftQty(SingleMouldShiftQtyUtil.resolveSingleMouldShiftQty(context, sku, mouldQty));
-        result.setDailyPlanQty(sku.getDailyPlanQty());
+        result.setDailyPlanQty(0);
+        result.setTotalDailyPlanQty(sku.getMonthPlanQty());
         result.setMouldSurplusQty(sku.getSurplusQty());
         result.setIsEnd("0");
         result.setIsDelivery(sku.isDeliveryLocked() ? "1" : "0");
@@ -379,15 +380,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode()));
 
         // 按班次分配计划量
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
-        int remaining = distributeToShifts(context, result, shifts, startTime,
+        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty);
-
-        int totalQty = calcTotalPlanQty(result, shifts);
-        result.setTotalDailyPlanQty(totalQty);
-        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), mouldQty);
-        result.setSpecEndTime(specEndTime);
-        result.setTdaySpecEndTime(specEndTime);
+        refreshResultSummary(context, result);
         return result;
     }
 
@@ -479,6 +475,29 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                         ShiftFieldUtil.getShiftEndTime(result, idx));
             }
         }
+    }
+
+    /**
+     * 刷新结果行的汇总计划量和规格结束时间。
+     *
+     * @param context 排程上下文
+     * @param result 排程结果
+     */
+    private void refreshResultSummary(LhScheduleContext context, LhScheduleResult result) {
+        if (result == null) {
+            return;
+        }
+        ShiftFieldUtil.syncDailyPlanQty(result);
+        List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
+        if (CollectionUtils.isEmpty(shifts)) {
+            shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        }
+        int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
+                result.getMouldQty() != null ? result.getMouldQty() : 0);
+        Date specEndTime = calcSpecEndTime(result, shifts, lhTimeSeconds, mouldQty);
+        result.setSpecEndTime(specEndTime);
+        result.setTdaySpecEndTime(specEndTime);
     }
 
     private Date calcSpecEndTime(LhScheduleResult result, List<LhShiftConfigVO> shifts, int lhTimeSeconds, int mouldQty) {

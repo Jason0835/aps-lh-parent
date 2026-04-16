@@ -24,6 +24,7 @@ public enum ScheduleErrorCode {
     MES_RELEASED("S4101", "排程已下发MES，禁止重新排程"),
     SCHEDULE_IN_PROGRESS("S4102", "排程任务正在执行中"),
     BATCH_NO_GENERATE_FAILED("S4103", "批次号生成失败"),
+    CROSS_MONTH_SCHEDULE_UNSUPPORTED("S4104", "当前暂未开放跨月排产能力"),
 
     // ==================== S4.2 数据初始化错误 ====================
     DATA_INCOMPLETE("S4201", "基础数据不完整"),

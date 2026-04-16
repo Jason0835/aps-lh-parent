@@ -153,18 +153,13 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
     }
 
     /**
-     * 检查模具是否与机台兼容（模数不超限且模具未被占用）
+     * 检查模具是否与机台兼容（仅校验模具未被占用）。
      */
     private boolean isMouldCompatible(SkuScheduleDTO sku, List<String> skuMouldCodes, MachineScheduleDTO machine, Set<String> occupiedMouldCodes) {
         if (skuMouldCodes.isEmpty()) {
             return true;
         }
-        // 模数不能超过机台最大模台数（按SKU实际用模数判断，不按关系条数判断）
-        int requiredMouldQty = sku != null && sku.getMouldQty() > 0 ? sku.getMouldQty() : 1;
-        if (requiredMouldQty > machine.getMaxMoldNum()) {
-            return false;
-        }
-        // 检查模具是否已被占用（共用模冲突）
+        // 当前 mouldQty 的业务语义是“选机后的机台模台数”，此处不再拿 SKU 预置模数拦截候选机台。
         for (String mouldCode : skuMouldCodes) {
             if (occupiedMouldCodes.contains(mouldCode)) {
                 return false;

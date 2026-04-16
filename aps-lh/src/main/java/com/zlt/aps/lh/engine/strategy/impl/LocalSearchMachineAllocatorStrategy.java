@@ -12,6 +12,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
@@ -274,7 +275,8 @@ public class LocalSearchMachineAllocatorStrategy {
             return null;
         }
         Date productionStartTime = LhScheduleTimeUtil.addHours(inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
-        LocalSearchCapacityEstimate capacityEstimate = estimateCapacity(context, sku, productionStartTime, shifts, capacityCalculate);
+        LocalSearchCapacityEstimate capacityEstimate = estimateCapacity(
+                context, sku, machine, productionStartTime, shifts);
         if (capacityEstimate.getTotalQty() <= 0 || capacityEstimate.getSpecEndTime() == null) {
             // 产能不可行时回滚已占用的首检/换模窗口
             inspectionBalance.rollbackInspection(context, inspectionTime);
@@ -311,23 +313,24 @@ public class LocalSearchMachineAllocatorStrategy {
      *
      * @param context 排程上下文
      * @param sku 待排 SKU
+     * @param machine 候选机台
      * @param productionStartTime 开产时间
      * @param shifts 排程班次窗口
-     * @param capacityCalculate 产能计算策略
      * @return 产能估算结果
      */
     private LocalSearchCapacityEstimate estimateCapacity(LhScheduleContext context,
                                                          SkuScheduleDTO sku,
+                                                         MachineScheduleDTO machine,
                                                          Date productionStartTime,
-                                                         List<LhShiftConfigVO> shifts,
-                                                         ICapacityCalculateStrategy capacityCalculate) {
-        if (sku == null || productionStartTime == null || CollectionUtils.isEmpty(shifts)) {
+                                                         List<LhShiftConfigVO> shifts) {
+        if (sku == null || machine == null || productionStartTime == null || CollectionUtils.isEmpty(shifts)) {
             return LocalSearchCapacityEstimate.empty();
         }
         int lhTimeSeconds = sku.getLhTimeSeconds();
-        int mouldQty = sku.getMouldQty();
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
+        int shiftCapacity = sku.getShiftCapacity();
         int remainingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
-        if (lhTimeSeconds <= 0 || mouldQty <= 0 || remainingQty <= 0) {
+        if (lhTimeSeconds <= 0 || remainingQty <= 0) {
             return LocalSearchCapacityEstimate.empty();
         }
 
@@ -353,14 +356,9 @@ public class LocalSearchMachineAllocatorStrategy {
                 continue;
             }
 
-            // 首个有效班次按剩余时段计算，后续班次按整班产能计算
-            int shiftMaxQty;
-            if (cursorStartTime.equals(effectiveStartTime)) {
-                shiftMaxQty = capacityCalculate.calculateFirstShiftQty(
-                        effectiveStartTime, shift.getShiftEndDateTime(), lhTimeSeconds, mouldQty);
-            } else {
-                shiftMaxQty = capacityCalculate.calculateShiftCapacity(context, lhTimeSeconds, mouldQty);
-            }
+            // 统一按班产主口径或回退公式估算残班/整班计划量。
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+                    shift, effectiveStartTime, shiftCapacity, lhTimeSeconds, mouldQty);
             if (shiftMaxQty <= 0) {
                 continue;
             }

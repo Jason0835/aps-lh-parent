@@ -69,7 +69,7 @@ class NewSpecFailReasonPriorityRegressionTest {
         };
 
         Date mouldFailReadyTime = dateTime(2026, 4, 19, 8, 0);
-        Date noCapacityReadyTime = dateTime(2026, 4, 19, 9, 0);
+        Date noCapacityReadyTime = dateTime(2026, 4, 22, 9, 0);
 
         IMouldChangeBalanceStrategy mouldChangeBalanceStrategy = new IMouldChangeBalanceStrategy() {
             @Override

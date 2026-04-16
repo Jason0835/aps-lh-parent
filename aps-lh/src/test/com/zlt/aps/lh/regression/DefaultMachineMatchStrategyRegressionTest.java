@@ -14,7 +14,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * 机台匹配回归：SKU存在多条模具关系时，应按实际用模数（mouldQty）校验机台模台能力。
+ * 机台匹配回归：SKU存在多条模具关系时，不应把关系条数误当成待选前的用模数。
  */
 class DefaultMachineMatchStrategyRegressionTest {
 
@@ -25,7 +25,7 @@ class DefaultMachineMatchStrategyRegressionTest {
 
         MachineScheduleDTO machine = new MachineScheduleDTO();
         machine.setMachineCode("M1");
-        machine.setStatus("0");
+        machine.setStatus("1");
         machine.setMaxMoldNum(1);
 
         context.setMachineScheduleMap(new LinkedHashMap<>());
@@ -34,7 +34,6 @@ class DefaultMachineMatchStrategyRegressionTest {
 
         SkuScheduleDTO sku = new SkuScheduleDTO();
         sku.setMaterialCode("MAT-1");
-        sku.setMouldQty(1);
 
         context.getSkuMouldRelMap().put("MAT-1", Arrays.asList(
                 mouldRel("MOULD-A"),

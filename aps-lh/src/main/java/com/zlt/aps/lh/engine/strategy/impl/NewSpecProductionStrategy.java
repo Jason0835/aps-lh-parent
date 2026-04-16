@@ -20,6 +20,7 @@ import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import lombok.extern.slf4j.Slf4j;
@@ -198,9 +199,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 // 6. 基于首检完成时间生成新增规格排产结果，并校验当日是否有有效产能
                 Date productionStartTime = LhScheduleTimeUtil.addHours(
                         inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
+                int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(candidateMachine);
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, productionStartTime, mouldChangeStartTime,
-                        mouldChangeCompleteTime, shifts, capacityCalculate);
+                        mouldChangeCompleteTime, shifts, machineMouldQty);
                 if (result == null || result.getTotalDailyPlanQty() == null || result.getTotalDailyPlanQty() <= 0) {
                     // 无有效产能时回滚首检和换模占用，避免影响后续SKU排产
                     inspectionBalance.rollbackInspection(context, inspectionTime);
@@ -212,6 +214,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 }
 
                 // 7. 排产成功后落地结果并刷新机台状态，当前SKU结束尝试
+                sku.setMouldQty(machineMouldQty);
                 context.getScheduleResultList().add(result);
                 updateMachineState(context, candidateMachine, sku, result);
                 registerMachineAssignment(context, machineCode, result);
@@ -336,7 +339,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                          Date mouldChangeStartTime,
                                                          Date mouldChangeEndTime,
                                                          List<LhShiftConfigVO> shifts,
-                                                         ICapacityCalculateStrategy capacityCalculate) {
+                                                         int mouldQty) {
         LhScheduleResult result = new LhScheduleResult();
         result.setFactoryCode(context.getFactoryCode());
         result.setBatchNo(context.getBatchNo());
@@ -352,8 +355,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setStructureName(sku.getStructureName());
         result.setScheduleDate(context.getScheduleTargetDate());
         result.setLhTime(sku.getLhTimeSeconds());
-        result.setMouldQty(sku.getMouldQty());
-        result.setSingleMouldShiftQty(SingleMouldShiftQtyUtil.resolveSingleMouldShiftQty(context, sku));
+        result.setMouldQty(mouldQty);
+        result.setSingleMouldShiftQty(SingleMouldShiftQtyUtil.resolveSingleMouldShiftQty(context, sku, mouldQty));
         result.setDailyPlanQty(sku.getDailyPlanQty());
         result.setMouldSurplusQty(sku.getSurplusQty());
         result.setIsEnd("0");
@@ -377,11 +380,12 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
         // 按班次分配计划量
         int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
-        int remaining = distributeToShifts(context, result, shifts, startTime, sku.getLhTimeSeconds(), sku.getMouldQty(), pendingQty, capacityCalculate);
+        int remaining = distributeToShifts(context, result, shifts, startTime,
+                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty);
 
         int totalQty = calcTotalPlanQty(result, shifts);
         result.setTotalDailyPlanQty(totalQty);
-        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), sku.getMouldQty());
+        Date specEndTime = calcSpecEndTime(result, shifts, sku.getLhTimeSeconds(), mouldQty);
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
         return result;
@@ -396,10 +400,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                    LhScheduleResult result,
                                    List<LhShiftConfigVO> shifts,
                                    Date startTime,
+                                   int shiftCapacity,
                                    int lhTimeSeconds,
                                    int mouldQty,
-                                   int remaining,
-                                   ICapacityCalculateStrategy capacityCalculate) {
+                                   int remaining) {
         if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0 || startTime == null) {
             return remaining;
         }
@@ -428,11 +432,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            int shiftMaxQty;
-            if (startTime.equals(effectiveStart)) {
-                shiftMaxQty = capacityCalculate.calculateFirstShiftQty(effectiveStart, shift.getShiftEndDateTime(), lhTimeSeconds, mouldQty);
-            } else {
-                shiftMaxQty = capacityCalculate.calculateShiftCapacity(context, lhTimeSeconds, mouldQty);
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+                    shift, effectiveStart, shiftCapacity, lhTimeSeconds, mouldQty);
+            if (shiftMaxQty <= 0) {
+                continue;
             }
 
             int shiftQty = Math.min(remaining, shiftMaxQty);

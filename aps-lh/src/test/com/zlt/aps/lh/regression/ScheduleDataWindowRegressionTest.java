@@ -1,8 +1,10 @@
 package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
@@ -29,6 +31,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
@@ -36,7 +39,6 @@ import java.util.Date;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -111,6 +113,78 @@ class ScheduleDataWindowRegressionTest {
         int offsetDays = Math.max(0, LhScheduleConstant.SCHEDULE_DAYS - 1);
         Date scheduleDate = LhScheduleTimeUtil.addDays(target, -offsetDays);
 
+        prepareRequiredBaseMocks();
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode(factoryCode);
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        // [startDate,endDate) 与 T～T+2 对齐见 scheduleWindow_targetDayTDayAndHalfOpenEndMatchFormula；此处仅确认三类数据按该窗口加载
+        verify(workCalendarMapper).selectList(any());
+        verify(devicePlanShutMapper).selectList(any());
+        verify(lhCleaningPlanMapper).selectList(any());
+        verify(lhScheduleResultMapper).selectList(any());
+    }
+
+    @Test
+    void loadAllBaseData_shouldUseLatestSnapshotInConfiguredLookbackWindow() {
+        Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 17));
+        Date scheduleDate = LhScheduleTimeUtil.addDays(target, -2);
+        prepareRequiredBaseMocks();
+
+        // 第一次查询仅用于命中“最近有数据日期”，4/12 有数据，4/14 与 4/13 均为空
+        LhMachineOnlineInfo latestDateRow = new LhMachineOnlineInfo();
+        latestDateRow.setOnlineDate(dateTime(2026, 4, 12, 8, 30, 0));
+
+        // 第二次查询加载命中日期（4/12）整天快照
+        LhMachineOnlineInfo snapshot1 = new LhMachineOnlineInfo();
+        snapshot1.setOnlineDate(dateTime(2026, 4, 12, 9, 0, 0));
+        snapshot1.setLhCode("K1501");
+        snapshot1.setMaterialCode("MAT-A");
+        LhMachineOnlineInfo snapshot2 = new LhMachineOnlineInfo();
+        snapshot2.setOnlineDate(dateTime(2026, 4, 12, 10, 0, 0));
+        snapshot2.setLhCode("K1502");
+        snapshot2.setMaterialCode("MAT-B");
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(
+                Collections.singletonList(latestDateRow),
+                Arrays.asList(snapshot1, snapshot2));
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("FC01");
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+        context.getLhParamsMap().put(LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS, "3");
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        assertEquals(2, context.getMachineOnlineInfoMap().size());
+        assertEquals("MAT-A", context.getMachineOnlineInfoMap().get("K1501").getMaterialCode());
+        assertEquals("MAT-B", context.getMachineOnlineInfoMap().get("K1502").getMaterialCode());
+    }
+
+    @Test
+    void loadAllBaseData_shouldKeepEmptyWhenNoDataWithinLookbackWindow() {
+        Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 17));
+        Date scheduleDate = LhScheduleTimeUtil.addDays(target, -2);
+        prepareRequiredBaseMocks();
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("FC01");
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+        context.getLhParamsMap().put(LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS, "1");
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        assertTrue(context.getMachineOnlineInfoMap().isEmpty());
+    }
+
+    private void prepareRequiredBaseMocks() {
         MpFactoryProductionVersion finalVersion = new MpFactoryProductionVersion();
         finalVersion.setProductionVersion("PV_REGRESSION_01");
         when(mpFactoryProductionVersionMapper.selectCount(any())).thenReturn(1L);
@@ -132,24 +206,10 @@ class ScheduleDataWindowRegressionTest {
         when(monthSurplusMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhShiftFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(mdmMaterialInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhSpecifyMachineMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhRepairCapsuleMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devMaintenancePlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhScheduleResultMapper.selectList(any())).thenReturn(Collections.emptyList());
-
-        LhScheduleContext context = new LhScheduleContext();
-        context.setFactoryCode(factoryCode);
-        context.setScheduleTargetDate(target);
-        context.setScheduleDate(scheduleDate);
-
-        lhBaseDataService.loadAllBaseData(context);
-
-        // [startDate,endDate) 与 T～T+2 对齐见 scheduleWindow_targetDayTDayAndHalfOpenEndMatchFormula；此处仅确认三类数据按该窗口加载
-        verify(workCalendarMapper).selectList(any());
-        verify(devicePlanShutMapper).selectList(any());
-        verify(lhCleaningPlanMapper).selectList(any());
-        verify(lhScheduleResultMapper).selectList(any());
     }
 
     private static Date date(int y, int month, int day) {
@@ -163,5 +223,17 @@ class ScheduleDataWindowRegressionTest {
 
     private static Date stripTime(Date d) {
         return LhScheduleTimeUtil.clearTime(d);
+    }
+
+    private static Date dateTime(int y, int month, int day, int hour, int minute, int second) {
+        Calendar c = Calendar.getInstance();
+        c.clear();
+        c.set(Calendar.YEAR, y);
+        c.set(Calendar.MONTH, month - 1);
+        c.set(Calendar.DAY_OF_MONTH, day);
+        c.set(Calendar.HOUR_OF_DAY, hour);
+        c.set(Calendar.MINUTE, minute);
+        c.set(Calendar.SECOND, second);
+        return c.getTime();
     }
 }

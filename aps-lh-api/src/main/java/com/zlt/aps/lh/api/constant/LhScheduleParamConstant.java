@@ -80,6 +80,8 @@ public final class LhScheduleParamConstant {
     public static final String CAPSULE_PREHEAT_HOURS = "CAPSULE_PREHEAT_HOURS";
     /** 排程天数 */
     public static final String SCHEDULE_DAYS = "SCHEDULE_DAYS";
+    /** MES在机信息往前追溯天数 */
+    public static final String MACHINE_ONLINE_LOOKBACK_DAYS = "MACHINE_ONLINE_LOOKBACK_DAYS";
     /** 停机超时阈值（小时） */
     public static final String MACHINE_STOP_TIMEOUT_HOURS = "MACHINE_STOP_TIMEOUT_HOURS";
     /** 胶囊预警次数 */

@@ -36,6 +36,8 @@ public final class LhScheduleParamConstant {
     public static final String MOULD_CHANGE_OTHER_HOURS = "MOULD_CHANGE_OTHER_HOURS";
     /** 换模总耗时（小时） */
     public static final String MOULD_CHANGE_TOTAL_HOURS = "MOULD_CHANGE_TOTAL_HOURS";
+    /** 换活字块总耗时（小时） */
+    public static final String TYPE_BLOCK_CHANGE_TOTAL_HOURS = "TYPE_BLOCK_CHANGE_TOTAL_HOURS";
     /** 首检时间（小时） */
     public static final String FIRST_INSPECTION_HOURS = "FIRST_INSPECTION_HOURS";
     /** 每班最大首检次数 */

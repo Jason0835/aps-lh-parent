@@ -101,6 +101,8 @@ public class LhScheduleConfigResolver {
                 LhScheduleConstant.MOULD_CHANGE_OTHER_HOURS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MOULD_CHANGE_TOTAL_HOURS,
                 LhScheduleConstant.MOULD_CHANGE_TOTAL_HOURS);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS,
+                LhScheduleConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.FIRST_INSPECTION_HOURS,
                 LhScheduleConstant.FIRST_INSPECTION_HOURS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MAX_FIRST_INSPECTION_PER_SHIFT,

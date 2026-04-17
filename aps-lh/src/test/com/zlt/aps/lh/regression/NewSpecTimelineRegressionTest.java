@@ -82,6 +82,7 @@ class NewSpecTimelineRegressionTest {
         assertEquals(1, context.getScheduleResultList().size());
         LhScheduleResult result = context.getScheduleResultList().get(0);
         assertEquals("MOULD-01", result.getMouldCode());
+        assertEquals("LR", result.getLeftRightMould());
         assertNotNull(result.getClass2StartTime());
         assertEquals(dateTime(2026, 4, 11, 17, 0), result.getClass2StartTime());
         assertNotNull(result.getSpecEndTime());
@@ -128,6 +129,7 @@ class NewSpecTimelineRegressionTest {
 
         assertEquals(1, context.getScheduleResultList().size());
         LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals("LR", result.getLeftRightMould());
         assertEquals(2, result.getMouldQty());
         assertEquals(16, result.getSingleMouldShiftQty());
         assertEquals(17, result.getDailyPlanQty());

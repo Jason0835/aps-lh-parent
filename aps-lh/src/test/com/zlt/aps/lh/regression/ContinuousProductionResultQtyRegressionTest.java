@@ -68,6 +68,7 @@ class ContinuousProductionResultQtyRegressionTest {
         strategy.scheduleContinuousEnding(context);
 
         LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals("LR", result.getLeftRightMould());
         assertEquals(50, result.getTotalDailyPlanQty());
         assertEquals(30, result.getDailyPlanQty());
         assertEquals(16, result.getClass1PlanQty());

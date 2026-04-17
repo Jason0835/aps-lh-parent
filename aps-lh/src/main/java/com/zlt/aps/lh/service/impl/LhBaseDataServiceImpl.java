@@ -2,6 +2,7 @@ package com.zlt.aps.lh.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
@@ -74,6 +75,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /** 查询最新排产版本时返回前两条，用于判断是否存在多条数据 */
     private static final String FINAL_PRODUCTION_VERSION_LIMIT_TWO = "LIMIT 2";
+    /** 查询最新一条记录时使用 */
+    private static final String LIMIT_ONE = "LIMIT 1";
 
     @Resource
     private FactoryMonthPlanProductionFinalResultMapper monthPlanMapper;
@@ -183,9 +186,11 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 12. 加载物料信息
         loadMaterialInfo(context, factoryCode);
 
-        // 13. 加载MES硫化在机信息（取T-1日在机信息）
-        Date previousDay = LhScheduleTimeUtil.addDays(startDate, -1);
-        loadMachineOnlineInfo(context, factoryCode, previousDay);
+        // 13. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
+        int machineOnlineLookbackDays = context.getParamIntValue(
+                LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS,
+                LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS);
+        loadMachineOnlineInfo(context, factoryCode, startDate, machineOnlineLookbackDays);
 
         // 14. 加载硫化定点机台
         loadSpecifyMachine(context, factoryCode);
@@ -562,31 +567,66 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     /**
      * 加载MES硫化在机信息，按机台编号建立Map
      *
-     * @param context     排程上下文
-     * @param factoryCode 分厂编号
-     * @param onlineDate  在机日期（T-1日）
+     * @param context       排程上下文
+     * @param factoryCode   分厂编号
+     * @param scheduleTDay  排程窗口起点 T 日
+     * @param lookbackDays  往前追溯天数（最小 1）
      */
-    private void loadMachineOnlineInfo(LhScheduleContext context, String factoryCode, Date onlineDate) {
-        Date onlineDay = LhScheduleTimeUtil.clearTime(onlineDate);
-        Date onlineDayNext = LhScheduleTimeUtil.addDays(onlineDay, 1);
+    private void loadMachineOnlineInfo(LhScheduleContext context, String factoryCode, Date scheduleTDay, int lookbackDays) {
+        int safeLookbackDays = Math.max(1, lookbackDays);
+        Date tDay = LhScheduleTimeUtil.clearTime(scheduleTDay);
+        Date lookbackStartDay = LhScheduleTimeUtil.addDays(tDay, -safeLookbackDays);
+
+        // 第一步：在 [T-lookbackDays, T) 内找最新一条在机记录，确定命中日期
+        List<LhMachineOnlineInfo> latestOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
+                buildMachineOnlineBaseQuery(factoryCode)
+                        .isNotNull(LhMachineOnlineInfo::getOnlineDate)
+                        .ge(LhMachineOnlineInfo::getOnlineDate, lookbackStartDay)
+                        .lt(LhMachineOnlineInfo::getOnlineDate, tDay)
+                        .orderByDesc(LhMachineOnlineInfo::getOnlineDate)
+                        .last(LIMIT_ONE));
+        if (CollectionUtils.isEmpty(latestOnlineInfoList)) {
+            context.setMachineOnlineInfoMap(new HashMap<>(16));
+            log.info("MES硫化在机信息未命中, 回溯范围: [{} ~ {}), 回溯天数: {}",
+                    LhScheduleTimeUtil.formatDate(lookbackStartDay),
+                    LhScheduleTimeUtil.formatDate(tDay),
+                    safeLookbackDays);
+            return;
+        }
+
+        Date latestOnlineDay = LhScheduleTimeUtil.clearTime(latestOnlineInfoList.get(0).getOnlineDate());
+        Date latestOnlineDayNext = LhScheduleTimeUtil.addDays(latestOnlineDay, 1);
+
+        // 第二步：按命中日期加载该整天快照
         List<LhMachineOnlineInfo> machineOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
-                new LambdaQueryWrapper<LhMachineOnlineInfo>()
-                        .eq(LhMachineOnlineInfo::getFactoryCode, factoryCode)
-                        .ge(LhMachineOnlineInfo::getOnlineDate, onlineDay)
-                        .lt(LhMachineOnlineInfo::getOnlineDate, onlineDayNext)
-                        .and(w -> w.eq(LhMachineOnlineInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
-                                .or()
-                                .isNull(LhMachineOnlineInfo::getIsDelete)));
+                buildMachineOnlineBaseQuery(factoryCode)
+                        .ge(LhMachineOnlineInfo::getOnlineDate, latestOnlineDay)
+                        .lt(LhMachineOnlineInfo::getOnlineDate, latestOnlineDayNext));
         Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>(32);
-        if (machineOnlineInfoList != null) {
+        if (!CollectionUtils.isEmpty(machineOnlineInfoList)) {
             for (LhMachineOnlineInfo onlineInfo : machineOnlineInfoList) {
-                if (onlineInfo.getLhCode() != null) {
+                if (StringUtils.isNotEmpty(onlineInfo.getLhCode())) {
                     machineOnlineInfoMap.put(onlineInfo.getLhCode(), onlineInfo);
                 }
             }
         }
         context.setMachineOnlineInfoMap(machineOnlineInfoMap);
-        log.debug("MES硫化在机信息加载完成, 数量: {}", machineOnlineInfoMap.size());
+        log.info("MES硫化在机信息加载完成, 命中日期: {}, 回溯天数: {}, 数量: {}",
+                LhScheduleTimeUtil.formatDate(latestOnlineDay), safeLookbackDays, machineOnlineInfoMap.size());
+    }
+
+    /**
+     * 构建 MES 在机信息基础查询条件
+     *
+     * @param factoryCode 分厂编号
+     * @return 查询条件
+     */
+    private LambdaQueryWrapper<LhMachineOnlineInfo> buildMachineOnlineBaseQuery(String factoryCode) {
+        return new LambdaQueryWrapper<LhMachineOnlineInfo>()
+                .eq(LhMachineOnlineInfo::getFactoryCode, factoryCode)
+                .and(w -> w.eq(LhMachineOnlineInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
+                        .or()
+                        .isNull(LhMachineOnlineInfo::getIsDelete));
     }
 
     /**

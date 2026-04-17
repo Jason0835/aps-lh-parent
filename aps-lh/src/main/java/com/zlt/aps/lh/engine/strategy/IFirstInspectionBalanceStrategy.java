@@ -23,7 +23,7 @@ public interface IFirstInspectionBalanceStrategy {
      *   <li>收集待处理任务(换模/喷砂清洗/保养/维修, 排除干冰清洗)</li>
      *   <li>优先分配到操作数更少的班次</li>
      *   <li>中班可安排时间窗口: 14:00-20:00</li>
-     *   <li>每个班首检不能超过5台</li>
+     *   <li>每个班首检数量可配置，参数 {@code MAX_FIRST_INSPECTION_PER_SHIFT} 为 {@code -1} 时不限制</li>
      *   <li>不足则顺延到次日早班</li>
      * </ol>
      * </p>

@@ -16,7 +16,7 @@ import java.util.Date;
 
 /**
  * 默认首检均衡策略实现
- * <p>将需首检任务均衡分配到早/中班, 每班不超过5台, 避免单班组过载</p>
+ * <p>将需首检任务均衡分配到早/中班, 每班上限可配置（-1 不限制）, 避免单班组过载</p>
  *
  * @author APS
  */
@@ -37,6 +37,7 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
 
         int maxPerShift = context.getParamIntValue(LhScheduleParamConstant.MAX_FIRST_INSPECTION_PER_SHIFT,
                 LhScheduleConstant.MAX_FIRST_INSPECTION_PER_SHIFT);
+        boolean unlimitedPerShift = maxPerShift < 0;
 
         // 首检时间 = 换模完成时间（上机后的首检）
         Date inspectionTime = mouldChangeTime;
@@ -47,14 +48,15 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
             int[] counts = context.getDailyFirstInspectionCountMap().computeIfAbsent(dateKey, k -> new int[]{0, 0});
 
             if (LhScheduleTimeUtil.isMorningShift(context, inspectionTime)) {
-                if (counts[IDX_MORNING] < maxPerShift) {
+                if (canAllocateInShift(counts[IDX_MORNING], maxPerShift, unlimitedPerShift)) {
                     counts[IDX_MORNING]++;
                     log.debug("首检分配到早班, 机台: {}, 日期: {}, 早班已用: {}/{}", machineCode, dateKey, counts[IDX_MORNING], maxPerShift);
                     return inspectionTime;
                 }
                 // 早班已满：判断中班是否有空间且时间窗口满足
                 Date afternoonStart = LhScheduleTimeUtil.getAfternoonShiftStart(context, inspectionTime);
-                if (counts[IDX_AFTERNOON] < maxPerShift && isAfternoonWindowValid(context, afternoonStart)) {
+                if (canAllocateInShift(counts[IDX_AFTERNOON], maxPerShift, unlimitedPerShift)
+                        && isAfternoonWindowValid(context, afternoonStart)) {
                     counts[IDX_AFTERNOON]++;
                     log.debug("首检移至中班, 机台: {}, 日期: {}, 中班已用: {}/{}", machineCode, dateKey, counts[IDX_AFTERNOON], maxPerShift);
                     return afternoonStart;
@@ -66,7 +68,8 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
 
             if (LhScheduleTimeUtil.isAfternoonShift(context, inspectionTime)) {
                 // 检查中班时间窗口是否足够（14:00-20:00之内可以首检）
-                if (counts[IDX_AFTERNOON] < maxPerShift && isAfternoonWindowValid(context, inspectionTime)) {
+                if (canAllocateInShift(counts[IDX_AFTERNOON], maxPerShift, unlimitedPerShift)
+                        && isAfternoonWindowValid(context, inspectionTime)) {
                     counts[IDX_AFTERNOON]++;
                     log.debug("首检分配到中班, 机台: {}, 日期: {}, 中班已用: {}/{}", machineCode, dateKey, counts[IDX_AFTERNOON], maxPerShift);
                     return inspectionTime;
@@ -130,5 +133,20 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
 
     private String formatDateKey(Date date) {
         return new SimpleDateFormat(DATE_KEY_FORMAT).format(date);
+    }
+
+    /**
+     * 判断当前班次是否可继续分配首检。
+     *
+     * @param usedCount          已占用首检数量
+     * @param maxPerShift        每班首检上限
+     * @param unlimitedPerShift  是否不限量（true 表示不限量）
+     * @return true-允许分配，false-不允许分配
+     */
+    private boolean canAllocateInShift(int usedCount, int maxPerShift, boolean unlimitedPerShift) {
+        if (unlimitedPerShift) {
+            return true;
+        }
+        return usedCount < maxPerShift;
     }
 }

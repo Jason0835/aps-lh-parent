@@ -8,76 +8,84 @@
 -- 4. 规则引擎缓存时间为 5 分钟，修改后最多 5 分钟生效
 -- ============================================
 
--- 工厂 F001 的规则配置示例
+-- 工厂 116 的规则配置示例
 INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMARK) VALUES
+-- ======================== 班次基础规则 ========================
+('116', 'NIGHT_START_HOUR', '22', '夜班开始小时', '默认夜班开始时间'),
+('116', 'MORNING_START_HOUR', '6', '早班开始小时', '默认早班开始时间'),
+('116', 'AFTERNOON_START_HOUR', '14', '中班开始小时', '默认中班开始时间'),
+('116', 'SHIFT_DURATION_HOURS', '8', '班次时长', '单位：小时'),
+
 -- ======================== 换模相关规则 ========================
-('F001', 'DAILY_MOULD_CHANGE_LIMIT', '15', '每日换模上限', '每日最大换模次数'),
-('F001', 'MORNING_MOULD_CHANGE_LIMIT', '8', '早班换模上限', '早班 (6:00-14:00) 最大换模次数'),
-('F001', 'AFTERNOON_MOULD_CHANGE_LIMIT', '7', '中班换模上限', '中班 (14:00-22:00) 最大换模次数'),
-('F001', 'MOULD_CHANGE_PREHEAT_HOURS', '4', '换模预热时间', '单位：小时'),
-('F001', 'MOULD_CHANGE_OTHER_HOURS', '4', '换模其他作业时间', '单位：小时'),
-('F001', 'MOULD_CHANGE_TOTAL_HOURS', '8', '换模总耗时', '单位：小时'),
+('116', 'DAILY_MOULD_CHANGE_LIMIT', '15', '每日换模上限', '每日最大换模次数'),
+('116', 'MORNING_MOULD_CHANGE_LIMIT', '8', '早班换模上限', '早班 (6:00-14:00) 最大换模次数'),
+('116', 'AFTERNOON_MOULD_CHANGE_LIMIT', '7', '中班换模上限', '中班 (14:00-22:00) 最大换模次数'),
+('116', 'NIGHT_MOULD_CHANGE_LIMIT', '0', '夜班换模上限', '夜班默认不允许换模'),
+('116', 'MOULD_CHANGE_PREHEAT_HOURS', '4', '换模预热时间', '单位：小时'),
+('116', 'MOULD_CHANGE_OTHER_HOURS', '4', '换模其他作业时间', '单位：小时'),
+('116', 'MOULD_CHANGE_TOTAL_HOURS', '8', '换模总耗时', '单位：小时'),
+('116', 'TYPE_BLOCK_CHANGE_TOTAL_HOURS', '8', '换活字块总耗时', '单位：小时'),
 
 -- ======================== 首检相关规则 ========================
-('F001', 'FIRST_INSPECTION_HOURS', '1', '首检时间', '单位：小时'),
-('F001', 'MAX_FIRST_INSPECTION_PER_SHIFT', '5', '每班最大首检次数', '每个班次最大首检次数'),
-
--- ======================== 产能相关规则 ========================
-('F001', 'SHIFT_DURATION_HOURS', '8', '班次时长', '单位：小时'),
-('F001', 'SHIFT_EFFICIENCY_MORNING', '1.0', '早班效率因子', '早班产能效率系数'),
-('F001', 'SHIFT_EFFICIENCY_AFTERNOON', '0.95', '中班效率因子', '中班产能效率系数'),
-('F001', 'SHIFT_EFFICIENCY_NIGHT', '0.9', '夜班效率因子', '夜班产能效率系数'),
+('116', 'FIRST_INSPECTION_HOURS', '1', '首检时间', '单位：小时'),
+('116', 'MAX_FIRST_INSPECTION_PER_SHIFT', '-1', '每班最大首检次数', '每个班次最大首检次数，-1 表示不限制'),
 
 -- ======================== 时间窗口规则 ========================
-('F001', 'NO_MOULD_CHANGE_START_HOUR', '20', '禁止换模开始小时', '20:00 后禁止换模'),
-('F001', 'NO_MOULD_CHANGE_END_HOUR', '6', '禁止换模结束小时', '6:00 前禁止换模'),
+('116', 'NO_MOULD_CHANGE_START_HOUR', '20', '禁止换模开始小时', '20:00 后禁止换模'),
+('116', 'NO_MOULD_CHANGE_END_HOUR', '6', '禁止换模结束小时', '6:00 前禁止换模'),
 
 -- ======================== 排程参数 ========================
-('F001', 'SCHEDULE_DAYS', '3', '排程天数', '排程计划覆盖天数'),
-('F001', 'ENDING_DETECT_DAYS', '3', '收尾判定天数', '触发收尾判定的天数'),
-('F001', 'ENDING_TIME_TOLERANCE_MINUTES', '20', '机台收尾时间容差', '单位：分钟'),
-('F001', 'STRUCTURE_ENDING_DAYS', '5', '结构收尾判定天数', '降模排产的收尾判定天数'),
+('116', 'SCHEDULE_DAYS', '3', '排程天数', '排程计划覆盖天数'),
+('116', 'ENDING_DETECT_DAYS', '3', '收尾判定天数', '触发收尾判定的天数'),
+('116', 'ENDING_TIME_TOLERANCE_MINUTES', '20', '机台收尾时间容差', '单位：分钟'),
+('116', 'STRUCTURE_ENDING_DAYS', '5', '结构收尾判定天数', '降模排产的收尾判定天数'),
 
 -- ======================== 干冰清洗规则 ========================
-('F001', 'DRY_ICE_INTERVAL_DAYS', '25', '干冰清洗间隔天数', '每 25 天清洗一次'),
-('F001', 'DRY_ICE_WARNING_DAYS', '20', '干冰清洗预警天数', '提前 20 天预警'),
-('F001', 'DRY_ICE_ADVANCE_DAYS', '7', '干冰清洗提前天数', '提前 7 天安排'),
-('F001', 'DRY_ICE_DURATION_HOURS', '3', '干冰清洗耗时', '单位：小时'),
-('F001', 'DRY_ICE_LOSS_QTY', '6', '干冰清洗损失数量', '清洗过程损失的产品数量'),
-('F001', 'DRY_ICE_DAILY_LIMIT', '3', '每日干冰清洗上限', '每天最多 3 台'),
+('116', 'DRY_ICE_INTERVAL_DAYS', '25', '干冰清洗间隔天数', '每 25 天清洗一次'),
+('116', 'DRY_ICE_WARNING_DAYS', '20', '干冰清洗预警天数', '提前 20 天预警'),
+('116', 'DRY_ICE_ADVANCE_DAYS', '7', '干冰清洗提前天数', '提前 7 天安排'),
+('116', 'DRY_ICE_DURATION_HOURS', '3', '干冰清洗耗时', '单位：小时'),
+('116', 'DRY_ICE_LOSS_QTY', '6', '干冰清洗损失数量', '清洗过程损失的产品数量'),
+('116', 'DRY_ICE_DAILY_LIMIT', '3', '每日干冰清洗上限', '每天最多 3 台'),
 
 -- ======================== 喷砂清洗规则 ========================
-('F001', 'SAND_BLAST_DURATION_HOURS', '10', '喷砂清洗耗时', '单位：小时'),
-('F001', 'SAND_BLAST_WITH_INSPECTION_HOURS', '12', '喷砂清洗含首检耗时', '单位：小时'),
-('F001', 'SAND_BLAST_DAILY_LIMIT', '1', '每日喷砂清洗上限', '每天最多 1 台'),
-('F001', 'SAND_BLAST_MAINTENANCE_DAY_MID', '15', '喷砂保养日 -月中', '每月 15 日'),
-('F001', 'SAND_BLAST_MAINTENANCE_DAY_END', '28', '喷砂保养日 -月末', '每月 28 日'),
+('116', 'SAND_BLAST_DURATION_HOURS', '10', '喷砂清洗耗时', '单位：小时'),
+('116', 'SAND_BLAST_WITH_INSPECTION_HOURS', '12', '喷砂清洗含首检耗时', '单位：小时'),
+('116', 'SAND_BLAST_DAILY_LIMIT', '1', '每日喷砂清洗上限', '每天最多 1 台'),
+('116', 'SAND_BLAST_MAINTENANCE_DAY_MID', '15', '喷砂保养日 -月中', '每月 15 日'),
+('116', 'SAND_BLAST_MAINTENANCE_DAY_END', '28', '喷砂保养日 -月末', '每月 28 日'),
 
 -- ======================== 设备保养规则 ========================
-('F001', 'MAINTENANCE_DURATION_HOURS', '7', '保养耗时', '单位：小时'),
-('F001', 'MAINTENANCE_START_HOUR', '8', '保养开始小时', '固定从 8:00 开始'),
-('F001', 'MAINTENANCE_WARNING_DAYS', '30', '保养预警天数', '提前 30 天预警'),
-('F001', 'CAPSULE_PREHEAT_HOURS', '2.5', '胶囊预热时间', '单位：小时'),
+('116', 'MAINTENANCE_DURATION_HOURS', '7', '保养耗时', '单位：小时'),
+('116', 'MAINTENANCE_START_HOUR', '8', '保养开始小时', '固定从 8:00 开始'),
+('116', 'MAINTENANCE_WARNING_DAYS', '30', '保养预警天数', '提前 30 天预警'),
+('116', 'CAPSULE_PREHEAT_HOURS', '2.5', '胶囊预热时间', '单位：小时'),
 
 -- ======================== 停机超时阈值 ========================
-('F001', 'MACHINE_STOP_TIMEOUT_HOURS', '24', '停机超时阈值', '单位：小时'),
+('116', 'MACHINE_STOP_TIMEOUT_HOURS', '24', '停机超时阈值', '单位：小时'),
 
 -- ======================== 胶囊相关规则 ========================
-('F001', 'CAPSULE_WARNING_COUNT', '430', '胶囊预警次数', '达到 430 次预警'),
-('F001', 'CAPSULE_FORCE_DOWN_COUNT', '450', '胶囊强制下机次数', '达到 450 次强制下机'),
-('F001', 'CAPSULE_CHANGE_LOSS_QTY', '2', '胶囊更换损失数量', '更换过程损失的产品数量'),
+('116', 'CAPSULE_WARNING_COUNT', '430', '胶囊预警次数', '达到 430 次预警'),
+('116', 'CAPSULE_FORCE_DOWN_COUNT', '450', '胶囊强制下机次数', '达到 450 次强制下机'),
+('116', 'CAPSULE_CHANGE_LOSS_QTY', '2', '胶囊更换损失数量', '更换过程损失的产品数量'),
 
 -- ======================== 开停产比例 ========================
-('F001', 'SHUTDOWN_DAY_MINUS_3_RATE', '90', '停产前第 3 天产能比例', '单位：%'),
-('F001', 'SHUTDOWN_DAY_MINUS_2_RATE', '80', '停产前第 2 天产能比例', '单位：%'),
-('F001', 'SHUTDOWN_DAY_MINUS_1_RATE', '70', '停产前第 1 天产能比例', '单位：%'),
-('F001', 'STARTUP_FIRST_DAY_RATE', '50', '开产首日产能比例', '单位：%'),
+('116', 'SHUTDOWN_DAY_MINUS_3_RATE', '90', '停产前第 3 天产能比例', '单位：%'),
+('116', 'SHUTDOWN_DAY_MINUS_2_RATE', '80', '停产前第 2 天产能比例', '单位：%'),
+('116', 'SHUTDOWN_DAY_MINUS_1_RATE', '70', '停产前第 1 天产能比例', '单位：%'),
+('116', 'STARTUP_FIRST_DAY_RATE', '50', '开产首日产能比例', '单位：%'),
 
 -- ======================== 试制量试规则 ========================
-('F001', 'TRIAL_DAILY_LIMIT', '2', '试制量试每日上限', '每天最多 2 个试制'),
+('116', 'TRIAL_DAILY_LIMIT', '2', '试制量试每日上限', '每天最多 2 个试制'),
 
 -- ======================== 模具交替计划规则 ========================
-('F001', 'MOULD_CHANGE_PLAN_DAYS', '2', '模具交替计划天数', '提前 2 天计划')
+('116', 'MOULD_CHANGE_PLAN_DAYS', '2', '模具交替计划天数', '提前 2 天计划'),
+
+-- ======================== 局部搜索选机规则 ========================
+('116', 'ENABLE_LOCAL_SEARCH', '1', '局部搜索开关', '0-关闭，1-开启'),
+('116', 'LOCAL_SEARCH_MACHINE_THRESHOLD', '10', '局部搜索候选机台阈值', '候选机台数小于该值时启用'),
+('116', 'LOCAL_SEARCH_DEPTH', '3', '局部搜索深度', '包含当前 SKU 的回看深度'),
+('116', 'LOCAL_SEARCH_TIME_BUDGET_MS', '50', '局部搜索耗时预算', '单位：毫秒')
 ;
 
 -- 工厂 F002 的规则配置示例（如有需要）
@@ -89,13 +97,13 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 -- 查询示例
 -- ============================================
 -- 查询某工厂的所有规则配置
--- SELECT * FROM T_LH_PARAMS WHERE FACTORY_CODE = 'F001' AND IS_DELETE = 0 ORDER BY PARAM_CODE;
+-- SELECT * FROM T_LH_PARAMS WHERE FACTORY_CODE = '116' AND IS_DELETE = 0 ORDER BY PARAM_CODE;
 
 -- 更新某规则值
--- UPDATE T_LH_PARAMS SET PARAM_VALUE = '16' WHERE FACTORY_CODE = 'F001' AND PARAM_CODE = 'DAILY_MOULD_CHANGE_LIMIT';
+-- UPDATE T_LH_PARAMS SET PARAM_VALUE = '16' WHERE FACTORY_CODE = '116' AND PARAM_CODE = 'DAILY_MOULD_CHANGE_LIMIT';
 
 -- 删除某规则配置（逻辑删除）
--- UPDATE T_LH_PARAMS SET IS_DELETE = 1 WHERE FACTORY_CODE = 'F001' AND PARAM_CODE = 'XXX';
+-- UPDATE T_LH_PARAMS SET IS_DELETE = 1 WHERE FACTORY_CODE = '116' AND PARAM_CODE = 'XXX';
 
 -- ============================================
 -- 使用说明

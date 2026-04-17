@@ -6,6 +6,7 @@ import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.exception.ScheduleException;
 import com.zlt.aps.lh.service.ILhScheduleResultService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.MonthPlanDayQtyUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -30,7 +31,10 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
         // S4.1.1 校验MES下发状态
         checkMesReleaseStatus(context);
 
-        // S4.1.2 生成批次号
+        // S4.1.2 校验排程窗口是否跨月
+        checkCrossMonthWindow(context);
+
+        // S4.1.3 生成批次号
         generateBatchNo(context);
     }
 
@@ -52,6 +56,26 @@ public class PreValidationHandler extends AbsScheduleStepHandler {
                     "该日期排程已下发MES，请先撤销发布后再重新排程。排程日期: "
                             + LhScheduleTimeUtil.getDateStr(targetDate));
         }
+    }
+
+    /**
+     * 校验排程窗口是否跨月。
+     *
+     * @param context 排程上下文
+     */
+    private void checkCrossMonthWindow(LhScheduleContext context) {
+        if (!MonthPlanDayQtyUtil.isCrossMonthWindow(context.getScheduleDate(), context.getScheduleTargetDate())) {
+            return;
+        }
+        log.warn("排程被拒绝: 工厂[{}] 排程窗口跨月, T日: {}, 目标日: {}",
+                context.getFactoryCode(),
+                LhScheduleTimeUtil.formatDate(context.getScheduleDate()),
+                LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()));
+        throw new ScheduleException(ScheduleStepEnum.S4_1_PRE_VALIDATION,
+                ScheduleErrorCode.CROSS_MONTH_SCHEDULE_UNSUPPORTED,
+                context.getFactoryCode(),
+                context.getBatchNo(),
+                MonthPlanDayQtyUtil.CROSS_MONTH_UNSUPPORTED_MESSAGE);
     }
 
     /**

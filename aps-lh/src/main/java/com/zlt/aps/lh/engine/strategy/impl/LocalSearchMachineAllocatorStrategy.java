@@ -329,7 +329,7 @@ public class LocalSearchMachineAllocatorStrategy {
         int lhTimeSeconds = sku.getLhTimeSeconds();
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
         int shiftCapacity = sku.getShiftCapacity();
-        int remainingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getDailyPlanQty();
+        int remainingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
         if (lhTimeSeconds <= 0 || remainingQty <= 0) {
             return LocalSearchCapacityEstimate.empty();
         }

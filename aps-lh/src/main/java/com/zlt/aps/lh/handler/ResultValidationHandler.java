@@ -13,6 +13,7 @@ import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.exception.ScheduleException;
 import com.zlt.aps.lh.service.impl.SchedulePersistenceService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -105,6 +106,8 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             requireField(result.getBatchNo(), "batchNo", context, result);
             requireField(result.getFactoryCode(), "factoryCode", context, result);
             requireField(result.getLhMachineCode(), "lhMachineCode", context, result);
+            result.setLeftRightMould(LeftRightMouldUtil.resolveLeftRightMould(
+                    result.getLeftRightMould(), result.getLhMachineCode()));
             requireField(result.getMaterialCode(), "materialCode", context, result);
             requireField(result.getScheduleType(), "scheduleType", context, result);
             if (result.getSpecEndTime() == null) {
@@ -152,6 +155,8 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             plan.setPlanOrder(planOrder++);
             plan.setLhMachineCode(result.getLhMachineCode());
             plan.setLhMachineName(result.getLhMachineName());
+            plan.setLeftRightMould(LeftRightMouldUtil.resolveLeftRightMould(
+                    result.getLeftRightMould(), result.getLhMachineCode()));
             plan.setAfterMaterialCode(result.getMaterialCode());
             plan.setAfterMaterialDesc(result.getMaterialDesc());
             plan.setMouldCode(result.getMouldCode());

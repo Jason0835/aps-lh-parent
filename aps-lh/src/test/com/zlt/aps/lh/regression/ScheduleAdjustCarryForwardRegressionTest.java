@@ -43,6 +43,9 @@ class ScheduleAdjustCarryForwardRegressionTest {
         plan.setProSize("18");
         plan.setTotalQty(1000);
         plan.setDayVulcanizationQty(120);
+        plan.setDay11(40);
+        plan.setDay12(40);
+        plan.setDay13(20);
         context.setMonthPlanList(Collections.singletonList(plan));
 
         MdmMonthSurplus monthSurplus = new MdmMonthSurplus();
@@ -71,8 +74,71 @@ class ScheduleAdjustCarryForwardRegressionTest {
 
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S1").get(0);
         assertEquals(20, context.getCarryForwardQtyMap().get("MAT-1").intValue());
+        assertEquals(100, sku.getWindowPlanQty());
         assertEquals(120, sku.getPendingQty());
-        assertEquals(120, sku.getSurplusQty());
+        assertEquals(100, sku.getSurplusQty());
+    }
+
+    @Test
+    void doHandle_skipsSkuWhenWindowPlanQtyAndCarryForwardAreBothZero() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-2");
+        plan.setMaterialDesc("MAT-2-DESC");
+        plan.setStructureName("S2");
+        plan.setSpecifications("SPEC-2");
+        plan.setTotalQty(200);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        assertEquals(0, context.getStructureSkuMap().size());
+        assertEquals(1, context.getUnscheduledResultList().size());
+        assertEquals("物料：MAT-2 没有计划量，不进行排产",
+                context.getUnscheduledResultList().get(0).getUnscheduledReason());
+    }
+
+    @Test
+    void doHandle_keepsSkuWhenOnlyCarryForwardNeedsScheduling() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-3");
+        plan.setMaterialDesc("MAT-3-DESC");
+        plan.setStructureName("S3");
+        plan.setSpecifications("SPEC-3");
+        plan.setTotalQty(200);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        LhScheduleResult previous = new LhScheduleResult();
+        previous.setLhMachineCode("M3");
+        previous.setMaterialCode("MAT-3");
+        previous.setClass1PlanQty(50);
+        context.setPreviousScheduleResultList(Collections.singletonList(previous));
+
+        LhShiftFinishQty finishQty = new LhShiftFinishQty();
+        finishQty.setLhMachineCode("M3");
+        finishQty.setMaterialCode("MAT-3");
+        finishQty.setClass1FinishQty(20);
+        context.getShiftFinishQtyMap().put("M3_MAT-3", finishQty);
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S3").get(0);
+        assertEquals(0, sku.getWindowPlanQty());
+        assertEquals(30, sku.getPendingQty());
+        assertEquals(0, context.getUnscheduledResultList().size());
     }
 
     private static java.util.Date date(int y, int month, int day) {

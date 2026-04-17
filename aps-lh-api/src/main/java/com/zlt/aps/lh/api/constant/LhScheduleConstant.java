@@ -66,6 +66,9 @@ public final class LhScheduleConstant {
     /** 换模总耗时（小时） */
     public static final int MOULD_CHANGE_TOTAL_HOURS = 8;
 
+    /** 换活字块总耗时（小时） */
+    public static final int TYPE_BLOCK_CHANGE_TOTAL_HOURS = 8;
+
     // ======================== 首检相关 ========================
 
     /** 首检时间（小时） */
@@ -74,8 +77,8 @@ public final class LhScheduleConstant {
     /** 首检数量 */
     public static final int FIRST_INSPECTION_QTY = 2;
 
-    /** 每班最大首检次数 */
-    public static final int MAX_FIRST_INSPECTION_PER_SHIFT = 5;
+    /** 每班最大首检次数（-1 表示不限制） */
+    public static final int MAX_FIRST_INSPECTION_PER_SHIFT = -1;
 
     // ======================== 收尾判定 ========================
 

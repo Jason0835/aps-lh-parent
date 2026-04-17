@@ -5,6 +5,7 @@ import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
@@ -28,7 +29,7 @@ class NewSpecProductionStrategyRegressionTest {
     @Test
     void scheduleNewSpecs_shouldFallbackToNextCandidateWhenFirstMachineHasNoCapacity() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
-        injectOrderNoGenerator(strategy);
+        injectDependencies(strategy, false);
 
         LhScheduleContext context = buildContext();
         SkuScheduleDTO sku = buildSku();
@@ -115,6 +116,49 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals(1, context.getScheduleResultList().size(), "第一候选机台无产能时，应继续尝试后续候选机台");
         assertEquals(0, context.getUnscheduledResultList().size(), "存在后续可排机台时，不应生成未排产记录");
         assertEquals("M-OK", context.getScheduleResultList().get(0).getLhMachineCode());
+        assertEquals("0", context.getScheduleResultList().get(0).getIsEnd(), "非收尾SKU应写入is_end=0");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldSetIsEndOneWhenEndingJudgmentTrue() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, true);
+
+        LhScheduleContext context = buildContext();
+        SkuScheduleDTO sku = buildSku();
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M-END");
+        machine.setMachineName("收尾机台");
+        machine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "应生成新增排产结果");
+        assertEquals("1", context.getScheduleResultList().get(0).getIsEnd(), "收尾SKU应写入is_end=1");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldSetIsEndZeroWhenEndingJudgmentFalse() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        SkuScheduleDTO sku = buildSku();
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M-NORMAL");
+        machine.setMachineName("常规机台");
+        machine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "应生成新增排产结果");
+        assertEquals("0", context.getScheduleResultList().get(0).getIsEnd(), "非收尾SKU应写入is_end=0");
     }
 
     private LhScheduleContext buildContext() {
@@ -142,7 +186,73 @@ class NewSpecProductionStrategyRegressionTest {
         return sku;
     }
 
-    private void injectOrderNoGenerator(NewSpecProductionStrategy strategy) throws Exception {
+    private IMachineMatchStrategy singletonMachineMatch(MachineScheduleDTO machine) {
+        return new IMachineMatchStrategy() {
+            @Override
+            public java.util.List<MachineScheduleDTO> matchMachines(LhScheduleContext ctx, SkuScheduleDTO scheduleSku) {
+                return Arrays.asList(machine);
+            }
+
+            @Override
+            public MachineScheduleDTO selectBestMachine(LhScheduleContext ctx, SkuScheduleDTO scheduleSku,
+                                                        java.util.List<MachineScheduleDTO> candidates,
+                                                        Set<String> excludedMachineCodes) {
+                if (excludedMachineCodes.contains(machine.getMachineCode())) {
+                    return null;
+                }
+                return machine;
+            }
+        };
+    }
+
+    private IMouldChangeBalanceStrategy defaultMouldChangeBalance() {
+        return new IMouldChangeBalanceStrategy() {
+            @Override
+            public boolean hasCapacity(LhScheduleContext ctx, Date targetDate) {
+                return true;
+            }
+
+            @Override
+            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+                return endingTime;
+            }
+
+            @Override
+            public int getRemainingCapacity(LhScheduleContext ctx, Date targetDate) {
+                return 99;
+            }
+        };
+    }
+
+    private IFirstInspectionBalanceStrategy defaultInspectionBalance() {
+        return (ctx, machineCode, mouldChangeTime) -> mouldChangeTime;
+    }
+
+    private ICapacityCalculateStrategy defaultCapacityCalculate() {
+        return new ICapacityCalculateStrategy() {
+            @Override
+            public int calculateShiftCapacity(LhScheduleContext ctx, int lhTimeSeconds, int mouldQty) {
+                return 1;
+            }
+
+            @Override
+            public Date calculateStartTime(LhScheduleContext ctx, String machineCode, Date endingTime) {
+                return endingTime;
+            }
+
+            @Override
+            public int calculateFirstShiftQty(Date startTime, Date shiftEndTime, int lhTimeSeconds, int mouldQty) {
+                return startTime.before(shiftEndTime) ? 1 : 0;
+            }
+
+            @Override
+            public int calculateDailyCapacity(int lhTimeSeconds, int mouldQty) {
+                return 1;
+            }
+        };
+    }
+
+    private void injectDependencies(NewSpecProductionStrategy strategy, boolean isEnding) throws Exception {
         OrderNoGenerator orderNoGenerator = new OrderNoGenerator();
 
         Field useRedisField = OrderNoGenerator.class.getDeclaredField("useRedis");
@@ -152,6 +262,26 @@ class NewSpecProductionStrategyRegressionTest {
         Field generatorField = NewSpecProductionStrategy.class.getDeclaredField("orderNoGenerator");
         generatorField.setAccessible(true);
         generatorField.set(strategy, orderNoGenerator);
+
+        IEndingJudgmentStrategy endingJudgmentStrategy = new IEndingJudgmentStrategy() {
+            @Override
+            public boolean isEnding(LhScheduleContext context, SkuScheduleDTO sku) {
+                return isEnding;
+            }
+
+            @Override
+            public int calculateEndingShifts(LhScheduleContext context, SkuScheduleDTO sku) {
+                return isEnding ? 1 : 0;
+            }
+
+            @Override
+            public int calculateEndingDays(LhScheduleContext context, SkuScheduleDTO sku) {
+                return isEnding ? 1 : 0;
+            }
+        };
+        Field endingField = NewSpecProductionStrategy.class.getDeclaredField("endingJudgmentStrategy");
+        endingField.setAccessible(true);
+        endingField.set(strategy, endingJudgmentStrategy);
     }
 
     private static Date dateTime(int year, int month, int day, int hour, int minute) {

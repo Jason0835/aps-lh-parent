@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
@@ -55,6 +56,9 @@ class NewSpecTimelineRegressionTest {
     @Mock
     private ICapacityCalculateStrategy capacityCalculateStrategy;
 
+    @Mock
+    private IEndingJudgmentStrategy endingJudgmentStrategy;
+
     @Test
     void scheduleNewSpecs_keepsTimelineMonotonicAndUpdatesMachineState() {
         LhScheduleContext context = newContext();
@@ -76,6 +80,7 @@ class NewSpecTimelineRegressionTest {
         when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any())).thenReturn(dateTime(2026, 4, 11, 8, 0));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 16, 0));
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
         strategy.scheduleNewSpecs(context, machineMatchStrategy, mouldChangeBalanceStrategy,
                 inspectionBalanceStrategy, capacityCalculateStrategy);
 
@@ -123,6 +128,7 @@ class NewSpecTimelineRegressionTest {
                 .thenReturn(dateTime(2026, 4, 10, 22, 0));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 6, 0));
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
 
         strategy.scheduleNewSpecs(context, machineMatchStrategy, mouldChangeBalanceStrategy,
                 inspectionBalanceStrategy, capacityCalculateStrategy);

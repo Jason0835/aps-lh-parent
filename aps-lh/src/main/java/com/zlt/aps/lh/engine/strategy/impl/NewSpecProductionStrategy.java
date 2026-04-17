@@ -14,6 +14,7 @@ import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.enums.NewSpecFailReasonEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
@@ -53,6 +54,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
     @Resource
     private OrderNoGenerator orderNoGenerator;
+    @Resource
+    private IEndingJudgmentStrategy endingJudgmentStrategy;
     @Resource
     private LocalSearchMachineAllocatorStrategy localSearchMachineAllocator;
 
@@ -130,6 +133,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         Iterator<SkuScheduleDTO> iterator = context.getNewSpecSkuList().iterator();
         while (iterator.hasNext()) {
             SkuScheduleDTO sku = iterator.next();
+            boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
 
             // 1. 匹配候选机台
             List<MachineScheduleDTO> candidates = machineMatch.matchMachines(context, sku);
@@ -203,7 +207,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(candidateMachine);
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, productionStartTime, mouldChangeStartTime,
-                        mouldChangeCompleteTime, shifts, machineMouldQty);
+                        mouldChangeCompleteTime, shifts, machineMouldQty, isEnding);
                 if (result == null || result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
                     // 无有效产能时回滚首检和换模占用，避免影响后续SKU排产
                     inspectionBalance.rollbackInspection(context, inspectionTime);
@@ -340,7 +344,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                          Date mouldChangeStartTime,
                                                          Date mouldChangeEndTime,
                                                          List<LhShiftConfigVO> shifts,
-                                                         int mouldQty) {
+                                                         int mouldQty,
+                                                         boolean isEnding) {
         LhScheduleResult result = new LhScheduleResult();
         result.setFactoryCode(context.getFactoryCode());
         result.setBatchNo(context.getBatchNo());
@@ -362,7 +367,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setDailyPlanQty(0);
         result.setTotalDailyPlanQty(sku.getMonthPlanQty());
         result.setMouldSurplusQty(sku.getSurplusQty());
-        result.setIsEnd("0");
+        result.setIsEnd(isEnding ? "1" : "0");
         result.setIsDelivery(sku.isDeliveryLocked() ? "1" : "0");
         result.setIsRelease("0");
         result.setDataSource("0");

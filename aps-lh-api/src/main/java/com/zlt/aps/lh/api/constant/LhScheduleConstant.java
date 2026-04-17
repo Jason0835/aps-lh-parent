@@ -66,6 +66,9 @@ public final class LhScheduleConstant {
     /** 换模总耗时（小时） */
     public static final int MOULD_CHANGE_TOTAL_HOURS = 8;
 
+    /** 换活字块总耗时（小时） */
+    public static final int TYPE_BLOCK_CHANGE_TOTAL_HOURS = 8;
+
     // ======================== 首检相关 ========================
 
     /** 首检时间（小时） */

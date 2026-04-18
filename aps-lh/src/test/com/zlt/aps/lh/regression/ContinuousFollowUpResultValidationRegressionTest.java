@@ -24,6 +24,7 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -88,10 +89,112 @@ class ContinuousFollowUpResultValidationRegressionTest {
         assertEquals("0", followUpResult.getIsEnd());
         assertNotNull(followUpResult.getSpecEndTime());
         assertNotNull(followUpResult.getTdaySpecEndTime());
+        Date latestSpecEndTime = context.getScheduleResultList().stream()
+                .filter(result -> "01".equals(result.getScheduleType()))
+                .filter(result -> result.getDailyPlanQty() != null && result.getDailyPlanQty() > 0)
+                .map(LhScheduleResult::getSpecEndTime)
+                .filter(endTime -> endTime != null)
+                .max(Date::compareTo)
+                .orElse(null);
+        assertEquals(latestSpecEndTime, context.getMachineScheduleMap().get("M1").getEstimatedEndTime());
 
         assertDoesNotThrow(() -> resultValidationHandler.handle(context));
         verify(schedulePersistenceService).replaceScheduleAtomically(context);
         verify(scheduleEventPublisher).publish(any());
+    }
+
+    @Test
+    void handle_shouldRemoveZeroPlanResultAndSkipMouldChangePlan() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        SkuScheduleDTO continuousSku = buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1);
+        continuousSku.setEmbryoStock(0);
+        context.getContinuousSkuList().add(continuousSku);
+        SkuScheduleDTO typeBlockSku = buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1);
+        typeBlockSku.setEmbryoStock(0);
+        context.getNewSpecSkuList().add(typeBlockSku);
+        context.getStructureSkuMap().put("STRUCT-TEST", Arrays.asList(continuousSku, typeBlockSku));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+        when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
+
+        continuousProductionHandler.handle(context);
+
+        assertEquals(0, context.getScheduleResultList().size(), "零计划续作结果应从排程结果列表移除");
+        long unscheduledTypeBlockCount = context.getUnscheduledResultList().stream()
+                .filter(unscheduled -> "MAT-T1".equals(unscheduled.getMaterialCode()))
+                .count();
+        assertEquals(1, unscheduledTypeBlockCount);
+        Integer typeBlockUnscheduledQty = context.getUnscheduledResultList().stream()
+                .filter(unscheduled -> "MAT-T1".equals(unscheduled.getMaterialCode()))
+                .map(unscheduled -> unscheduled.getUnscheduledQty())
+                .findFirst()
+                .orElse(-1);
+        assertEquals(1, typeBlockUnscheduledQty);
+
+        assertDoesNotThrow(() -> resultValidationHandler.handle(context));
+        assertEquals(0, context.getMouldChangePlanList().size());
+    }
+
+    @Test
+    void handle_shouldMergeZeroPlanUnscheduledByMaterialCode() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getMachineScheduleMap().put("M2", buildMachine("M2", "MAT-C1"));
+        SkuScheduleDTO continuousSku1 = buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 2);
+        continuousSku1.setEmbryoStock(0);
+        SkuScheduleDTO continuousSku2 = buildContinuousSku("MAT-C1", "M2", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 2);
+        continuousSku2.setEmbryoStock(0);
+        context.getContinuousSkuList().add(continuousSku1);
+        context.getContinuousSkuList().add(continuousSku2);
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(true);
+        when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
+
+        continuousProductionHandler.handle(context);
+
+        assertEquals(0, context.getScheduleResultList().size(), "同物料零计划续作结果应全部移除");
+
+        long unscheduledCount = context.getUnscheduledResultList().stream()
+                .filter(unscheduled -> "MAT-C1".equals(unscheduled.getMaterialCode()))
+                .count();
+        assertEquals(1, unscheduledCount);
+        Integer unscheduledQty = context.getUnscheduledResultList().stream()
+                .filter(unscheduled -> "MAT-C1".equals(unscheduled.getMaterialCode()))
+                .map(unscheduled -> unscheduled.getUnscheduledQty())
+                .findFirst()
+                .orElse(-1);
+        assertEquals(2, unscheduledQty);
+    }
+
+    @Test
+    void handle_shouldNotWriteUnscheduledWhenOtherMachineRetainsEffectiveQty() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getMachineScheduleMap().put("M2", buildMachine("M2", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M2", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(true);
+        when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
+
+        continuousProductionHandler.handle(context);
+
+        assertEquals(1, context.getScheduleResultList().size(), "同物料有有效续作保留时，不应把全部结果都转未排");
+        long unscheduledCount = context.getUnscheduledResultList().stream()
+                .filter(unscheduled -> "MAT-C1".equals(unscheduled.getMaterialCode()))
+                .count();
+        assertEquals(0, unscheduledCount, "有效计划量已覆盖待排量时，不应额外生成未排记录");
     }
 
     private LhScheduleContext newContext() {

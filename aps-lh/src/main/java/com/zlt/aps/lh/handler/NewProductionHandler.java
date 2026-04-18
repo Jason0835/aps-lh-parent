@@ -57,10 +57,15 @@ public class NewProductionHandler extends AbsScheduleStepHandler {
          * 4. 首检均衡分配(早/中班操作数均衡)
          * 5. 计算开产时间(考虑保养/维修/清洗重叠)
          * 6. 分配班次计划量
-         * 7. 标记未排产SKU和原因
+         * 7. 胎胚库存校正与零计划收口
+         * 8. 新增排产降模处理
+         * 9. 标记未排产SKU和原因
          */
         strategy.scheduleNewSpecs(context, machineMatchStrategy,
                 mouldChangeStrategy, inspectionStrategy, capacityStrategy);
+        strategy.allocateShiftPlanQty(context);
+        strategy.adjustEmbryoStock(context);
+        strategy.scheduleReduceMould(context);
     }
 
     @Override

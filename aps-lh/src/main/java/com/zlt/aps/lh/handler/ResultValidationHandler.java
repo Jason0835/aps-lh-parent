@@ -130,7 +130,9 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
      */
     private void generateMouldChangePlan(LhScheduleContext context) {
         List<LhScheduleResult> changeResults = context.getScheduleResultList().stream()
-                .filter(r -> "1".equals(r.getIsChangeMould()))
+                .filter(r -> "1".equals(r.getIsChangeMould())
+                        && r.getDailyPlanQty() != null
+                        && r.getDailyPlanQty() > 0)
                 .sorted(Comparator.comparing(LhScheduleResult::getLhMachineCode, Comparator.nullsLast(String::compareTo))
                         .thenComparing(this::resolveProductionStartTime, Comparator.nullsLast(Date::compareTo))
                         .thenComparing(LhScheduleResult::getSpecEndTime, Comparator.nullsLast(Date::compareTo)))

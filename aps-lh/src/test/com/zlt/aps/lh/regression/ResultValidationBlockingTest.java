@@ -13,7 +13,6 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.Collections;
-
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -46,6 +45,27 @@ class ResultValidationBlockingTest {
         result.setScheduleType("02");
         result.setIsChangeMould("1");
         result.setMouldCode("MOULD-1");
+        result.setDailyPlanQty(1);
+        context.setScheduleResultList(Collections.singletonList(result));
+
+        assertThrows(ScheduleException.class, () -> handler.handle(context));
+
+        verify(schedulePersistenceService, never()).replaceScheduleAtomically(context);
+        verify(scheduleEventPublisher, never()).publish(any());
+    }
+
+    @Test
+    void handle_throwsWhenZeroDailyPlanMissingSpecEndTime() {
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("FC01");
+        context.setBatchNo("LHPC20260413002");
+
+        LhScheduleResult result = new LhScheduleResult();
+        result.setLhMachineCode("M1");
+        result.setMaterialCode("MAT-1");
+        result.setScheduleType("01");
+        result.setDailyPlanQty(0);
+        result.setIsChangeMould("0");
         context.setScheduleResultList(Collections.singletonList(result));
 
         assertThrows(ScheduleException.class, () -> handler.handle(context));

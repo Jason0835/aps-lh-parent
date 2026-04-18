@@ -191,6 +191,45 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals("1", context.getScheduleResultList().get(0).getIsChangeMould());
     }
 
+    @Test
+    void adjustEmbryoStock_shouldRemoveZeroPlanResultAndRestoreMachineState() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M-ZERO");
+        machine.setMachineName("裁剪机台");
+        machine.setCurrentMaterialCode("MAT-BASE");
+        machine.setCurrentMaterialDesc("基础物料");
+        machine.setPreviousSpecCode("BASE-SPEC");
+        machine.setPreviousProSize("22.5");
+        machine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+        context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("MAT-ZERO");
+        sku.setEmbryoCode("EMB-1");
+        sku.setStructureName("STRUCT-ZERO");
+        sku.setEmbryoStock(0);
+        context.getNewSpecSkuList().add(sku);
+        context.getStructureSkuMap().put("STRUCT-ZERO", Arrays.asList(sku));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "库存裁剪前应先生成新增排产结果");
+
+        strategy.adjustEmbryoStock(context);
+
+        assertEquals(0, context.getScheduleResultList().size(), "裁剪为0的新增结果应从排程结果列表移除");
+        assertEquals(1, context.getUnscheduledResultList().size(), "裁剪为0的新增结果应转入未排");
+        assertEquals(1, context.getUnscheduledResultList().get(0).getUnscheduledQty());
+        assertEquals("新增结果裁剪为0", context.getUnscheduledResultList().get(0).getUnscheduledReason());
+        assertEquals("MAT-BASE", machine.getCurrentMaterialCode(), "移除零计划结果后应回滚机台当前物料");
+        assertEquals(dateTime(2026, 4, 17, 6, 0), machine.getEstimatedEndTime(), "机台完工时刻应回滚到初始状态");
+    }
+
     private LhScheduleContext buildContext() {
         LhScheduleContext context = new LhScheduleContext();
         Date scheduleDate = dateTime(2026, 4, 17, 0, 0);

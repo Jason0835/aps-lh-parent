@@ -9,6 +9,7 @@ import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
@@ -35,6 +36,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -48,6 +51,10 @@ import java.util.stream.Collectors;
 @Slf4j
 @Component("continuousProductionStrategy")
 public class ContinuousProductionStrategy implements IProductionStrategy {
+
+    private static final String CONTINUOUS_SCHEDULE_TYPE = "01";
+    private static final String AUTO_DATA_SOURCE = "0";
+    private static final String ZERO_PLAN_UNSCHEDULED_REASON = "续作结果裁剪为0";
 
     @Resource
     private OrderNoGenerator orderNoGenerator;
@@ -215,6 +222,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 }
             }
         }
+        // S4.4 收口：零计划续作结果语义统一，并按最终结果同步机台状态。
+        finalizeZeroPlanContinuousResults(context);
+        syncMachineStateAfterContinuousAdjust(context);
     }
 
     @Override
@@ -679,6 +689,12 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             return;
         }
         ShiftFieldUtil.syncDailyPlanQty(result);
+        if (result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
+            // 零计划结果不参与完工时刻语义。
+            result.setSpecEndTime(null);
+            result.setTdaySpecEndTime(null);
+            return;
+        }
         int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
                 result.getMouldQty() != null ? result.getMouldQty() : 0);
@@ -689,6 +705,310 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         }
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
+    }
+
+    /**
+     * 统一处理续作阶段零计划结果：
+     * 1) 清空完工时刻并从排程结果列表移除；
+     * 2) 按物料去重写入/合并未排结果。
+     *
+     * @param context 排程上下文
+     */
+    private void finalizeZeroPlanContinuousResults(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return;
+        }
+        Map<String, Integer> zeroPlanQtyMap = new LinkedHashMap<>(8);
+        List<LhScheduleResult> zeroPlanResults = new ArrayList<>(8);
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (!CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())) {
+                continue;
+            }
+            if (result.getDailyPlanQty() != null && result.getDailyPlanQty() > 0) {
+                continue;
+            }
+            result.setSpecEndTime(null);
+            result.setTdaySpecEndTime(null);
+            zeroPlanResults.add(result);
+            if (StringUtils.isEmpty(result.getMaterialCode())) {
+                continue;
+            }
+            int unscheduledQty = resolveRemainingUnscheduledQty(context, result.getMaterialCode());
+            if (unscheduledQty > 0) {
+                zeroPlanQtyMap.putIfAbsent(result.getMaterialCode(), unscheduledQty);
+            }
+        }
+        for (Map.Entry<String, Integer> entry : zeroPlanQtyMap.entrySet()) {
+            mergeUnscheduledResultByMaterial(context, entry.getKey(), entry.getValue());
+        }
+        if (!CollectionUtils.isEmpty(zeroPlanResults)) {
+            context.getScheduleResultList().removeAll(zeroPlanResults);
+            removeResultsFromMachineAssignments(context, zeroPlanResults);
+        }
+        normalizeUnscheduledResultsByMaterial(context);
+    }
+
+    /**
+     * S4.4 结束后按最终有效续作结果二次回写机台状态。
+     *
+     * @param context 排程上下文
+     */
+    private void syncMachineStateAfterContinuousAdjust(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getMachineScheduleMap())) {
+            return;
+        }
+        Map<String, List<LhScheduleResult>> machineResultMap = context.getScheduleResultList().stream()
+                .filter(this::isEffectiveContinuousResult)
+                .collect(Collectors.groupingBy(LhScheduleResult::getLhMachineCode));
+        for (Map.Entry<String, MachineScheduleDTO> entry : context.getMachineScheduleMap().entrySet()) {
+            String machineCode = entry.getKey();
+            MachineScheduleDTO machine = entry.getValue();
+            List<LhScheduleResult> machineResults = machineResultMap.get(machineCode);
+            if (!CollectionUtils.isEmpty(machineResults)) {
+                LhScheduleResult latestResult = machineResults.stream()
+                        .max(Comparator.comparing(LhScheduleResult::getSpecEndTime))
+                        .orElse(null);
+                if (latestResult != null) {
+                    applyMachineStateFromResult(context, machine, latestResult);
+                    continue;
+                }
+            }
+            restoreMachineStateFromInitial(context, machineCode, machine);
+        }
+    }
+
+    /**
+     * 判断结果是否属于可驱动机台终态的有效续作结果。
+     *
+     * @param result 排程结果
+     * @return true-有效续作结果；false-非有效续作结果
+     */
+    private boolean isEffectiveContinuousResult(LhScheduleResult result) {
+        return result != null
+                && CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())
+                && result.getDailyPlanQty() != null
+                && result.getDailyPlanQty() > 0
+                && result.getSpecEndTime() != null
+                && StringUtils.isNotEmpty(result.getLhMachineCode());
+    }
+
+    /**
+     * 根据最终有效结果回写机台状态。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param result 最终有效续作结果
+     */
+    private void applyMachineStateFromResult(LhScheduleContext context, MachineScheduleDTO machine, LhScheduleResult result) {
+        machine.setCurrentMaterialCode(result.getMaterialCode());
+        machine.setCurrentMaterialDesc(result.getMaterialDesc());
+        machine.setPreviousSpecCode(result.getSpecCode());
+        machine.setPreviousProSize(resolveMaterialProSize(context, result.getMaterialCode()));
+        machine.setEstimatedEndTime(result.getSpecEndTime());
+        machine.setEnding("1".equals(result.getIsEnd()) && result.getSpecEndTime() != null);
+    }
+
+    /**
+     * 回退机台状态到初始化快照，避免沿用失效衔接状态。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @param machine 当前机台对象
+     */
+    private void restoreMachineStateFromInitial(LhScheduleContext context, String machineCode, MachineScheduleDTO machine) {
+        if (context == null || machine == null || StringUtils.isEmpty(machineCode)) {
+            return;
+        }
+        MachineScheduleDTO initialMachine = context.getInitialMachineScheduleMap().get(machineCode);
+        if (initialMachine == null) {
+            return;
+        }
+        machine.setCurrentMaterialCode(initialMachine.getCurrentMaterialCode());
+        machine.setCurrentMaterialDesc(initialMachine.getCurrentMaterialDesc());
+        machine.setPreviousSpecCode(initialMachine.getPreviousSpecCode());
+        machine.setPreviousProSize(initialMachine.getPreviousProSize());
+        machine.setEstimatedEndTime(initialMachine.getEstimatedEndTime());
+        machine.setEnding(initialMachine.isEnding());
+    }
+
+    /**
+     * 解析物料规格英寸，用于机台前规格回写。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 规格英寸
+     */
+    private String resolveMaterialProSize(LhScheduleContext context, String materialCode) {
+        if (context == null || StringUtils.isEmpty(materialCode)) {
+            return null;
+        }
+        MdmMaterialInfo materialInfo = context.getMaterialInfoMap().get(materialCode);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getProSize())) {
+            return materialInfo.getProSize();
+        }
+        SkuScheduleDTO sku = findSkuDto(context, materialCode);
+        return sku != null ? sku.getProSize() : null;
+    }
+
+    /**
+     * 计算物料剩余待排数量（续作零计划未排口径）。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 剩余待排数量
+     */
+    private int resolveRemainingUnscheduledQty(LhScheduleContext context, String materialCode) {
+        SkuScheduleDTO sku = findSkuDto(context, materialCode);
+        if (sku == null) {
+            return 0;
+        }
+        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        int retainedQty = resolveEffectiveScheduledQty(context, materialCode, CONTINUOUS_SCHEDULE_TYPE);
+        return Math.max(pendingQty - retainedQty, 0);
+    }
+
+    /**
+     * 统计同物料最终仍保留在结果列表中的有效计划量。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @param scheduleType 排产类型
+     * @return 有效计划量
+     */
+    private int resolveEffectiveScheduledQty(LhScheduleContext context, String materialCode, String scheduleType) {
+        if (context == null || StringUtils.isEmpty(materialCode) || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return 0;
+        }
+        int totalQty = 0;
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (result == null
+                    || !StringUtils.equals(materialCode, result.getMaterialCode())
+                    || !StringUtils.equals(scheduleType, result.getScheduleType())
+                    || result.getDailyPlanQty() == null
+                    || result.getDailyPlanQty() <= 0) {
+                continue;
+            }
+            totalQty += result.getDailyPlanQty();
+        }
+        return totalQty;
+    }
+
+    /**
+     * 按物料维度写入/合并未排结果，保证同物料仅一条记录。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @param unscheduledQty 未排数量
+     */
+    private void mergeUnscheduledResultByMaterial(LhScheduleContext context, String materialCode, int unscheduledQty) {
+        if (context == null || StringUtils.isEmpty(materialCode)) {
+            return;
+        }
+        LhUnscheduledResult existing = findUnscheduledResultByMaterial(context, materialCode);
+        if (existing != null) {
+            int existingQty = existing.getUnscheduledQty() != null ? existing.getUnscheduledQty() : 0;
+            existing.setUnscheduledQty(existingQty + Math.max(unscheduledQty, 0));
+            if (StringUtils.isEmpty(existing.getUnscheduledReason())) {
+                existing.setUnscheduledReason(ZERO_PLAN_UNSCHEDULED_REASON);
+            }
+            return;
+        }
+        SkuScheduleDTO sku = findSkuDto(context, materialCode);
+        LhUnscheduledResult unscheduled = new LhUnscheduledResult();
+        unscheduled.setFactoryCode(context.getFactoryCode());
+        unscheduled.setBatchNo(context.getBatchNo());
+        unscheduled.setScheduleDate(context.getScheduleTargetDate());
+        unscheduled.setMaterialCode(materialCode);
+        unscheduled.setUnscheduledQty(Math.max(unscheduledQty, 0));
+        unscheduled.setUnscheduledReason(ZERO_PLAN_UNSCHEDULED_REASON);
+        unscheduled.setDataSource(AUTO_DATA_SOURCE);
+        unscheduled.setIsDelete(0);
+        if (sku != null) {
+            unscheduled.setMaterialDesc(sku.getMaterialDesc());
+            unscheduled.setStructureName(sku.getStructureName());
+            unscheduled.setSpecCode(sku.getSpecCode());
+            unscheduled.setEmbryoCode(sku.getEmbryoCode());
+            unscheduled.setMouldQty(sku.getMouldQty());
+        }
+        context.getUnscheduledResultList().add(unscheduled);
+    }
+
+    /**
+     * 根据物料编码查找已存在未排结果。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 未排结果
+     */
+    private LhUnscheduledResult findUnscheduledResultByMaterial(LhScheduleContext context, String materialCode) {
+        if (context == null || CollectionUtils.isEmpty(context.getUnscheduledResultList())) {
+            return null;
+        }
+        for (LhUnscheduledResult unscheduledResult : context.getUnscheduledResultList()) {
+            if (StringUtils.equals(materialCode, unscheduledResult.getMaterialCode())) {
+                return unscheduledResult;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 按物料编码归并未排结果，确保同物料只保留一条记录。
+     *
+     * @param context 排程上下文
+     */
+    private void normalizeUnscheduledResultsByMaterial(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getUnscheduledResultList())) {
+            return;
+        }
+        Map<String, LhUnscheduledResult> mergedMap = new LinkedHashMap<>(context.getUnscheduledResultList().size());
+        for (LhUnscheduledResult unscheduledResult : context.getUnscheduledResultList()) {
+            if (unscheduledResult == null || StringUtils.isEmpty(unscheduledResult.getMaterialCode())) {
+                continue;
+            }
+            String materialCode = unscheduledResult.getMaterialCode();
+            if (!mergedMap.containsKey(materialCode)) {
+                mergedMap.put(materialCode, unscheduledResult);
+                continue;
+            }
+            LhUnscheduledResult existing = mergedMap.get(materialCode);
+            int existingQty = existing.getUnscheduledQty() != null ? existing.getUnscheduledQty() : 0;
+            int currentQty = unscheduledResult.getUnscheduledQty() != null ? unscheduledResult.getUnscheduledQty() : 0;
+            existing.setUnscheduledQty(existingQty + currentQty);
+            if (StringUtils.isEmpty(existing.getUnscheduledReason())) {
+                existing.setUnscheduledReason(unscheduledResult.getUnscheduledReason());
+            }
+        }
+        context.getUnscheduledResultList().clear();
+        context.getUnscheduledResultList().addAll(mergedMap.values());
+    }
+
+    /**
+     * 从机台已分配结果中移除零计划续作结果，避免占用后续选机上下文。
+     *
+     * @param context 排程上下文
+     * @param resultsToRemove 待移除结果列表
+     */
+    private void removeResultsFromMachineAssignments(LhScheduleContext context, List<LhScheduleResult> resultsToRemove) {
+        if (context == null
+                || CollectionUtils.isEmpty(resultsToRemove)
+                || CollectionUtils.isEmpty(context.getMachineAssignmentMap())) {
+            return;
+        }
+        Iterator<Map.Entry<String, List<LhScheduleResult>>> iterator =
+                context.getMachineAssignmentMap().entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, List<LhScheduleResult>> entry = iterator.next();
+            List<LhScheduleResult> assignedResults = entry.getValue();
+            if (CollectionUtils.isEmpty(assignedResults)) {
+                iterator.remove();
+                continue;
+            }
+            assignedResults.removeAll(resultsToRemove);
+            if (assignedResults.isEmpty()) {
+                iterator.remove();
+            }
+        }
     }
 
     private void updateMachineState(MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
@@ -854,6 +1174,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * 在所有SKU列表中查找指定materialCode的SKU
      */
     private SkuScheduleDTO findSkuDto(LhScheduleContext context, String materialCode) {
+        if (context == null || StringUtils.isEmpty(materialCode)) {
+            return null;
+        }
         for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
             if (materialCode.equals(sku.getMaterialCode())) {
                 return sku;
@@ -862,6 +1185,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
             if (materialCode.equals(sku.getMaterialCode())) {
                 return sku;
+            }
+        }
+        if (!CollectionUtils.isEmpty(context.getStructureSkuMap())) {
+            for (List<SkuScheduleDTO> skuList : context.getStructureSkuMap().values()) {
+                if (CollectionUtils.isEmpty(skuList)) {
+                    continue;
+                }
+                for (SkuScheduleDTO sku : skuList) {
+                    if (materialCode.equals(sku.getMaterialCode())) {
+                        return sku;
+                    }
+                }
             }
         }
         return null;

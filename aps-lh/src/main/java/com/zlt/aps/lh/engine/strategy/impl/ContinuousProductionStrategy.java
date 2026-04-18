@@ -69,7 +69,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
-        // 按收尾时间升序处理每个在产机台
+        // 基于续作收尾阶段回写后的真实收尾时间，按机台收尾先后衔接换活字块
         List<MachineScheduleDTO> endingMachines = context.getMachineScheduleMap().values().stream()
                 .filter(m -> m.isEnding() && m.getEstimatedEndTime() != null)
                 .sorted(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime))

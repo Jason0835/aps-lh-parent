@@ -28,11 +28,11 @@ public class ContinuousProductionHandler extends AbsScheduleStepHandler {
         IProductionStrategy strategy = strategyFactory.getProductionStrategy(
                 ScheduleTypeEnum.CONTINUOUS.getCode());
 
-        // S4.4.1 换活字块排产(同胎胚同模具)
-        strategy.scheduleTypeBlockChange(context);
-
-        // S4.4.2 续作收尾判定与排产
+        // S4.4.1 续作收尾判定与排产
         strategy.scheduleContinuousEnding(context);
+
+        // S4.4.2 换活字块排产(基于续作收尾后的真实结束时间衔接)
+        strategy.scheduleTypeBlockChange(context);
 
         // S4.4.3 班次计划量分配
         strategy.allocateShiftPlanQty(context);

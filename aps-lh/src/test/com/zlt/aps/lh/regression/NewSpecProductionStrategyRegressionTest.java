@@ -161,6 +161,36 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals("0", context.getScheduleResultList().get(0).getIsEnd(), "非收尾SKU应写入is_end=0");
     }
 
+    @Test
+    void scheduleNewSpecs_shouldAllowContinuousCandidateFallbackIntoNewSpec() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M-CONT");
+        machine.setMachineName("续作机台");
+        machine.setCurrentMaterialCode("MAT-BASE");
+        machine.setPreviousSpecCode("SPEC-A");
+        context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setEmbryoCode("EMB-1");
+        sku.setStructureName("STRUCT-A");
+        sku.setSpecCode("SPEC-A");
+        sku.setMainPattern("PAT-A");
+        sku.setPattern("PAT-A");
+        context.getNewSpecSkuList().add(sku);
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "续作阶段未命中的候选SKU应继续参与新增排产");
+        assertEquals(0, context.getUnscheduledResultList().size(), "进入新增排产后命中机台时不应生成未排记录");
+        assertEquals("02", context.getScheduleResultList().get(0).getScheduleType());
+        assertEquals("1", context.getScheduleResultList().get(0).getIsChangeMould());
+    }
+
     private LhScheduleContext buildContext() {
         LhScheduleContext context = new LhScheduleContext();
         Date scheduleDate = dateTime(2026, 4, 17, 0, 0);

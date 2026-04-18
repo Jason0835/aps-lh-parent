@@ -133,6 +133,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         Iterator<SkuScheduleDTO> iterator = context.getNewSpecSkuList().iterator();
         while (iterator.hasNext()) {
             SkuScheduleDTO sku = iterator.next();
+            // 续作阶段未命中的SKU在此继续参与新增排产兜底，不做提前拦截。
             boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
 
             // 1. 匹配候选机台
@@ -221,7 +222,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 // 7. 排产成功后落地结果并刷新机台状态，当前SKU结束尝试
                 sku.setMouldQty(machineMouldQty);
                 context.getScheduleResultList().add(result);
-                updateMachineState(context, candidateMachine, sku, result);
+                updateMachineState(candidateMachine, sku, result);
                 registerMachineAssignment(context, machineCode, result);
                 scheduledCount++;
                 iterator.remove();
@@ -538,7 +539,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 .collect(Collectors.joining(","));
     }
 
-    private void updateMachineState(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
+    private void updateMachineState(MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
         machine.setCurrentMaterialCode(sku.getMaterialCode());
         machine.setCurrentMaterialDesc(sku.getMaterialDesc());
         machine.setPreviousSpecCode(sku.getSpecCode());

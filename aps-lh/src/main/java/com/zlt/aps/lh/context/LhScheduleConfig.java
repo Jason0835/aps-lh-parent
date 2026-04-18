@@ -142,6 +142,10 @@ public class LhScheduleConfig {
         return getParamIntValue(LhScheduleParamConstant.MOULD_CHANGE_TOTAL_HOURS, LhScheduleConstant.MOULD_CHANGE_TOTAL_HOURS);
     }
 
+    public int getTypeBlockChangeTotalHours() {
+        return getParamIntValue(LhScheduleParamConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS, LhScheduleConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS);
+    }
+
     public int getFirstInspectionHours() {
         return getParamIntValue(LhScheduleParamConstant.FIRST_INSPECTION_HOURS, LhScheduleConstant.FIRST_INSPECTION_HOURS);
     }

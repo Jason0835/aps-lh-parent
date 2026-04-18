@@ -22,8 +22,10 @@ import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
+import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -65,39 +67,30 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
     @Override
     public void scheduleTypeBlockChange(LhScheduleContext context) {
-        log.info("续作排产 - 换活字块排产, 机台数: {}", context.getMachineScheduleMap().size());
+        log.info("续作排产 - 收尾后衔接排产, 机台数: {}", context.getMachineScheduleMap().size());
 
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
-        // 基于续作收尾阶段回写后的真实收尾时间，按机台收尾先后衔接换活字块
+        // 基于续作收尾阶段回写后的真实收尾时间，按机台收尾先后衔接同产品结构/换活字块
         List<MachineScheduleDTO> endingMachines = context.getMachineScheduleMap().values().stream()
                 .filter(m -> m.isEnding() && m.getEstimatedEndTime() != null)
                 .sorted(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime))
                 .collect(Collectors.toList());
 
         for (MachineScheduleDTO machine : endingMachines) {
-            // 在newSpecSkuList中查找同胎胚同模具（换活字块）的SKU
+            // 第一步：同产品结构直接续作，命中后本机台不再尝试换活字块。
+            SkuScheduleDTO sameStructureSku = findSameStructureContinuousSku(context, machine);
+            if (sameStructureSku != null
+                    && appendFollowUpResult(context, machine, sameStructureSku, machine.getEstimatedEndTime(), shifts, false)) {
+                continue;
+            }
+
+            // 第二步：同胎胚同规格不同花纹，执行换活字块衔接。
             SkuScheduleDTO typeBlockSku = findTypeBlockChangeSku(context, machine);
             if (typeBlockSku == null) {
                 continue;
             }
-            // 计算开产时间（同模具换活字块，无需换模，但需首检）
-            Date startTime = calcTypeBlockStartTime(context, machine);
-            if (startTime == null) {
-                continue;
-            }
-            // 创建排程结果并分配到各班次
-            int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
-            typeBlockSku.setMouldQty(machineMouldQty);
-            LhScheduleResult result = buildScheduleResult(
-                    context, machine, typeBlockSku, startTime, shifts, machineMouldQty, false);
-            if (result != null) {
-                context.getScheduleResultList().add(result);
-                registerMachineAssignment(context, machine.getMachineCode(), result);
-                // 从新增SKU列表中移除已排产的SKU
-                context.getNewSpecSkuList().remove(typeBlockSku);
-                log.debug("换活字块排产完成, 机台: {}, SKU: {}", machine.getMachineCode(), typeBlockSku.getMaterialCode());
-            }
+            appendFollowUpResult(context, machine, typeBlockSku, calcTypeBlockStartTime(context, machine), shifts, true);
         }
     }
 
@@ -236,58 +229,142 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     // ==================== 私有辅助方法 ====================
 
     /**
-     * 在新增SKU列表中查找可以换活字块的SKU（同胎胚同模具）
+     * 在新增SKU列表中查找可直接续作的同产品结构SKU。
      */
-    private SkuScheduleDTO findTypeBlockChangeSku(LhScheduleContext context, MachineScheduleDTO machine) {
-        String machineEmbryoCode = machine.getCurrentMaterialCode();
-        if (machineEmbryoCode == null) {
+    private SkuScheduleDTO findSameStructureContinuousSku(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
             return null;
         }
         for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
-            // 同胎胚代码判定（活字块通过胎胚代码识别）
-            if (machineEmbryoCode.equals(sku.getEmbryoCode())) {
-                // 验证模具兼容：SKU的模具在机台现有模具集合内
-                if (isMouldCompatible(context, sku, machine)) {
-                    return sku;
-                }
+            if (isSameStructureContinuousCandidate(context, machine, sku)) {
+                return sku;
             }
         }
         return null;
     }
 
     /**
-     * 验证SKU模具与机台当前模具是否兼容（同模具换活字块）
+     * 在新增SKU列表中查找可以换活字块的SKU。
      */
-    private boolean isMouldCompatible(LhScheduleContext context, SkuScheduleDTO sku, MachineScheduleDTO machine) {
-        List<MdmSkuMouldRel> mouldRels = context.getSkuMouldRelMap().get(sku.getMaterialCode());
-        if (mouldRels == null || mouldRels.isEmpty()) {
-            return false;
+    private SkuScheduleDTO findTypeBlockChangeSku(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
+            return null;
         }
-        List<MdmSkuMouldRel> machineMoulds = context.getSkuMouldRelMap().get(machine.getCurrentMaterialCode());
-        if (machineMoulds == null || machineMoulds.isEmpty()) {
-            return false;
-        }
-        // 检查是否有相同的模具号
-        for (MdmSkuMouldRel rel : mouldRels) {
-            for (MdmSkuMouldRel machineRel : machineMoulds) {
-                if (rel.getMouldCode() != null && rel.getMouldCode().equals(machineRel.getMouldCode())) {
-                    return true;
-                }
+
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (endingJudgmentStrategy.isEnding(context, sku)
+                    && isTypeBlockCandidate(context, machine, sku)) {
+                return sku;
             }
         }
-        return false;
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (isTypeBlockCandidate(context, machine, sku)) {
+                return sku;
+            }
+        }
+        return null;
     }
 
     /**
-     * 计算换活字块开产时间（无需换模，但需首检时间）
+     * 判断SKU是否满足同产品结构直接续作。
+     */
+    private boolean isSameStructureContinuousCandidate(LhScheduleContext context,
+                                                       MachineScheduleDTO machine,
+                                                       SkuScheduleDTO sku) {
+        return isSameEmbryo(context, machine, sku)
+                && StringUtils.isNotEmpty(resolveMachineStructureKey(context, machine))
+                && StringUtils.isNotEmpty(resolveStructureKey(sku))
+                && StringUtils.equals(resolveMachineStructureKey(context, machine), resolveStructureKey(sku));
+    }
+
+    /**
+     * 判断SKU是否满足换活字块条件：同胎胚、同规格、不同花纹。
+     */
+    private boolean isTypeBlockCandidate(LhScheduleContext context,
+                                         MachineScheduleDTO machine,
+                                         SkuScheduleDTO sku) {
+        if (!isSameEmbryo(context, machine, sku)) {
+            return false;
+        }
+        String machineSpecCode = resolveMachineSpecCode(context, machine);
+        String machinePatternKey = resolveMachinePatternKey(context, machine);
+        String skuPatternKey = resolvePatternKey(sku.getMainPattern(), sku.getPattern());
+        if (StringUtils.isEmpty(machineSpecCode)
+                || StringUtils.isEmpty(machinePatternKey)
+                || StringUtils.isEmpty(sku.getSpecCode())
+                || StringUtils.isEmpty(skuPatternKey)) {
+            return false;
+        }
+        return StringUtils.equals(machineSpecCode, sku.getSpecCode())
+                && !StringUtils.equals(machinePatternKey, skuPatternKey);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同胎胚。
+     */
+    private boolean isSameEmbryo(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineEmbryoCode = resolveMachineEmbryoCode(context, machine);
+        return StringUtils.isNotEmpty(machineEmbryoCode)
+                && StringUtils.isNotEmpty(sku.getEmbryoCode())
+                && StringUtils.equals(machineEmbryoCode, sku.getEmbryoCode());
+    }
+
+    /**
+     * 计算换活字块开产时间（无需换模、无需首检，仅消耗换活字块时间）
      */
     private Date calcTypeBlockStartTime(LhScheduleContext context, MachineScheduleDTO machine) {
         if (machine.getEstimatedEndTime() == null) {
             return null;
         }
-        // 换活字块：收尾时间 + 首检时间（1小时）
+        // 换活字块：收尾时间 + 换活字块总耗时
         return LhScheduleTimeUtil.addHours(machine.getEstimatedEndTime(),
-                LhScheduleTimeUtil.getFirstInspectionHours(context));
+                LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+    }
+
+    /**
+     * 追加续作衔接结果（同产品结构直续或换活字块）。
+     */
+    private boolean appendFollowUpResult(LhScheduleContext context,
+                                         MachineScheduleDTO machine,
+                                         SkuScheduleDTO sku,
+                                         Date startTime,
+                                         List<LhShiftConfigVO> shifts,
+                                         boolean typeBlock) {
+        if (startTime == null) {
+            return false;
+        }
+        boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
+        int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
+        sku.setMouldQty(machineMouldQty);
+        LhScheduleResult result = buildScheduleResult(
+                context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
+        if (result == null || result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
+            return false;
+        }
+        result.setScheduleType("01");
+        result.setIsEnd(isEnding ? "1" : "0");
+        if (typeBlock) {
+            result.setIsChangeMould("1");
+            result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode(), machine.getCurrentMaterialCode()));
+        } else {
+            result.setIsChangeMould("0");
+        }
+        // 续作衔接结果即便非收尾，也必须补齐可计算完工时刻，避免结果校验失败。
+        Date actualCompletionTime = resolveActualCompletionTime(result);
+        if (actualCompletionTime == null) {
+            return false;
+        }
+        result.setSpecEndTime(actualCompletionTime);
+        result.setTdaySpecEndTime(actualCompletionTime);
+
+        context.getScheduleResultList().add(result);
+        registerMachineAssignment(context, machine.getMachineCode(), result);
+        updateMachineState(machine, sku, result);
+        context.getNewSpecSkuList().remove(sku);
+        log.debug("{}排产完成, 机台: {}, SKU: {}",
+                typeBlock ? "换活字块" : "同产品结构续作",
+                machine.getMachineCode(), sku.getMaterialCode());
+        return true;
     }
 
     /**
@@ -606,8 +683,162 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
                 result.getMouldQty() != null ? result.getMouldQty() : 0);
         Date specEndTime = calcSpecEndTime(result, shifts, lhTimeSeconds, mouldQty, "1".equals(result.getIsEnd()));
+        if (specEndTime == null) {
+            // 非收尾结果也要保留可推导完工时刻，避免后续校验出现 specEndTime 缺失。
+            specEndTime = resolveActualCompletionTime(result);
+        }
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
+    }
+
+    private void updateMachineState(MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
+        machine.setCurrentMaterialCode(sku.getMaterialCode());
+        machine.setCurrentMaterialDesc(sku.getMaterialDesc());
+        machine.setPreviousSpecCode(sku.getSpecCode());
+        machine.setPreviousProSize(sku.getProSize());
+        // 机台预计结束时间严格回写为实际完工时间，避免被整班结束时间放大。
+        machine.setEstimatedEndTime(resolveActualCompletionTime(result));
+        machine.setEnding("1".equals(result.getIsEnd()) && result.getSpecEndTime() != null);
+    }
+
+    private Date resolveActualCompletionTime(LhScheduleResult result) {
+        if (result == null) {
+            return null;
+        }
+        int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
+                result.getMouldQty() != null ? result.getMouldQty() : 0);
+        if (lhTimeSeconds > 0 && mouldQty > 0) {
+            Date actualCompletionTime = null;
+            for (int shiftIndex = 1; shiftIndex <= 8; shiftIndex++) {
+                Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
+                Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shiftIndex);
+                if (shiftPlanQty == null || shiftPlanQty <= 0 || shiftStartTime == null) {
+                    continue;
+                }
+                long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
+                Date shiftCompletionTime = new Date(shiftStartTime.getTime() + secondsNeeded * 1000L);
+                if (actualCompletionTime == null || shiftCompletionTime.after(actualCompletionTime)) {
+                    actualCompletionTime = shiftCompletionTime;
+                }
+            }
+            if (actualCompletionTime != null) {
+                return actualCompletionTime;
+            }
+        }
+        return result.getSpecEndTime();
+    }
+
+    private String resolveMachineEmbryoCode(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getEmbryoCode())) {
+            return materialInfo.getEmbryoCode();
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? currentSku.getEmbryoCode() : null;
+    }
+
+    private String resolveMachineSpecCode(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (StringUtils.isNotEmpty(machine.getPreviousSpecCode())) {
+            return machine.getPreviousSpecCode();
+        }
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getSpecifications())) {
+            return materialInfo.getSpecifications();
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? currentSku.getSpecCode() : null;
+    }
+
+    private String resolveMachinePatternKey(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null) {
+            return resolvePatternKey(materialInfo.getMainPattern(), materialInfo.getPattern());
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        if (currentSku == null) {
+            return null;
+        }
+        return resolvePatternKey(currentSku.getMainPattern(), currentSku.getPattern());
+    }
+
+    private String resolveMachineStructureKey(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null) {
+            String structureKey = resolveStructureKey(materialInfo.getStructureName(),
+                    materialInfo.getSpecifications(),
+                    materialInfo.getMainPattern(),
+                    materialInfo.getPattern());
+            if (StringUtils.isNotEmpty(structureKey)) {
+                return structureKey;
+            }
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? resolveStructureKey(currentSku) : null;
+    }
+
+    private MdmMaterialInfo resolveMachineMaterialInfo(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (context == null || machine == null || StringUtils.isEmpty(machine.getCurrentMaterialCode())) {
+            return null;
+        }
+        return context.getMaterialInfoMap().get(machine.getCurrentMaterialCode());
+    }
+
+    private SkuScheduleDTO findSkuByMaterialCode(List<SkuScheduleDTO> skuList, String materialCode) {
+        if (CollectionUtils.isEmpty(skuList) || StringUtils.isEmpty(materialCode)) {
+            return null;
+        }
+        for (SkuScheduleDTO sku : skuList) {
+            if (StringUtils.equals(materialCode, sku.getMaterialCode())) {
+                return sku;
+            }
+        }
+        return null;
+    }
+
+    private String resolveStructureKey(SkuScheduleDTO sku) {
+        if (sku == null) {
+            return null;
+        }
+        return resolveStructureKey(sku.getStructureName(), sku.getSpecCode(), sku.getMainPattern(), sku.getPattern());
+    }
+
+    private String resolveStructureKey(String structureName, String specCode, String mainPattern, String pattern) {
+        if (StringUtils.isNotEmpty(structureName)) {
+            return structureName;
+        }
+        String patternKey = resolvePatternKey(mainPattern, pattern);
+        if (StringUtils.isEmpty(specCode) || StringUtils.isEmpty(patternKey)) {
+            return null;
+        }
+        return specCode + "#" + patternKey;
+    }
+
+    private String resolvePatternKey(String mainPattern, String pattern) {
+        if (StringUtils.isNotEmpty(mainPattern)) {
+            return mainPattern;
+        }
+        return StringUtils.isNotEmpty(pattern) ? pattern : null;
+    }
+
+    private String resolveMouldCode(LhScheduleContext context, String... materialCodes) {
+        if (context == null || materialCodes == null) {
+            return null;
+        }
+        for (String materialCode : materialCodes) {
+            if (StringUtils.isEmpty(materialCode) || !context.getSkuMouldRelMap().containsKey(materialCode)) {
+                continue;
+            }
+            String mouldCode = context.getSkuMouldRelMap().get(materialCode).stream()
+                    .map(MdmSkuMouldRel::getMouldCode)
+                    .filter(StringUtils::isNotEmpty)
+                    .distinct()
+                    .collect(Collectors.joining(","));
+            if (StringUtils.isNotEmpty(mouldCode)) {
+                return mouldCode;
+            }
+        }
+        return null;
     }
 
     /**

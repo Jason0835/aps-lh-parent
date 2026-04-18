@@ -242,6 +242,19 @@ public final class LhScheduleTimeUtil {
     }
 
     /**
+     * 获取换活字块总耗时（小时）
+     *
+     * @param context 排程上下文
+     * @return 换活字块总耗时（小时）
+     */
+    public static int getTypeBlockChangeTotalHours(LhScheduleContext context) {
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS;
+        }
+        return context.getScheduleConfig().getTypeBlockChangeTotalHours();
+    }
+
+    /**
      * 获取首检时间（小时）
      *
      * @param context 排程上下文

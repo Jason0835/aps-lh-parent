@@ -5,6 +5,7 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.dto.ValidationResult;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhMouldCleanPlan;
 import com.zlt.aps.lh.api.enums.CleaningTypeEnum;
 import com.zlt.aps.lh.api.enums.MachineStopTypeEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
@@ -167,17 +168,17 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             }
 
             // 初始化清洗计划
-            for (com.zlt.aps.lh.api.domain.entity.LhCleaningPlan cleaningPlan : context.getCleaningPlanList()) {
-                if (!machineCode.equals(cleaningPlan.getLhMachineCode())) {
+            for (LhMouldCleanPlan cleaningPlan : context.getCleaningPlanList()) {
+                if (!machineCode.equals(cleaningPlan.getLhCode())) {
                     continue;
                 }
-                if (CleaningTypeEnum.DRY_ICE.getCode().equals(cleaningPlan.getPlanType())) {
+                if (CleaningTypeEnum.DRY_ICE.getCode().equals(cleaningPlan.getCleanType())) {
                     dto.setHasDryIceCleaning(true);
                 }
-                if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleaningPlan.getPlanType())) {
+                if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleaningPlan.getCleanType())) {
                     dto.setHasSandBlastCleaning(true);
                 }
-                dto.setCleaningPlanTime(earlier(dto.getCleaningPlanTime(), cleaningPlan.getPlanTime()));
+                dto.setCleaningPlanTime(earlier(dto.getCleaningPlanTime(), cleaningPlan.getCleanTime()));
             }
 
             // 初始化胶囊使用次数

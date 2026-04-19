@@ -4,15 +4,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
-import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhMouldCleanPlan;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
-import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
+import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
 import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
@@ -103,7 +103,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     private LhMachineInfoMapper lhMachineInfoMapper;
 
     @Resource
-    private LhCleaningPlanMapper lhCleaningPlanMapper;
+    private LhMouldCleanPlanMapper lhMouldCleanPlanMapper;
 
     @Resource
     private MdmMonthSurplusMapper monthSurplusMapper;
@@ -472,18 +472,19 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      */
     private void loadCleaningPlan(LhScheduleContext context, String factoryCode, Date startDate, Date endDate) {
         List<String> machineCodes = new ArrayList<>(context.getMachineInfoMap().keySet());
-        List<LhCleaningPlan> cleaningPlanList;
+        List<LhMouldCleanPlan> cleaningPlanList;
         if (machineCodes.isEmpty()) {
             cleaningPlanList = Collections.emptyList();
         } else {
-            cleaningPlanList = lhCleaningPlanMapper.selectList(
-                    new LambdaQueryWrapper<LhCleaningPlan>()
-                            .in(LhCleaningPlan::getLhMachineCode, machineCodes)
-                            .ge(LhCleaningPlan::getPlanTime, startDate)
-                            .lt(LhCleaningPlan::getPlanTime, endDate)
-                            .and(w -> w.eq(LhCleaningPlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
+            cleaningPlanList = lhMouldCleanPlanMapper.selectList(
+                    new LambdaQueryWrapper<LhMouldCleanPlan>()
+                            .eq(LhMouldCleanPlan::getFactoryCode, factoryCode)
+                            .in(LhMouldCleanPlan::getLhCode, machineCodes)
+                            .ge(LhMouldCleanPlan::getCleanTime, startDate)
+                            .lt(LhMouldCleanPlan::getCleanTime, endDate)
+                            .and(w -> w.eq(LhMouldCleanPlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode())
                                     .or()
-                                    .isNull(LhCleaningPlan::getIsDelete)));
+                                    .isNull(LhMouldCleanPlan::getIsDelete)));
         }
         context.setCleaningPlanList(cleaningPlanList != null ? cleaningPlanList : context.getCleaningPlanList());
         log.debug("模具清洗计划加载完成, 数量: {}", context.getCleaningPlanList().size());

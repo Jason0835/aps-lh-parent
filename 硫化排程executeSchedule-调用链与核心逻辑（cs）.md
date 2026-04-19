@@ -37,7 +37,7 @@
 ### S4.2 数据层（Mapper / Service）
 
 - `LhParamsMapper`：硫化参数 → `context.lhParamsMap`。
-- `ILhBaseDataService#loadAllBaseData`（`LhBaseDataServiceImpl`）顺序调用：`MpFactoryProductionVersionMapper`、`FactoryMonthPlanProductionFinalResultMapper`、`MdmWorkCalendarMapper`、`MdmSkuLhCapacityMapper`、`MdmDevicePlanShutMapper`、`MdmSkuMouldRelMapper`、`LhMachineInfoMapper`、`LhCleaningPlanMapper`、`MdmMonthSurplusMapper`、`LhShiftFinishQtyMapper`、`MdmMaterialInfoMapper`、`MdmLhMachineOnlineInfoMapper`（T−1 在机）、`LhSpecifyMachineMapper`、`MdmLhRepairCapsuleMapper`、`MdmDevMaintenancePlanMapper` 等。
+- `ILhBaseDataService#loadAllBaseData`（`LhBaseDataServiceImpl`）顺序调用：`MpFactoryProductionVersionMapper`、`FactoryMonthPlanProductionFinalResultMapper`、`MdmWorkCalendarMapper`、`MdmSkuLhCapacityMapper`、`MdmDevicePlanShutMapper`、`MdmSkuMouldRelMapper`、`LhMachineInfoMapper`、`LhMouldCleanPlanMapper`、`MdmMonthSurplusMapper`、`LhShiftFinishQtyMapper`、`MdmMaterialInfoMapper`、`MdmLhMachineOnlineInfoMapper`（T−1 在机）、`LhSpecifyMachineMapper`、`MdmLhRepairCapsuleMapper`、`MdmDevMaintenancePlanMapper` 等。
 - `DataValidationChain#validate`：责任链校验基础数据。
 
 ### S4.1 / S4.3 / S4.6 涉及 Mapper

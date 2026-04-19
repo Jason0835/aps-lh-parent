@@ -13,7 +13,7 @@ DB_CONFIG = {
 
 # ====================== 【必须修改】需要导出的表名列表 ======================
 TABLE_NAMES = [
-    "T_LH_CLEANING_PLAN",
+    "T_LH_MOULD_CLEAN_PLAN",
     "T_LH_MACHINE_INFO",
     "T_LH_MOULD_CHANGE_PLAN",
     "T_LH_PARAMS",

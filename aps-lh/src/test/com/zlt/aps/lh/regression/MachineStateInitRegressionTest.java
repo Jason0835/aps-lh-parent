@@ -1,8 +1,8 @@
 package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
-import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhMouldCleanPlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.handler.DataInitHandler;
@@ -57,14 +57,14 @@ class MachineStateInitRegressionTest {
         materialInfo.setProSize("18");
         context.getMaterialInfoMap().put("MAT-1", materialInfo);
 
-        LhCleaningPlan dryIce = new LhCleaningPlan();
-        dryIce.setLhMachineCode("M1");
-        dryIce.setPlanType("01");
-        dryIce.setPlanTime(dateTime(2026, 4, 12, 8, 0));
-        LhCleaningPlan sandBlast = new LhCleaningPlan();
-        sandBlast.setLhMachineCode("M1");
-        sandBlast.setPlanType("02");
-        sandBlast.setPlanTime(dateTime(2026, 4, 12, 7, 30));
+        LhMouldCleanPlan dryIce = new LhMouldCleanPlan();
+        dryIce.setLhCode("M1");
+        dryIce.setCleanType("01");
+        dryIce.setCleanTime(dateTime(2026, 4, 12, 8, 0));
+        LhMouldCleanPlan sandBlast = new LhMouldCleanPlan();
+        sandBlast.setLhCode("M1");
+        sandBlast.setCleanType("02");
+        sandBlast.setCleanTime(dateTime(2026, 4, 12, 7, 30));
         context.setCleaningPlanList(java.util.Arrays.asList(dryIce, sandBlast));
 
         MdmDevMaintenancePlan maintenancePlan = new MdmDevMaintenancePlan();

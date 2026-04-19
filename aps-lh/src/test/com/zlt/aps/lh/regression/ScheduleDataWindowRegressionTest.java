@@ -7,8 +7,8 @@ import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
-import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
+import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
 import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
@@ -17,6 +17,7 @@ import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
 import com.zlt.aps.lh.mapper.LhMachineOnlineInfoMapper;
 import com.zlt.aps.lh.mapper.LhRepairCapsuleMapper;
 import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
+import com.zlt.aps.lh.mapper.MdmModelInfoMapper;
 import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
@@ -61,9 +62,11 @@ class ScheduleDataWindowRegressionTest {
     @Mock
     private MdmSkuMouldRelMapper skuMouldRelMapper;
     @Mock
+    private MdmModelInfoMapper mdmModelInfoMapper;
+    @Mock
     private LhMachineInfoMapper lhMachineInfoMapper;
     @Mock
-    private LhCleaningPlanMapper lhCleaningPlanMapper;
+    private LhMouldCleanPlanMapper lhMouldCleanPlanMapper;
     @Mock
     private MdmMonthSurplusMapper monthSurplusMapper;
     @Mock
@@ -126,7 +129,7 @@ class ScheduleDataWindowRegressionTest {
         // [startDate,endDate) 与 T～T+2 对齐见 scheduleWindow_targetDayTDayAndHalfOpenEndMatchFormula；此处仅确认三类数据按该窗口加载
         verify(workCalendarMapper).selectList(any());
         verify(devicePlanShutMapper).selectList(any());
-        verify(lhCleaningPlanMapper).selectList(any());
+        verify(lhMouldCleanPlanMapper).selectList(any());
         verify(lhScheduleResultMapper).selectList(any());
     }
 
@@ -187,7 +190,6 @@ class ScheduleDataWindowRegressionTest {
     private void prepareRequiredBaseMocks() {
         MpFactoryProductionVersion finalVersion = new MpFactoryProductionVersion();
         finalVersion.setProductionVersion("PV_REGRESSION_01");
-        when(mpFactoryProductionVersionMapper.selectCount(any())).thenReturn(1L);
         when(mpFactoryProductionVersionMapper.selectList(any())).thenReturn(Collections.singletonList(finalVersion));
 
         when(monthPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
@@ -195,6 +197,7 @@ class ScheduleDataWindowRegressionTest {
         when(skuLhCapacityMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devicePlanShutMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(skuMouldRelMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(mdmModelInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         LhMachineInfo machine = new LhMachineInfo();
         machine.setMachineCode("M1");
@@ -202,7 +205,7 @@ class ScheduleDataWindowRegressionTest {
         machine.setIsDelete(DeleteFlagEnum.NORMAL.getCode());
         when(lhMachineInfoMapper.selectList(any())).thenReturn(Collections.singletonList(machine));
 
-        when(lhCleaningPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(lhMouldCleanPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(monthSurplusMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhShiftFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(mdmMaterialInfoMapper.selectList(any())).thenReturn(Collections.emptyList());

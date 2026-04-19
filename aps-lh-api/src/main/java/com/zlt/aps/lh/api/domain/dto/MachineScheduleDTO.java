@@ -38,6 +38,10 @@ public class MachineScheduleDTO {
     private String currentMaterialCode;
     /** 当前在产物料描述 */
     private String currentMaterialDesc;
+    /** 前规格物料编码（换模前机台当前在机物料编码） */
+    private String previousMaterialCode;
+    /** 前规格物料描述（换模前机台当前在机物料描述） */
+    private String previousMaterialDesc;
     /** 前规格(用于换模匹配) */
     private String previousSpecCode;
     /** 前规格英寸 */

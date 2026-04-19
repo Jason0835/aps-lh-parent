@@ -132,6 +132,10 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             dto.setMouldSetCode(machineInfo.getMouldSetCode());
 
             // 初始化在产规格（来自MES在机信息）
+            dto.setCurrentMaterialCode(null);
+            dto.setCurrentMaterialDesc(null);
+            dto.setPreviousMaterialCode(null);
+            dto.setPreviousMaterialDesc(null);
             if (context.getMachineOnlineInfoMap().containsKey(machineCode)) {
                 LhMachineOnlineInfo onlineInfo = context.getMachineOnlineInfoMap().get(machineCode);
                 dto.setCurrentMaterialCode(onlineInfo.getMaterialCode());
@@ -229,6 +233,8 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             copy.setMachineName(source.getMachineName());
             copy.setCurrentMaterialCode(source.getCurrentMaterialCode());
             copy.setCurrentMaterialDesc(source.getCurrentMaterialDesc());
+            copy.setPreviousMaterialCode(source.getPreviousMaterialCode());
+            copy.setPreviousMaterialDesc(source.getPreviousMaterialDesc());
             copy.setPreviousSpecCode(source.getPreviousSpecCode());
             copy.setPreviousProSize(source.getPreviousProSize());
             copy.setEstimatedEndTime(source.getEstimatedEndTime());

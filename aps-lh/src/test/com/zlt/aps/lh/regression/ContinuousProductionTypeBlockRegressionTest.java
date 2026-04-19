@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
@@ -18,6 +19,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
@@ -29,6 +31,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -138,6 +141,100 @@ class ContinuousProductionTypeBlockRegressionTest {
         assertEquals("1", typeBlockResult.getIsChangeMould());
         assertNotNull(typeBlockResult.getMouldCode());
         assertFalse(expectedStartTime.equals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 9)));
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldWriteCleaningTypeBlockAnalysisWhenWindowHitsShift() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("01");
+        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 18, 0, 0, 0));
+        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 19, 23, 59, 59));
+        cleaningWindow.setReadyTime(dateTime(2026, 4, 19, 23, 59, 59));
+        List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
+        cleaningWindowList.add(cleaningWindow);
+        machine.setCleaningWindowList(cleaningWindowList);
+        context.getMachineScheduleMap().put("M1", machine);
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        strategy.scheduleTypeBlockChange(context);
+
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        int firstPlannedShift = resolveFirstPlannedShiftIndex(typeBlockResult);
+        assertEquals("模具清洗+换活字块", ShiftFieldUtil.getShiftAnalysis(typeBlockResult, firstPlannedShift));
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldNotWriteCleaningTypeBlockAnalysisWithoutCleaningWindow() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        strategy.scheduleTypeBlockChange(context);
+
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        int firstPlannedShift = resolveFirstPlannedShiftIndex(typeBlockResult);
+        assertNull(ShiftFieldUtil.getShiftAnalysis(typeBlockResult, firstPlannedShift));
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldNotWriteCleaningTypeBlockAnalysisWhenOnlyTouchBoundary() {
+        LhScheduleContext context = newContext();
+        context.setScheduleConfig(createConfig(3, 9));
+        MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
+        context.getMachineScheduleMap().put("M1", machine);
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        LhScheduleResult continuousResult = context.getScheduleResultList().get(0);
+        Date typeBlockStartBoundary = LhScheduleTimeUtil.addHours(
+                continuousResult.getSpecEndTime(),
+                LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("01");
+        cleaningWindow.setCleanStartTime(LhScheduleTimeUtil.addHours(typeBlockStartBoundary, -1));
+        cleaningWindow.setCleanEndTime(typeBlockStartBoundary);
+        cleaningWindow.setReadyTime(typeBlockStartBoundary);
+        List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
+        cleaningWindowList.add(cleaningWindow);
+        machine.setCleaningWindowList(cleaningWindowList);
+
+        strategy.scheduleTypeBlockChange(context);
+
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        int firstPlannedShift = resolveFirstPlannedShiftIndex(typeBlockResult);
+        assertNull(ShiftFieldUtil.getShiftAnalysis(typeBlockResult, firstPlannedShift));
     }
 
     @Test
@@ -316,6 +413,16 @@ class ContinuousProductionTypeBlockRegressionTest {
             }
         }
         return null;
+    }
+
+    private int resolveFirstPlannedShiftIndex(LhScheduleResult result) {
+        for (int shiftIndex = 1; shiftIndex <= 8; shiftIndex++) {
+            Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
+            if (shiftPlanQty != null && shiftPlanQty > 0) {
+                return shiftIndex;
+            }
+        }
+        return 1;
     }
 
     private Date resolveActualCompletionTime(LhScheduleResult result) {

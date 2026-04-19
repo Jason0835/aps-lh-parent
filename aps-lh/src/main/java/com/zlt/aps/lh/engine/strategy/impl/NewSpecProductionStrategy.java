@@ -630,6 +630,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
     private void updateMachineState(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
         cacheInitialMachineState(context, machine);
+        machine.setPreviousMaterialCode(machine.getCurrentMaterialCode());
+        machine.setPreviousMaterialDesc(machine.getCurrentMaterialDesc());
         machine.setCurrentMaterialCode(sku.getMaterialCode());
         machine.setCurrentMaterialDesc(sku.getMaterialDesc());
         machine.setPreviousSpecCode(sku.getSpecCode());
@@ -655,6 +657,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         snapshot.setMachineName(machine.getMachineName());
         snapshot.setCurrentMaterialCode(machine.getCurrentMaterialCode());
         snapshot.setCurrentMaterialDesc(machine.getCurrentMaterialDesc());
+        snapshot.setPreviousMaterialCode(machine.getPreviousMaterialCode());
+        snapshot.setPreviousMaterialDesc(machine.getPreviousMaterialDesc());
         snapshot.setPreviousSpecCode(machine.getPreviousSpecCode());
         snapshot.setPreviousProSize(machine.getPreviousProSize());
         snapshot.setEstimatedEndTime(machine.getEstimatedEndTime());
@@ -916,9 +920,11 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         for (Map.Entry<String, MachineScheduleDTO> entry : context.getMachineScheduleMap().entrySet()) {
             String machineCode = entry.getKey();
             MachineScheduleDTO machine = entry.getValue();
-            LhScheduleResult latestResult = resolveLatestAssignedResult(context, machineCode);
+            List<LhScheduleResult> assignedResults = context.getMachineAssignmentMap().get(machineCode);
+            LhScheduleResult latestResult = resolveLatestAssignedResult(assignedResults);
             if (latestResult != null) {
-                applyMachineStateFromResult(context, machine, latestResult);
+                LhScheduleResult previousResult = resolvePreviousAssignedResult(assignedResults, latestResult);
+                applyMachineStateFromResult(context, machine, latestResult, previousResult);
                 continue;
             }
             restoreMachineStateFromInitial(context, machineCode, machine);
@@ -932,11 +938,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
      * @param machineCode 机台编码
      * @return 最新有效结果
      */
-    private LhScheduleResult resolveLatestAssignedResult(LhScheduleContext context, String machineCode) {
-        if (context == null || StringUtils.isEmpty(machineCode)) {
-            return null;
-        }
-        List<LhScheduleResult> assignedResults = context.getMachineAssignmentMap().get(machineCode);
+    private LhScheduleResult resolveLatestAssignedResult(List<LhScheduleResult> assignedResults) {
         if (CollectionUtils.isEmpty(assignedResults)) {
             return null;
         }
@@ -950,18 +952,57 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     }
 
     /**
+     * 查找机台当前保留结果中的上一条有效结果。
+     *
+     * @param assignedResults 机台保留结果
+     * @param latestResult 最新有效结果
+     * @return 上一条有效结果
+     */
+    private LhScheduleResult resolvePreviousAssignedResult(List<LhScheduleResult> assignedResults,
+                                                           LhScheduleResult latestResult) {
+        if (CollectionUtils.isEmpty(assignedResults) || latestResult == null) {
+            return null;
+        }
+        return assignedResults.stream()
+                .filter(result -> result != null
+                        && result != latestResult
+                        && result.getDailyPlanQty() != null
+                        && result.getDailyPlanQty() > 0
+                        && result.getSpecEndTime() != null)
+                .max(Comparator.comparing(LhScheduleResult::getSpecEndTime))
+                .orElse(null);
+    }
+
+    /**
      * 使用最新有效结果回写机台状态。
      *
      * @param machine 机台
      * @param result 最新有效结果
      */
-    private void applyMachineStateFromResult(LhScheduleContext context, MachineScheduleDTO machine, LhScheduleResult result) {
+    private void applyMachineStateFromResult(LhScheduleContext context,
+                                             MachineScheduleDTO machine,
+                                             LhScheduleResult result,
+                                             LhScheduleResult previousResult) {
         if (context == null || machine == null || result == null) {
             return;
+        }
+        String previousMaterialCode = null;
+        String previousMaterialDesc = null;
+        if (previousResult != null) {
+            previousMaterialCode = previousResult.getMaterialCode();
+            previousMaterialDesc = previousResult.getMaterialDesc();
+        } else if (StringUtils.isNotEmpty(machine.getMachineCode())) {
+            MachineScheduleDTO initialMachine = context.getInitialMachineScheduleMap().get(machine.getMachineCode());
+            if (initialMachine != null) {
+                previousMaterialCode = initialMachine.getCurrentMaterialCode();
+                previousMaterialDesc = initialMachine.getCurrentMaterialDesc();
+            }
         }
         SkuScheduleDTO sku = findSkuDto(context, result.getMaterialCode());
         machine.setCurrentMaterialCode(result.getMaterialCode());
         machine.setCurrentMaterialDesc(result.getMaterialDesc());
+        machine.setPreviousMaterialCode(previousMaterialCode);
+        machine.setPreviousMaterialDesc(previousMaterialDesc);
         machine.setPreviousSpecCode(result.getSpecCode());
         machine.setPreviousProSize(sku != null ? sku.getProSize() : null);
         machine.setEstimatedEndTime(result.getSpecEndTime());
@@ -984,6 +1025,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         }
         machine.setCurrentMaterialCode(initialMachine.getCurrentMaterialCode());
         machine.setCurrentMaterialDesc(initialMachine.getCurrentMaterialDesc());
+        machine.setPreviousMaterialCode(initialMachine.getPreviousMaterialCode());
+        machine.setPreviousMaterialDesc(initialMachine.getPreviousMaterialDesc());
         machine.setPreviousSpecCode(initialMachine.getPreviousSpecCode());
         machine.setPreviousProSize(initialMachine.getPreviousProSize());
         machine.setEstimatedEndTime(initialMachine.getEstimatedEndTime());

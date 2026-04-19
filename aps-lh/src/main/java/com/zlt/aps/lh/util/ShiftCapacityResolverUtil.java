@@ -2,10 +2,16 @@ package com.zlt.aps.lh.util;
 
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
+import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.util.CollectionUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -140,5 +146,168 @@ public final class ShiftCapacityResolverUtil {
         }
         long durationSeconds = (shiftEndTime.getTime() - shiftStartTime.getTime()) / 1000L;
         return Math.max(durationSeconds, 0L);
+    }
+
+    /**
+     * 计算机台在指定时间窗内被计划停机占用的总秒数。
+     *
+     * @param devicePlanShutList 设备计划停机列表
+     * @param machineCode 机台编号
+     * @param windowStartTime 时间窗开始时间
+     * @param windowEndTime 时间窗结束时间
+     * @return 停机重叠秒数
+     */
+    public static long resolvePlannedStopOverlapSeconds(List<MdmDevicePlanShut> devicePlanShutList,
+                                                        String machineCode,
+                                                        Date windowStartTime,
+                                                        Date windowEndTime) {
+        if (CollectionUtils.isEmpty(devicePlanShutList)
+                || StringUtils.isEmpty(machineCode)
+                || Objects.isNull(windowStartTime)
+                || Objects.isNull(windowEndTime)
+                || !windowStartTime.before(windowEndTime)) {
+            return 0L;
+        }
+
+        List<Date[]> overlapIntervals = new ArrayList<>();
+        for (MdmDevicePlanShut planShut : devicePlanShutList) {
+            if (Objects.isNull(planShut)
+                    || !StringUtils.equals(machineCode, planShut.getMachineCode())
+                    || Objects.isNull(planShut.getBeginDate())
+                    || Objects.isNull(planShut.getEndDate())
+                    || !planShut.getBeginDate().before(planShut.getEndDate())) {
+                continue;
+            }
+            Date overlapStartTime = planShut.getBeginDate().after(windowStartTime) ? planShut.getBeginDate() : windowStartTime;
+            Date overlapEndTime = planShut.getEndDate().before(windowEndTime) ? planShut.getEndDate() : windowEndTime;
+            if (overlapStartTime.before(overlapEndTime)) {
+                overlapIntervals.add(new Date[]{overlapStartTime, overlapEndTime});
+            }
+        }
+        if (overlapIntervals.isEmpty()) {
+            return 0L;
+        }
+
+        overlapIntervals.sort((left, right) -> {
+            int startCmp = left[0].compareTo(right[0]);
+            if (startCmp != 0) {
+                return startCmp;
+            }
+            return left[1].compareTo(right[1]);
+        });
+
+        long overlapSeconds = 0L;
+        Date mergedStart = overlapIntervals.get(0)[0];
+        Date mergedEnd = overlapIntervals.get(0)[1];
+        for (int i = 1; i < overlapIntervals.size(); i++) {
+            Date currentStart = overlapIntervals.get(i)[0];
+            Date currentEnd = overlapIntervals.get(i)[1];
+            if (!currentStart.after(mergedEnd)) {
+                if (currentEnd.after(mergedEnd)) {
+                    mergedEnd = currentEnd;
+                }
+                continue;
+            }
+            overlapSeconds += (mergedEnd.getTime() - mergedStart.getTime()) / 1000L;
+            mergedStart = currentStart;
+            mergedEnd = currentEnd;
+        }
+        overlapSeconds += (mergedEnd.getTime() - mergedStart.getTime()) / 1000L;
+        return Math.max(overlapSeconds, 0L);
+    }
+
+    /**
+     * 计算机台在指定时间窗内扣减计划停机后的净可用秒数。
+     *
+     * @param devicePlanShutList 设备计划停机列表
+     * @param machineCode 机台编号
+     * @param windowStartTime 时间窗开始时间
+     * @param windowEndTime 时间窗结束时间
+     * @return 净可用秒数
+     */
+    public static long resolveNetAvailableSeconds(List<MdmDevicePlanShut> devicePlanShutList,
+                                                  String machineCode,
+                                                  Date windowStartTime,
+                                                  Date windowEndTime) {
+        if (Objects.isNull(windowStartTime) || Objects.isNull(windowEndTime) || !windowStartTime.before(windowEndTime)) {
+            return 0L;
+        }
+        long availableSeconds = (windowEndTime.getTime() - windowStartTime.getTime()) / 1000L;
+        if (availableSeconds <= 0) {
+            return 0L;
+        }
+        long overlapSeconds = resolvePlannedStopOverlapSeconds(devicePlanShutList, machineCode, windowStartTime, windowEndTime);
+        return Math.max(availableSeconds - overlapSeconds, 0L);
+    }
+
+    /**
+     * 推导考虑计划停机空档后的完工时间。
+     * <p>语义：生产只能在非停机时间推进，遇到停机窗口自动顺延。</p>
+     *
+     * @param devicePlanShutList 设备计划停机列表
+     * @param machineCode 机台编号
+     * @param productionStartTime 生产开始时间
+     * @param productionSeconds 纯生产所需秒数（不含停机空档）
+     * @return 完工时间
+     */
+    public static Date resolveCompletionTimeWithPlannedStops(List<MdmDevicePlanShut> devicePlanShutList,
+                                                             String machineCode,
+                                                             Date productionStartTime,
+                                                             long productionSeconds) {
+        if (Objects.isNull(productionStartTime)) {
+            return null;
+        }
+        if (productionSeconds <= 0) {
+            return productionStartTime;
+        }
+        if (CollectionUtils.isEmpty(devicePlanShutList) || StringUtils.isEmpty(machineCode)) {
+            return new Date(productionStartTime.getTime() + productionSeconds * 1000L);
+        }
+
+        List<MdmDevicePlanShut> machineStops = new ArrayList<>();
+        for (MdmDevicePlanShut planShut : devicePlanShutList) {
+            if (Objects.isNull(planShut)
+                    || !StringUtils.equals(machineCode, planShut.getMachineCode())
+                    || Objects.isNull(planShut.getBeginDate())
+                    || Objects.isNull(planShut.getEndDate())
+                    || !planShut.getBeginDate().before(planShut.getEndDate())
+                    || !planShut.getEndDate().after(productionStartTime)) {
+                continue;
+            }
+            machineStops.add(planShut);
+        }
+        if (machineStops.isEmpty()) {
+            return new Date(productionStartTime.getTime() + productionSeconds * 1000L);
+        }
+        machineStops.sort(Comparator.comparing(MdmDevicePlanShut::getBeginDate)
+                .thenComparing(MdmDevicePlanShut::getEndDate));
+
+        long remainingSeconds = productionSeconds;
+        Date cursor = productionStartTime;
+        for (MdmDevicePlanShut stop : machineStops) {
+            Date stopStartTime = stop.getBeginDate();
+            Date stopEndTime = stop.getEndDate();
+
+            if (!cursor.before(stopEndTime)) {
+                continue;
+            }
+
+            if (stopStartTime.after(cursor)) {
+                long productiveSeconds = (stopStartTime.getTime() - cursor.getTime()) / 1000L;
+                if (productiveSeconds >= remainingSeconds) {
+                    return new Date(cursor.getTime() + remainingSeconds * 1000L);
+                }
+                if (productiveSeconds > 0) {
+                    remainingSeconds -= productiveSeconds;
+                    cursor = stopStartTime;
+                }
+            }
+
+            if (cursor.before(stopEndTime)) {
+                cursor = stopEndTime;
+            }
+        }
+
+        return new Date(cursor.getTime() + remainingSeconds * 1000L);
     }
 }

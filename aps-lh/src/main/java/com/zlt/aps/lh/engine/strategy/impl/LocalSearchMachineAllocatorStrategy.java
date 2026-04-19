@@ -357,8 +357,14 @@ public class LocalSearchMachineAllocatorStrategy {
             }
 
             // 统一按班产主口径或回退公式估算残班/整班计划量。
+            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
+                    context.getDevicePlanShutList(), machine.getMachineCode(), effectiveStartTime, shift.getShiftEndDateTime());
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
-                    shift, effectiveStartTime, shiftCapacity, lhTimeSeconds, mouldQty);
+                    shiftCapacity,
+                    lhTimeSeconds,
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    netAvailableSeconds);
             if (shiftMaxQty <= 0) {
                 continue;
             }
@@ -370,7 +376,8 @@ public class LocalSearchMachineAllocatorStrategy {
             totalQty += allocationQty;
             remainingQty -= allocationQty;
             long productionSeconds = (long) Math.ceil((double) allocationQty / mouldQty) * lhTimeSeconds;
-            specEndTime = new Date(effectiveStartTime.getTime() + productionSeconds * 1000L);
+            specEndTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(
+                    context.getDevicePlanShutList(), machine.getMachineCode(), effectiveStartTime, productionSeconds);
             // 当前班次结束后再推进到下一班次，避免跨班次重叠计算
             cursorStartTime = shift.getShiftEndDateTime();
         }

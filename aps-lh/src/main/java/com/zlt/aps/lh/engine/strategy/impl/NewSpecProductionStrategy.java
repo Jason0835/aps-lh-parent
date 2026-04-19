@@ -438,13 +438,18 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            long availableSeconds = (shift.getShiftEndDateTime().getTime() - effectiveStart.getTime()) / 1000L;
-            if (availableSeconds <= 0) {
+            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
+                    context.getDevicePlanShutList(), result.getLhMachineCode(), effectiveStart, shift.getShiftEndDateTime());
+            if (netAvailableSeconds <= 0) {
                 continue;
             }
 
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
-                    shift, effectiveStart, shiftCapacity, lhTimeSeconds, mouldQty);
+                    shiftCapacity,
+                    lhTimeSeconds,
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    netAvailableSeconds);
             if (shiftMaxQty <= 0) {
                 continue;
             }
@@ -510,7 +515,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
                 result.getMouldQty() != null ? result.getMouldQty() : 0);
-        Date specEndTime = calcSpecEndTime(result, shifts, lhTimeSeconds, mouldQty);
+        Date specEndTime = calcSpecEndTime(context, result, shifts, lhTimeSeconds, mouldQty);
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
     }
@@ -554,7 +559,11 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         normalizeUnscheduledResultsByMaterial(context);
     }
 
-    private Date calcSpecEndTime(LhScheduleResult result, List<LhShiftConfigVO> shifts, int lhTimeSeconds, int mouldQty) {
+    private Date calcSpecEndTime(LhScheduleContext context,
+                                 LhScheduleResult result,
+                                 List<LhShiftConfigVO> shifts,
+                                 int lhTimeSeconds,
+                                 int mouldQty) {
         if (lhTimeSeconds <= 0 || mouldQty <= 0) {
             return null;
         }
@@ -569,7 +578,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 return shift.getShiftEndDateTime();
             }
             long secondsNeeded = (long) Math.ceil((double) planQty / mouldQty) * lhTimeSeconds;
-            return new Date(shiftStart.getTime() + secondsNeeded * 1000L);
+            return ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(
+                    context.getDevicePlanShutList(), result.getLhMachineCode(), shiftStart, secondsNeeded);
         }
         return null;
     }

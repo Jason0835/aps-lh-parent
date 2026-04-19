@@ -2,8 +2,10 @@ package com.zlt.aps.lh.util;
 
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -36,6 +38,70 @@ class ShiftCapacityResolverUtilTest {
 
         assertEquals(16, partialShiftQty, "无班产主数据时，应按有效时长、硫化时长和机台模台数回退计算");
         assertEquals(18, fullShiftQty, "无班产主数据时，满班应按整班时长和机台模台数回退计算");
+    }
+
+    @Test
+    void plannedStopInMiddleOfShift_shouldDeductCapacityAndDelayCompletion() {
+        Date shiftStart = dateTime(2026, 4, 17, 6, 0);
+        Date shiftEnd = dateTime(2026, 4, 17, 14, 0);
+        List<MdmDevicePlanShut> stops = Arrays.asList(
+                buildStop("M1", dateTime(2026, 4, 17, 10, 0), dateTime(2026, 4, 17, 12, 0))
+        );
+
+        long netSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(stops, "M1", shiftStart, shiftEnd);
+        Date completionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(stops, "M1", shiftStart, 6 * 3600L);
+
+        assertEquals(6 * 3600L, netSeconds, "班次中间停机 2 小时后，净可用时长应扣减为 6 小时");
+        assertEquals(shiftEnd, completionTime, "纯生产 6 小时遇到中间停机，应顺延到 14:00 完工");
+    }
+
+    @Test
+    void multipleStopsWithinSameShift_shouldAccumulateDeductionAndDelayCompletion() {
+        Date shiftStart = dateTime(2026, 4, 17, 6, 0);
+        Date shiftEnd = dateTime(2026, 4, 17, 14, 0);
+        List<MdmDevicePlanShut> stops = Arrays.asList(
+                buildStop("M1", dateTime(2026, 4, 17, 7, 0), dateTime(2026, 4, 17, 8, 0)),
+                buildStop("M1", dateTime(2026, 4, 17, 10, 0), dateTime(2026, 4, 17, 11, 0))
+        );
+
+        long netSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(stops, "M1", shiftStart, shiftEnd);
+        Date completionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(stops, "M1", shiftStart, 4 * 3600L);
+
+        assertEquals(6 * 3600L, netSeconds, "同班多段停机应累计扣减停机时长");
+        assertEquals(dateTime(2026, 4, 17, 12, 0), completionTime, "纯生产 4 小时需跳过两段停机空档");
+    }
+
+    @Test
+    void adjacentAndOverlappingStops_shouldBeMergedWithoutDoubleDeduction() {
+        Date shiftStart = dateTime(2026, 4, 17, 6, 0);
+        Date shiftEnd = dateTime(2026, 4, 17, 14, 0);
+        List<MdmDevicePlanShut> stops = Arrays.asList(
+                buildStop("M1", dateTime(2026, 4, 17, 8, 0), dateTime(2026, 4, 17, 9, 0)),
+                buildStop("M1", dateTime(2026, 4, 17, 9, 0), dateTime(2026, 4, 17, 10, 0)),
+                buildStop("M1", dateTime(2026, 4, 17, 9, 30), dateTime(2026, 4, 17, 11, 0))
+        );
+
+        long netSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(stops, "M1", shiftStart, shiftEnd);
+        Date completionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(stops, "M1", shiftStart, 5 * 3600L);
+
+        assertEquals(5 * 3600L, netSeconds, "相邻/重叠停机应按并集时长扣减，避免重复扣减");
+        assertEquals(shiftEnd, completionTime, "纯生产 5 小时应跨越停机并在 14:00 完工");
+    }
+
+    @Test
+    void stopOnShiftBoundary_shouldNotAffectShiftWindow() {
+        Date shiftStart = dateTime(2026, 4, 17, 6, 0);
+        Date shiftEnd = dateTime(2026, 4, 17, 14, 0);
+        List<MdmDevicePlanShut> stops = Arrays.asList(
+                buildStop("M1", dateTime(2026, 4, 17, 5, 0), dateTime(2026, 4, 17, 6, 0)),
+                buildStop("M1", dateTime(2026, 4, 17, 14, 0), dateTime(2026, 4, 17, 15, 0))
+        );
+
+        long netSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(stops, "M1", shiftStart, shiftEnd);
+        Date completionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(stops, "M1", shiftStart, 4 * 3600L);
+
+        assertEquals(8 * 3600L, netSeconds, "停机恰好在班次边界时，不应扣减班次内可用时长");
+        assertEquals(dateTime(2026, 4, 17, 10, 0), completionTime, "边界停机不应影响班次内完工时刻");
     }
 
     private LhShiftConfigVO findMorningShift(Date scheduleDate) {
@@ -73,5 +139,13 @@ class ShiftCapacityResolverUtilTest {
         calendar.set(Calendar.HOUR_OF_DAY, hour);
         calendar.set(Calendar.MINUTE, minute);
         return calendar.getTime();
+    }
+
+    private static MdmDevicePlanShut buildStop(String machineCode, Date beginDate, Date endDate) {
+        MdmDevicePlanShut stop = new MdmDevicePlanShut();
+        stop.setMachineCode(machineCode);
+        stop.setBeginDate(beginDate);
+        stop.setEndDate(endDate);
+        return stop;
     }
 }

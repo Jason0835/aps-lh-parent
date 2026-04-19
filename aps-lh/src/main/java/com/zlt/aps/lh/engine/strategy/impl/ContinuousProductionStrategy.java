@@ -148,7 +148,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
             // 重新按班次分配（夜->早->中顺序按可用量分配）
-            redistributeShiftQty(result, shifts);
+            redistributeShiftQty(context, result, shifts);
         }
     }
 
@@ -163,13 +163,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         // 先处理收尾SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if ("1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(result, embryoStockMap, shifts);
+                adjustResultByEmbryoStock(context, result, embryoStockMap, shifts);
             }
         }
         // 再处理普通SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if (!"1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(result, embryoStockMap, shifts);
+                adjustResultByEmbryoStock(context, result, embryoStockMap, shifts);
             }
         }
     }
@@ -214,7 +214,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             int remaining = targetQty;
             for (LhScheduleResult result : skuResults) {
                 int allocation = Math.min(remaining, ShiftFieldUtil.resolveScheduledQty(result));
-                redistributeShiftQty(result, shifts, allocation);
+                redistributeShiftQty(context, result, shifts, allocation);
                 remaining -= allocation;
                 if (allocation <= 0) {
                     // 当前结果已被完全降为0，保留收尾标记，避免后续继续参与续作产量判断。
@@ -360,7 +360,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             result.setIsChangeMould("0");
         }
         // 续作衔接结果即便非收尾，也必须补齐可计算完工时刻，避免结果校验失败。
-        Date actualCompletionTime = resolveActualCompletionTime(result);
+        Date actualCompletionTime = resolveActualCompletionTime(context, result);
         if (actualCompletionTime == null) {
             return false;
         }
@@ -369,7 +369,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
         context.getScheduleResultList().add(result);
         registerMachineAssignment(context, machine.getMachineCode(), result);
-        updateMachineState(machine, sku, result);
+        updateMachineState(context, machine, sku, result);
         context.getNewSpecSkuList().remove(sku);
         log.debug("{}排产完成, 机台: {}, SKU: {}",
                 typeBlock ? "换活字块" : "同产品结构续作",
@@ -431,7 +431,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining);
 
-        refreshResultSummary(result, shifts);
+        refreshResultSummary(context, result, shifts);
         result.setRealScheduleDate(context.getScheduleDate());
         result.setProductionStatus("0");
 
@@ -474,13 +474,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            long availableSeconds = (shift.getShiftEndDateTime().getTime() - effectiveStart.getTime()) / 1000L;
-            if (availableSeconds <= 0) {
+            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
+                    context.getDevicePlanShutList(), result.getLhMachineCode(), effectiveStart, shift.getShiftEndDateTime());
+            if (netAvailableSeconds <= 0) {
                 continue;
             }
 
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
-                    shift, effectiveStart, shiftCapacity, lhTimeSeconds, mouldQty);
+                    shiftCapacity,
+                    lhTimeSeconds,
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    netAvailableSeconds);
             if (shiftMaxQty <= 0) {
                 continue;
             }
@@ -510,7 +515,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 计算规格收尾时间（最后一个有计划量班次中，完成剩余量所需的时间点）
      */
-    private Date calcSpecEndTime(LhScheduleResult result,
+    private Date calcSpecEndTime(LhScheduleContext context,
+                                 LhScheduleResult result,
                                  List<LhShiftConfigVO> shifts,
                                  int lhTimeSeconds,
                                  int mouldQty,
@@ -527,7 +533,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 long secondsNeeded = (long) Math.ceil((double) planQty / mouldQty) * lhTimeSeconds;
                 Date shiftStart = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
                 if (shiftStart != null) {
-                    return new Date(shiftStart.getTime() + secondsNeeded * 1000L);
+                    return ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(
+                            context.getDevicePlanShutList(), result.getLhMachineCode(), shiftStart, secondsNeeded);
                 }
                 return shift.getShiftEndDateTime();
             }
@@ -547,8 +554,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 重新在班次间均衡分配计划量（用于allocateShiftPlanQty后续调整）
      */
-    private void redistributeShiftQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
-        redistributeShiftQty(result, shifts, ShiftFieldUtil.resolveScheduledQty(result));
+    private void redistributeShiftQty(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+        redistributeShiftQty(context, result, shifts, ShiftFieldUtil.resolveScheduledQty(result));
     }
 
     /**
@@ -558,7 +565,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * @param shifts 班次列表
      * @param targetQty 目标计划量
      */
-    private void redistributeShiftQty(LhScheduleResult result, List<LhShiftConfigVO> shifts, int targetQty) {
+    private void redistributeShiftQty(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts, int targetQty) {
         if (CollectionUtils.isEmpty(shifts)
                 || result.getLhTime() == null
                 || result.getLhTime() <= 0) {
@@ -567,7 +574,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
         if (targetQty <= 0) {
             clearShiftPlanQty(result, shifts);
-            refreshResultSummary(result, shifts);
+            refreshResultSummary(context, result, shifts);
             return;
         }
 
@@ -591,8 +598,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             Date shiftStartTime = shift.getShiftStartDateTime();
             Date effectiveStartTime = cursorStartTime != null && cursorStartTime.after(shiftStartTime)
                     ? cursorStartTime : shiftStartTime;
+            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
+                    context.getDevicePlanShutList(), result.getLhMachineCode(), effectiveStartTime, shift.getShiftEndDateTime());
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
-                    shift, effectiveStartTime, shiftCapacity, result.getLhTime(), mouldQty);
+                    shiftCapacity,
+                    result.getLhTime(),
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    netAvailableSeconds);
             if (shiftMaxQty <= 0) {
                 setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
                 continue;
@@ -602,7 +615,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             remaining -= shiftQty;
             cursorStartTime = shift.getShiftEndDateTime();
         }
-        refreshResultSummary(result, shifts);
+        refreshResultSummary(context, result, shifts);
     }
 
     /**
@@ -645,7 +658,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 根据胎胚库存调整排程结果的计划量
      */
-    private void adjustResultByEmbryoStock(LhScheduleResult result,
+    private void adjustResultByEmbryoStock(LhScheduleContext context,
+                                           LhScheduleResult result,
                                            Map<String, Integer> embryoStockMap,
                                            List<LhShiftConfigVO> shifts) {
         String embryoCode = result.getEmbryoCode();
@@ -661,7 +675,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             embryoStockMap.put(embryoCode, stock - totalPlan);
         } else {
             // 库存不足，削减计划量
-            redistributeShiftQty(result, shifts, stock);
+            redistributeShiftQty(context, result, shifts, stock);
             embryoStockMap.put(embryoCode, 0);
         }
     }
@@ -684,7 +698,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * @param result 排程结果
      * @param shifts 班次列表
      */
-    private void refreshResultSummary(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+    private void refreshResultSummary(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts) {
         if (result == null) {
             return;
         }
@@ -698,10 +712,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
                 result.getMouldQty() != null ? result.getMouldQty() : 0);
-        Date specEndTime = calcSpecEndTime(result, shifts, lhTimeSeconds, mouldQty, "1".equals(result.getIsEnd()));
+        Date specEndTime = calcSpecEndTime(context, result, shifts, lhTimeSeconds, mouldQty, "1".equals(result.getIsEnd()));
         if (specEndTime == null) {
             // 非收尾结果也要保留可推导完工时刻，避免后续校验出现 specEndTime 缺失。
-            specEndTime = resolveActualCompletionTime(result);
+            specEndTime = resolveActualCompletionTime(context, result);
         }
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
@@ -1011,17 +1025,17 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         }
     }
 
-    private void updateMachineState(MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
+    private void updateMachineState(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
         machine.setCurrentMaterialCode(sku.getMaterialCode());
         machine.setCurrentMaterialDesc(sku.getMaterialDesc());
         machine.setPreviousSpecCode(sku.getSpecCode());
         machine.setPreviousProSize(sku.getProSize());
         // 机台预计结束时间严格回写为实际完工时间，避免被整班结束时间放大。
-        machine.setEstimatedEndTime(resolveActualCompletionTime(result));
+        machine.setEstimatedEndTime(resolveActualCompletionTime(context, result));
         machine.setEnding("1".equals(result.getIsEnd()) && result.getSpecEndTime() != null);
     }
 
-    private Date resolveActualCompletionTime(LhScheduleResult result) {
+    private Date resolveActualCompletionTime(LhScheduleContext context, LhScheduleResult result) {
         if (result == null) {
             return null;
         }
@@ -1037,7 +1051,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                     continue;
                 }
                 long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
-                Date shiftCompletionTime = new Date(shiftStartTime.getTime() + secondsNeeded * 1000L);
+                Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(
+                        context.getDevicePlanShutList(), result.getLhMachineCode(), shiftStartTime, secondsNeeded);
                 if (actualCompletionTime == null || shiftCompletionTime.after(actualCompletionTime)) {
                     actualCompletionTime = shiftCompletionTime;
                 }

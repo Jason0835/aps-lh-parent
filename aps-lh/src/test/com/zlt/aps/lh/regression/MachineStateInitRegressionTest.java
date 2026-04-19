@@ -1,5 +1,6 @@
 package com.zlt.aps.lh.regression;
 
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMouldCleanPlan;
@@ -60,10 +61,12 @@ class MachineStateInitRegressionTest {
         LhMouldCleanPlan dryIce = new LhMouldCleanPlan();
         dryIce.setLhCode("M1");
         dryIce.setCleanType("01");
+        dryIce.setLeftRightMould("L");
         dryIce.setCleanTime(dateTime(2026, 4, 12, 8, 0));
         LhMouldCleanPlan sandBlast = new LhMouldCleanPlan();
         sandBlast.setLhCode("M1");
         sandBlast.setCleanType("02");
+        sandBlast.setLeftRightMould("R");
         sandBlast.setCleanTime(dateTime(2026, 4, 12, 7, 30));
         context.setCleaningPlanList(java.util.Arrays.asList(dryIce, sandBlast));
 
@@ -93,11 +96,26 @@ class MachineStateInitRegressionTest {
         assertEquals("18", machine.getPreviousProSize());
         assertTrue(machine.isHasDryIceCleaning());
         assertTrue(machine.isHasSandBlastCleaning());
+        assertEquals(dateTime(2026, 4, 12, 7, 30), machine.getCleaningPlanTime());
+        assertEquals(2, machine.getCleaningWindowList().size());
         assertTrue(machine.isHasMaintenancePlan());
         assertTrue(machine.isHasRepairPlan());
         assertNotNull(machine.getMaintenancePlanTime());
         assertEquals(dateTime(2026, 4, 12, 10, 0), machine.getRepairPlanTime());
         assertEquals(dateTime(2026, 4, 11, 20, 0), machine.getEstimatedEndTime());
+        MachineCleaningWindowDTO firstCleaningWindow = machine.getCleaningWindowList().get(0);
+        assertEquals("02", firstCleaningWindow.getCleanType());
+        assertEquals("R", firstCleaningWindow.getLeftRightMould());
+        assertEquals(dateTime(2026, 4, 12, 7, 30), firstCleaningWindow.getCleanStartTime());
+        assertEquals(dateTime(2026, 4, 12, 17, 30), firstCleaningWindow.getCleanEndTime());
+        assertEquals(dateTime(2026, 4, 12, 19, 30), firstCleaningWindow.getReadyTime());
+
+        MachineCleaningWindowDTO secondCleaningWindow = machine.getCleaningWindowList().get(1);
+        assertEquals("01", secondCleaningWindow.getCleanType());
+        assertEquals("L", secondCleaningWindow.getLeftRightMould());
+        assertEquals(dateTime(2026, 4, 12, 8, 0), secondCleaningWindow.getCleanStartTime());
+        assertEquals(dateTime(2026, 4, 12, 11, 0), secondCleaningWindow.getCleanEndTime());
+        assertEquals(dateTime(2026, 4, 12, 11, 0), secondCleaningWindow.getReadyTime());
 
         MachineScheduleDTO snapshot = context.getInitialMachineScheduleMap().get("M1");
         assertEquals(machine.getCurrentMaterialCode(), snapshot.getCurrentMaterialCode());

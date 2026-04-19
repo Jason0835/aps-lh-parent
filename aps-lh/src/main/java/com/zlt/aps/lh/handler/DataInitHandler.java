@@ -1,5 +1,8 @@
 package com.zlt.aps.lh.handler;
 
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
@@ -23,7 +26,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -168,18 +173,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             }
 
             // 初始化清洗计划
-            for (LhMouldCleanPlan cleaningPlan : context.getCleaningPlanList()) {
-                if (!machineCode.equals(cleaningPlan.getLhCode())) {
-                    continue;
-                }
-                if (CleaningTypeEnum.DRY_ICE.getCode().equals(cleaningPlan.getCleanType())) {
-                    dto.setHasDryIceCleaning(true);
-                }
-                if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleaningPlan.getCleanType())) {
-                    dto.setHasSandBlastCleaning(true);
-                }
-                dto.setCleaningPlanTime(earlier(dto.getCleaningPlanTime(), cleaningPlan.getCleanTime()));
-            }
+            attachCleaningPlanInfo(context, machineCode, dto);
 
             // 初始化胶囊使用次数
             if (context.getCapsuleUsageMap().containsKey(machineCode)) {
@@ -251,6 +245,73 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             return candidate;
         }
         return current;
+    }
+
+    /**
+     * 挂载机台清洗计划明细，并回填兼容摘要字段。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编号
+     * @param dto 机台状态对象
+     */
+    private void attachCleaningPlanInfo(LhScheduleContext context, String machineCode, MachineScheduleDTO dto) {
+        List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
+        for (LhMouldCleanPlan cleaningPlan : context.getCleaningPlanList()) {
+            if (!machineCode.equals(cleaningPlan.getLhCode())) {
+                continue;
+            }
+            MachineCleaningWindowDTO cleaningWindow = buildCleaningWindow(context, cleaningPlan);
+            if (cleaningWindow == null) {
+                continue;
+            }
+            cleaningWindowList.add(cleaningWindow);
+            if (CleaningTypeEnum.DRY_ICE.getCode().equals(cleaningWindow.getCleanType())) {
+                dto.setHasDryIceCleaning(true);
+            }
+            if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleaningWindow.getCleanType())) {
+                dto.setHasSandBlastCleaning(true);
+            }
+            dto.setCleaningPlanTime(earlier(dto.getCleaningPlanTime(), cleaningWindow.getCleanStartTime()));
+        }
+        cleaningWindowList.sort(Comparator.comparing(MachineCleaningWindowDTO::getCleanStartTime,
+                Comparator.nullsLast(Date::compareTo)));
+        dto.setCleaningWindowList(cleaningWindowList);
+    }
+
+    /**
+     * 构建机台清洗时间窗口。
+     *
+     * @param context 排程上下文
+     * @param cleaningPlan 模具清洗计划
+     * @return 清洗时间窗口
+     */
+    private MachineCleaningWindowDTO buildCleaningWindow(LhScheduleContext context, LhMouldCleanPlan cleaningPlan) {
+        if (cleaningPlan == null || cleaningPlan.getCleanTime() == null) {
+            return null;
+        }
+        String cleanType = cleaningPlan.getCleanType();
+        int cleanDurationHours = 0;
+        int readyDurationHours = 0;
+        if (CleaningTypeEnum.DRY_ICE.getCode().equals(cleanType)) {
+            cleanDurationHours = context.getParamIntValue(LhScheduleParamConstant.DRY_ICE_DURATION_HOURS,
+                    LhScheduleConstant.DRY_ICE_DURATION_HOURS);
+            readyDurationHours = cleanDurationHours;
+        } else if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleanType)) {
+            cleanDurationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_DURATION_HOURS,
+                    LhScheduleConstant.SAND_BLAST_DURATION_HOURS);
+            readyDurationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_WITH_INSPECTION_HOURS,
+                    LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
+        } else {
+            return null;
+        }
+
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType(cleanType);
+        cleaningWindow.setLeftRightMould(cleaningPlan.getLeftRightMould());
+        cleaningWindow.setCleanStartTime(cleaningPlan.getCleanTime());
+        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(cleaningPlan.getCleanTime(), cleanDurationHours));
+        cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(cleaningPlan.getCleanTime(), readyDurationHours));
+        return cleaningWindow;
     }
 
     @Override

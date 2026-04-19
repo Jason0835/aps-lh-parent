@@ -3,6 +3,9 @@
  */
 package com.zlt.aps.lh.engine.strategy.impl;
 
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
@@ -419,6 +422,12 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             return remaining;
         }
         Map<Integer, ShiftRuntimeState> stateMap = context.getShiftRuntimeStateMap();
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(
+                context, result.getLhMachineCode());
+        int dryIceLossQty = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
+        int dryIceDurationHours = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
 
         boolean started = false;
         for (LhShiftConfigVO shift : shifts) {
@@ -438,25 +447,33 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
-                    context.getDevicePlanShutList(), result.getLhMachineCode(), effectiveStart, shift.getShiftEndDateTime());
-            if (netAvailableSeconds <= 0) {
-                continue;
-            }
-
-            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    result.getLhMachineCode(),
+                    effectiveStart,
+                    shift.getShiftEndDateTime(),
                     shiftCapacity,
                     lhTimeSeconds,
                     mouldQty,
                     ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
-                    netAvailableSeconds);
+                    dryIceLossQty,
+                    dryIceDurationHours);
             if (shiftMaxQty <= 0) {
                 continue;
             }
 
             int shiftQty = Math.min(remaining, shiftMaxQty);
             if (shiftQty > 0) {
-                setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getShiftEndDateTime());
+                Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
+                        context.getDevicePlanShutList(),
+                        cleaningWindowList,
+                        result.getLhMachineCode(),
+                        effectiveStart,
+                        shift.getShiftEndDateTime(),
+                        shiftQty,
+                        shiftMaxQty);
+                setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shiftPlanEndTime);
                 remaining -= shiftQty;
                 startTime = shift.getShiftEndDateTime();
 
@@ -573,15 +590,31 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             if (planQty == null || planQty <= 0) {
                 continue;
             }
+            Date shiftEnd = ShiftFieldUtil.getShiftEndTime(result, shift.getShiftIndex());
+            if (shiftEnd != null) {
+                return shiftEnd;
+            }
             Date shiftStart = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
             if (shiftStart == null) {
                 return shift.getShiftEndDateTime();
             }
             long secondsNeeded = (long) Math.ceil((double) planQty / mouldQty) * lhTimeSeconds;
-            return ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(
-                    context.getDevicePlanShutList(), result.getLhMachineCode(), shiftStart, secondsNeeded);
+            return ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
+                    context.getDevicePlanShutList(),
+                    resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
+                    result.getLhMachineCode(),
+                    shiftStart,
+                    secondsNeeded);
         }
         return null;
+    }
+
+    private List<MachineCleaningWindowDTO> resolveMachineCleaningWindowList(LhScheduleContext context, String machineCode) {
+        MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
+        if (machine == null || CollectionUtils.isEmpty(machine.getCleaningWindowList())) {
+            return new ArrayList<>();
+        }
+        return machine.getCleaningWindowList();
     }
 
     private String resolveMouldCode(LhScheduleContext context, String materialCode) {

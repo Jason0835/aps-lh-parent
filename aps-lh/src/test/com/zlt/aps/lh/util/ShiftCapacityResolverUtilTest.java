@@ -1,5 +1,6 @@
 package com.zlt.aps.lh.util;
 
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
@@ -104,6 +105,65 @@ class ShiftCapacityResolverUtilTest {
         assertEquals(dateTime(2026, 4, 17, 10, 0), completionTime, "边界停机不应影响班次内完工时刻");
     }
 
+    @Test
+    void dryIceCleaningWithinShift_shouldReduceShiftQtyAndDelayCompletion() {
+        Date shiftStart = dateTime(2026, 4, 21, 6, 0);
+        Date shiftEnd = dateTime(2026, 4, 21, 14, 0);
+        List<MachineCleaningWindowDTO> cleaningWindowList = Arrays.asList(
+                buildCleaningWindow("01",
+                        dateTime(2026, 4, 21, 8, 22, 22),
+                        dateTime(2026, 4, 21, 11, 22, 22),
+                        dateTime(2026, 4, 21, 11, 22, 22))
+        );
+
+        int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                null, cleaningWindowList, "K1514", shiftStart, shiftEnd, 18, 1600, 1, 8 * 3600L, 6, 3);
+        Date completionTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
+                null, cleaningWindowList, "K1514", shiftStart, shiftEnd, 12, 12);
+
+        assertEquals(12, shiftQty, "干冰清洗落在班次内时，满班 18 应按损失 6 条扣减为 12");
+        assertEquals(shiftEnd, completionTime, "干冰清洗导致班次满量压缩后，12 条应在班末完工");
+    }
+
+    @Test
+    void sandBlastCleaningAcrossTwoShifts_shouldReduceBothShiftCapacities() {
+        Date morningShiftStart = dateTime(2026, 4, 21, 6, 0);
+        Date morningShiftEnd = dateTime(2026, 4, 21, 14, 0);
+        Date noonShiftStart = dateTime(2026, 4, 21, 14, 0);
+        Date noonShiftEnd = dateTime(2026, 4, 21, 22, 0);
+        List<MachineCleaningWindowDTO> cleaningWindowList = Arrays.asList(
+                buildCleaningWindow("02",
+                        dateTime(2026, 4, 21, 8, 22, 22),
+                        dateTime(2026, 4, 21, 18, 22, 22),
+                        dateTime(2026, 4, 21, 20, 22, 22))
+        );
+
+        int morningShiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                null, cleaningWindowList, "K1514", morningShiftStart, morningShiftEnd, 18, 1600, 1, 8 * 3600L, 6, 3);
+        int noonShiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                null, cleaningWindowList, "K1514", noonShiftStart, noonShiftEnd, 18, 1600, 1, 8 * 3600L, 6, 3);
+
+        assertEquals(6, morningShiftQty, "喷砂清洗跨班时，早班应按重叠时长折算后仅保留 6 条产能");
+        assertEquals(9, noonShiftQty, "喷砂清洗跨班时，中班应继续按重叠时长折算扣减");
+    }
+
+    @Test
+    void dryIcePartialOverlap_shouldUseFixedDurationAsLossDenominator() {
+        Date shiftStart = dateTime(2026, 4, 21, 6, 0);
+        Date shiftEnd = dateTime(2026, 4, 21, 14, 0);
+        List<MachineCleaningWindowDTO> cleaningWindowList = Arrays.asList(
+                buildCleaningWindow("01",
+                        dateTime(2026, 4, 21, 12, 0, 0),
+                        dateTime(2026, 4, 21, 15, 0, 0),
+                        dateTime(2026, 4, 21, 15, 0, 0))
+        );
+
+        int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                null, cleaningWindowList, "K1514", shiftStart, shiftEnd, 18, 1600, 1, 8 * 3600L, 6, 3);
+
+        assertEquals(14, shiftQty, "干冰仅重叠 2 小时时，应按 3 小时基准扣减 4 条而不是整次 6 条");
+    }
+
     private LhShiftConfigVO findMorningShift(Date scheduleDate) {
         LhScheduleContext context = new LhScheduleContext();
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate);
@@ -141,11 +201,34 @@ class ShiftCapacityResolverUtilTest {
         return calendar.getTime();
     }
 
+    private static Date dateTime(int year, int month, int day, int hour, int minute, int second) {
+        Calendar calendar = Calendar.getInstance();
+        calendar.clear();
+        calendar.set(Calendar.YEAR, year);
+        calendar.set(Calendar.MONTH, month - 1);
+        calendar.set(Calendar.DAY_OF_MONTH, day);
+        calendar.set(Calendar.HOUR_OF_DAY, hour);
+        calendar.set(Calendar.MINUTE, minute);
+        calendar.set(Calendar.SECOND, second);
+        return calendar.getTime();
+    }
+
     private static MdmDevicePlanShut buildStop(String machineCode, Date beginDate, Date endDate) {
         MdmDevicePlanShut stop = new MdmDevicePlanShut();
         stop.setMachineCode(machineCode);
         stop.setBeginDate(beginDate);
         stop.setEndDate(endDate);
         return stop;
+    }
+
+    private static MachineCleaningWindowDTO buildCleaningWindow(String cleanType, Date cleanStartTime,
+                                                                Date cleanEndTime, Date readyTime) {
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType(cleanType);
+        cleaningWindow.setLeftRightMould("LR");
+        cleaningWindow.setCleanStartTime(cleanStartTime);
+        cleaningWindow.setCleanEndTime(cleanEndTime);
+        cleaningWindow.setReadyTime(readyTime);
+        return cleaningWindow;
     }
 }

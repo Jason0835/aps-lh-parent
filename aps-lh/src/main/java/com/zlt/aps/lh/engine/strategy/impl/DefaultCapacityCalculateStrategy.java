@@ -5,6 +5,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
@@ -12,6 +13,7 @@ import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.util.Date;
 
@@ -48,7 +50,7 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
         // 判断机台是否有保养/维修计划，若有则取最晚时间
         Date maintenanceStartTime = calculateMaintenanceStartTime(context, machineCode);
         Date repairStartTime = calculateRepairStartTime(context, machineCode);
-        Date cleaningStartTime = calculateCleaningReadyTime(context, machineCode);
+        Date cleaningStartTime = calculateCleaningReadyTime(context, machineCode, baseReadyTime);
 
         // 取四者最大值：基础可用时间、保养后可用时间、维修后可用时间、清洗后可用时间
         Date maxStartTime = baseReadyTime;
@@ -180,24 +182,52 @@ public class DefaultCapacityCalculateStrategy implements ICapacityCalculateStrat
      * @param machineCode 机台编号
      * @return 清洗后的可用时间
      */
-    private Date calculateCleaningReadyTime(LhScheduleContext context, String machineCode) {
+    private Date calculateCleaningReadyTime(LhScheduleContext context, String machineCode, Date baseReadyTime) {
         MachineScheduleDTO machineDTO = context.getMachineScheduleMap().get(machineCode);
-        if (machineDTO == null || machineDTO.getCleaningPlanTime() == null) {
+        if (machineDTO == null || CollectionUtils.isEmpty(machineDTO.getCleaningWindowList())) {
             return null;
         }
 
-        if (machineDTO.isHasSandBlastCleaning()) {
-            int durationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_WITH_INSPECTION_HOURS,
-                    LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
-            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
-                    durationHours);
+        // 仅约束“当前开产时点已命中”的清洗窗口，避免被未来清洗计划过度后移。
+        Date constrainedReadyTime = null;
+        for (MachineCleaningWindowDTO cleaningWindow : machineDTO.getCleaningWindowList()) {
+            if (cleaningWindow == null
+                    || cleaningWindow.getCleanStartTime() == null
+                    || cleaningWindow.getReadyTime() == null) {
+                continue;
+            }
+            if (baseReadyTime != null && cleaningWindow.getCleanStartTime().after(baseReadyTime)) {
+                continue;
+            }
+            if (baseReadyTime != null && !cleaningWindow.getReadyTime().after(baseReadyTime)) {
+                continue;
+            }
+            if (constrainedReadyTime == null || cleaningWindow.getReadyTime().after(constrainedReadyTime)) {
+                constrainedReadyTime = cleaningWindow.getReadyTime();
+            }
         }
-        if (machineDTO.isHasDryIceCleaning()) {
-            int durationHours = context.getParamIntValue(LhScheduleParamConstant.DRY_ICE_DURATION_HOURS,
-                    LhScheduleConstant.DRY_ICE_DURATION_HOURS);
-            return LhScheduleTimeUtil.addHours(machineDTO.getCleaningPlanTime(),
-                    durationHours);
+        if (constrainedReadyTime == null) {
+            return null;
         }
-        return null;
+
+        // 若命中窗口后又遇到“开始时间早于当前就绪时刻”的后续清洗，继续顺延到连续清洗链末端。
+        boolean expanded = true;
+        while (expanded) {
+            expanded = false;
+            for (MachineCleaningWindowDTO cleaningWindow : machineDTO.getCleaningWindowList()) {
+                if (cleaningWindow == null
+                        || cleaningWindow.getCleanStartTime() == null
+                        || cleaningWindow.getReadyTime() == null) {
+                    continue;
+                }
+                if (cleaningWindow.getCleanStartTime().after(constrainedReadyTime)
+                        || !cleaningWindow.getReadyTime().after(constrainedReadyTime)) {
+                    continue;
+                }
+                constrainedReadyTime = cleaningWindow.getReadyTime();
+                expanded = true;
+            }
+        }
+        return constrainedReadyTime;
     }
 }

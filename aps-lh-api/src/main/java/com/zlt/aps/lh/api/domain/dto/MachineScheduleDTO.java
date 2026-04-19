@@ -72,6 +72,8 @@ public class MachineScheduleDTO {
     private boolean hasSandBlastCleaning;
     /** 清洗计划时间 */
     private Date cleaningPlanTime;
+    /** 清洗时间窗口明细 */
+    private List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
 
     // ========== 保养/维修 ==========
     /** 是否有保养计划 */

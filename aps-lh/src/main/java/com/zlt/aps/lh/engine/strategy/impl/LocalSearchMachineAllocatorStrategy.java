@@ -3,6 +3,9 @@
  */
 package com.zlt.aps.lh.engine.strategy.impl;
 
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
@@ -333,6 +336,12 @@ public class LocalSearchMachineAllocatorStrategy {
         if (lhTimeSeconds <= 0 || remainingQty <= 0) {
             return LocalSearchCapacityEstimate.empty();
         }
+        List<MachineCleaningWindowDTO> cleaningWindowList = CollectionUtils.isEmpty(machine.getCleaningWindowList())
+                ? new ArrayList<>() : machine.getCleaningWindowList();
+        int dryIceLossQty = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
+        int dryIceDurationHours = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
 
         Date cursorStartTime = productionStartTime;
         Date specEndTime = null;
@@ -357,14 +366,18 @@ public class LocalSearchMachineAllocatorStrategy {
             }
 
             // 统一按班产主口径或回退公式估算残班/整班计划量。
-            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
-                    context.getDevicePlanShutList(), machine.getMachineCode(), effectiveStartTime, shift.getShiftEndDateTime());
-            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    machine.getMachineCode(),
+                    effectiveStartTime,
+                    shift.getShiftEndDateTime(),
                     shiftCapacity,
                     lhTimeSeconds,
                     mouldQty,
                     ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
-                    netAvailableSeconds);
+                    dryIceLossQty,
+                    dryIceDurationHours);
             if (shiftMaxQty <= 0) {
                 continue;
             }
@@ -375,9 +388,14 @@ public class LocalSearchMachineAllocatorStrategy {
             }
             totalQty += allocationQty;
             remainingQty -= allocationQty;
-            long productionSeconds = (long) Math.ceil((double) allocationQty / mouldQty) * lhTimeSeconds;
-            specEndTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithPlannedStops(
-                    context.getDevicePlanShutList(), machine.getMachineCode(), effectiveStartTime, productionSeconds);
+            specEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    machine.getMachineCode(),
+                    effectiveStartTime,
+                    shift.getShiftEndDateTime(),
+                    allocationQty,
+                    shiftMaxQty);
             // 当前班次结束后再推进到下一班次，避免跨班次重叠计算
             cursorStartTime = shift.getShiftEndDateTime();
         }

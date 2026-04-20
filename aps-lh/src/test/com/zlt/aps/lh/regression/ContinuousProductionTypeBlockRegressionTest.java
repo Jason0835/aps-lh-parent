@@ -149,9 +149,10 @@ class ContinuousProductionTypeBlockRegressionTest {
         MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
         MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
         cleaningWindow.setCleanType("01");
-        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 18, 0, 0, 0));
-        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 19, 23, 59, 59));
-        cleaningWindow.setReadyTime(dateTime(2026, 4, 19, 23, 59, 59));
+        // 清洗窗口覆盖换活字块衔接班次，且不影响续作收尾时刻计算。
+        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 18, 15, 0, 0));
+        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 18, 17, 0, 0));
+        cleaningWindow.setReadyTime(dateTime(2026, 4, 18, 17, 0, 0));
         List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
         cleaningWindowList.add(cleaningWindow);
         machine.setCleaningWindowList(cleaningWindowList);
@@ -320,6 +321,58 @@ class ContinuousProductionTypeBlockRegressionTest {
         assertEquals(LhScheduleTimeUtil.addHours(results.get(1).getSpecEndTime(),
                         LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context)),
                 resolveFirstStartTime(results.get(3)));
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldContinueAtNightWhenEndingBefore20() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 13));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        LhScheduleResult continuousResult = context.getScheduleResultList().get(0);
+        assertEquals(dateTime(2026, 4, 18, 19, 0, 0), continuousResult.getSpecEndTime(),
+                "收尾时间应按真实完工时刻回写，不能放大到班次结束");
+
+        strategy.scheduleTypeBlockChange(context);
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        assertEquals(dateTime(2026, 4, 19, 3, 0, 0), resolveFirstStartTime(typeBlockResult),
+                "20:00前收尾应允许连续切换，夜班继续生产");
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldDelayToNextMorningWhenEndingAtOrAfter20() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 14));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        LhScheduleResult continuousResult = context.getScheduleResultList().get(0);
+        assertEquals(dateTime(2026, 4, 18, 20, 0, 0), continuousResult.getSpecEndTime(),
+                "边界20:00应视为禁止发起切换");
+
+        strategy.scheduleTypeBlockChange(context);
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        assertEquals(dateTime(2026, 4, 19, 14, 0, 0), resolveFirstStartTime(typeBlockResult),
+                "20:00及之后收尾应顺延到次日早班发起，再叠加换活字块总耗时");
     }
 
     private LhScheduleContext newContext() {

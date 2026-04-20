@@ -36,6 +36,7 @@ import org.springframework.util.CollectionUtils;
 import javax.annotation.Resource;
 
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -135,7 +136,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 // 如果是收尾，更新机台收尾信息
                 if (isEnding && result.getSpecEndTime() != null) {
                     machine.setEnding(true);
-                    machine.setEstimatedEndTime(result.getSpecEndTime());
+                    machine.setEstimatedEndTime(resolveActualCompletionTime(context, result));
                 }
             }
         }
@@ -330,9 +331,33 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (machine.getEstimatedEndTime() == null) {
             return null;
         }
-        // 换活字块：收尾时间 + 换活字块总耗时
-        return LhScheduleTimeUtil.addHours(machine.getEstimatedEndTime(),
+        Date switchStartTime = resolveAllowedSwitchStartTime(context, machine.getEstimatedEndTime());
+        // 换活字块：允许切换时间 + 换活字块总耗时
+        return LhScheduleTimeUtil.addHours(switchStartTime,
                 LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+    }
+
+    /**
+     * 解析允许发起切换（换模/换活字块）的开始时间。
+     * <p>20:00:00（含）到次日早班前禁止发起切换，需顺延到下一个早班开始时间。</p>
+     */
+    private Date resolveAllowedSwitchStartTime(LhScheduleContext context, Date endingTime) {
+        if (endingTime == null) {
+            return null;
+        }
+        if (!LhScheduleTimeUtil.isNoMouldChangeTime(context, endingTime)) {
+            return endingTime;
+        }
+
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(endingTime);
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        Date morningBaseDate = LhScheduleTimeUtil.clearTime(endingTime);
+        if (hour >= LhScheduleTimeUtil.getNoMouldChangeStartHour(context)) {
+            morningBaseDate = LhScheduleTimeUtil.addDays(morningBaseDate, 1);
+        }
+        return LhScheduleTimeUtil.buildTime(
+                morningBaseDate, LhScheduleTimeUtil.getMorningStartHour(context), 0, 0);
     }
 
     /**
@@ -531,28 +556,32 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (!isEnding) {
             return null;
         }
-        // 找到最后一个有计划量的班次
+        // 找到最后一个有计划量的班次，按真实产量推导完工时刻，避免被班次结束时刻放大。
         for (int i = shifts.size() - 1; i >= 0; i--) {
             LhShiftConfigVO shift = shifts.get(i);
-            Integer planQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
-            if (planQty != null && planQty > 0 && lhTimeSeconds > 0 && mouldQty > 0) {
-                Date shiftEndTime = ShiftFieldUtil.getShiftEndTime(result, shift.getShiftIndex());
-                if (shiftEndTime != null) {
-                    return shiftEndTime;
-                }
-                // 收尾时间 = 该班次开始时间 + (计划量/模数) * 硫化时间
-                long secondsNeeded = (long) Math.ceil((double) planQty / mouldQty) * lhTimeSeconds;
-                Date shiftStart = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
-                if (shiftStart != null) {
-                    return ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
-                            context.getDevicePlanShutList(),
-                            resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
-                            result.getLhMachineCode(),
-                            shiftStart,
-                            secondsNeeded);
-                }
-                return shift.getShiftEndDateTime();
+            Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
+            Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
+            Date shiftEndTime = ShiftFieldUtil.getShiftEndTime(result, shift.getShiftIndex());
+            if (shiftEndTime == null) {
+                shiftEndTime = shift.getShiftEndDateTime();
             }
+            if (shiftPlanQty == null || shiftPlanQty <= 0 || shiftStartTime == null) {
+                continue;
+            }
+            if (lhTimeSeconds <= 0 || mouldQty <= 0) {
+                return shiftEndTime;
+            }
+            long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
+            Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
+                    context.getDevicePlanShutList(),
+                    resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
+                    result.getLhMachineCode(),
+                    shiftStartTime,
+                    secondsNeeded);
+            if (shiftCompletionTime != null) {
+                return constrainCompletionWithinShift(shiftCompletionTime, shiftEndTime);
+            }
+            return shiftEndTime;
         }
         return null;
     }
@@ -1124,6 +1153,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 if (shiftPlanQty == null || shiftPlanQty <= 0 || shiftStartTime == null) {
                     continue;
                 }
+                Date shiftEndTime = ShiftFieldUtil.getShiftEndTime(result, shiftIndex);
                 long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
                 Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
                         context.getDevicePlanShutList(),
@@ -1132,7 +1162,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                         shiftStartTime,
                         secondsNeeded);
                 if (shiftCompletionTime == null) {
-                    shiftCompletionTime = ShiftFieldUtil.getShiftEndTime(result, shiftIndex);
+                    shiftCompletionTime = shiftEndTime;
+                } else {
+                    shiftCompletionTime = constrainCompletionWithinShift(shiftCompletionTime, shiftEndTime);
                 }
                 if (actualCompletionTime == null || shiftCompletionTime.after(actualCompletionTime)) {
                     actualCompletionTime = shiftCompletionTime;
@@ -1214,7 +1246,25 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 result.getLhMachineCode(),
                 shiftStartTime,
                 secondsNeeded);
-        return completionTime != null ? completionTime : defaultEndTime;
+        return completionTime != null
+                ? constrainCompletionWithinShift(completionTime, defaultEndTime) : defaultEndTime;
+    }
+
+    /**
+     * 约束班次真实完工时刻不晚于该班次结束时刻，避免跨班时刻反向污染收尾判断。
+     *
+     * @param completionTime 计算出的完工时刻
+     * @param shiftEndTime 班次结束时刻
+     * @return 约束后的完工时刻
+     */
+    private Date constrainCompletionWithinShift(Date completionTime, Date shiftEndTime) {
+        if (completionTime == null) {
+            return shiftEndTime;
+        }
+        if (shiftEndTime == null) {
+            return completionTime;
+        }
+        return completionTime.after(shiftEndTime) ? shiftEndTime : completionTime;
     }
 
     /**

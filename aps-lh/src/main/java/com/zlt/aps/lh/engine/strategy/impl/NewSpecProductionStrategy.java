@@ -186,7 +186,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
                 // 3. 计算机台可开工时间（考虑机台当前预计完工和能力策略约束）
                 Date endingTime = candidateMachine.getEstimatedEndTime() != null
-                        ? candidateMachine.getEstimatedEndTime() : new Date();
+                        ? candidateMachine.getEstimatedEndTime() : resolveDefaultMachineEndTime(context, shifts);
                 Date machineReadyTime = capacityCalculate.calculateStartTime(context,
                         machineCode, endingTime);
 
@@ -212,9 +212,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                     continue;
                 }
 
-                // 6. 基于首检完成时间生成新增规格排产结果，并校验当日是否有有效产能
-                Date productionStartTime = LhScheduleTimeUtil.addHours(
-                        inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
+                // 6. 基于首检分配时间生成新增规格排产结果，并校验当日是否有有效产能
+                // 业务口径：换模总时长已包含首检时长，不再额外叠加 FIRST_INSPECTION_HOURS
+                Date productionStartTime = inspectionTime;
                 int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(candidateMachine);
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, productionStartTime, mouldChangeStartTime,
@@ -607,6 +607,23 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                     secondsNeeded);
         }
         return null;
+    }
+
+    /**
+     * 机台缺失预计完工时刻时，回退到排程窗口基准时间，避免依赖系统当前时刻导致排程漂移。
+     *
+     * @param context 排程上下文
+     * @param shifts 排程班次窗口
+     * @return 默认机台结束时间
+     */
+    private Date resolveDefaultMachineEndTime(LhScheduleContext context, List<LhShiftConfigVO> shifts) {
+        if (!CollectionUtils.isEmpty(shifts) && shifts.get(0).getShiftStartDateTime() != null) {
+            return shifts.get(0).getShiftStartDateTime();
+        }
+        if (context != null && context.getScheduleDate() != null) {
+            return context.getScheduleDate();
+        }
+        return new Date();
     }
 
     private List<MachineCleaningWindowDTO> resolveMachineCleaningWindowList(LhScheduleContext context, String machineCode) {

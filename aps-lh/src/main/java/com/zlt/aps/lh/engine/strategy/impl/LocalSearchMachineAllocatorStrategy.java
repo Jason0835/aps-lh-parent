@@ -263,7 +263,7 @@ public class LocalSearchMachineAllocatorStrategy {
         }
         String machineCode = machine.getMachineCode();
         // 按“机台准备 -> 换模 -> 首检 -> 产能估算”的顺序串行预占资源
-        Date machineEndTime = resolveMachineEndTime(machine, virtualMachineEndTimeMap);
+        Date machineEndTime = resolveMachineEndTime(context, machine, shifts, virtualMachineEndTimeMap);
         Date machineReadyTime = capacityCalculate.calculateStartTime(context, machineCode, machineEndTime);
         Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineReadyTime);
         if (mouldChangeStartTime == null) {
@@ -277,7 +277,8 @@ public class LocalSearchMachineAllocatorStrategy {
             mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
             return null;
         }
-        Date productionStartTime = LhScheduleTimeUtil.addHours(inspectionTime, LhScheduleTimeUtil.getFirstInspectionHours(context));
+        // 业务口径：换模总时长已包含首检时长，局部搜索与主流程保持一致，不再额外 +FIRST_INSPECTION_HOURS
+        Date productionStartTime = inspectionTime;
         LocalSearchCapacityEstimate capacityEstimate = estimateCapacity(
                 context, sku, machine, productionStartTime, shifts);
         if (capacityEstimate.getTotalQty() <= 0 || capacityEstimate.getSpecEndTime() == null) {
@@ -414,13 +415,22 @@ public class LocalSearchMachineAllocatorStrategy {
      * @param virtualMachineEndTimeMap 虚拟机台结束时间
      * @return 机台结束时间
      */
-    private Date resolveMachineEndTime(MachineScheduleDTO machine, Map<String, Date> virtualMachineEndTimeMap) {
+    private Date resolveMachineEndTime(LhScheduleContext context,
+                                       MachineScheduleDTO machine,
+                                       List<LhShiftConfigVO> shifts,
+                                       Map<String, Date> virtualMachineEndTimeMap) {
         Date virtualEndTime = virtualMachineEndTimeMap.get(machine.getMachineCode());
         if (virtualEndTime != null) {
             return virtualEndTime;
         }
         if (machine.getEstimatedEndTime() != null) {
             return machine.getEstimatedEndTime();
+        }
+        if (!CollectionUtils.isEmpty(shifts) && shifts.get(0).getShiftStartDateTime() != null) {
+            return shifts.get(0).getShiftStartDateTime();
+        }
+        if (context != null && context.getScheduleDate() != null) {
+            return context.getScheduleDate();
         }
         return new Date();
     }

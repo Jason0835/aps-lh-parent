@@ -62,6 +62,23 @@ class DefaultFirstInspectionBalanceStrategyRegressionTest {
         assertNull(allocated, "参数为0时每班不可分配首检");
     }
 
+    @Test
+    void allocateInspection_shouldAllowNightWithoutConsumingMorningAfternoonQuota() {
+        LhScheduleContext context = newContext("1");
+        Date nightTime = dateTime(2026, 4, 11, 22, 30);
+        for (int i = 0; i < 3; i++) {
+            Date allocated = strategy.allocateInspection(context, "M1", nightTime);
+            assertEquals(nightTime, allocated, "夜班首检应允许分配");
+        }
+
+        Date morningTime = dateTime(2026, 4, 11, 6, 0);
+        Date firstMorning = strategy.allocateInspection(context, "M1", morningTime);
+        assertEquals(morningTime, firstMorning, "夜班首检不应占用早班上限");
+
+        Date secondMorning = strategy.allocateInspection(context, "M1", morningTime);
+        assertEquals(dateTime(2026, 4, 11, 14, 0), secondMorning, "早班达到上限后应顺延到中班");
+    }
+
     private LhScheduleContext newContext(String maxFirstInspectionPerShift) {
         LhScheduleContext context = new LhScheduleContext();
         if (maxFirstInspectionPerShift != null) {

@@ -504,6 +504,22 @@ public final class LhScheduleTimeUtil {
     }
 
     /**
+     * 判断指定时间是否在夜班时段
+     *
+     * @param context 排程上下文
+     * @param time    时间点
+     * @return true-夜班时段
+     */
+    public static boolean isNightShift(LhScheduleContext context, Date time) {
+        int nightHour = getNightStartHour(context);
+        int morningHour = getMorningStartHour(context);
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(time);
+        int hour = cal.get(Calendar.HOUR_OF_DAY);
+        return hour >= nightHour || hour < morningHour;
+    }
+
+    /**
      * 获取某天早班开始时间
      *
      * @param context 排程上下文

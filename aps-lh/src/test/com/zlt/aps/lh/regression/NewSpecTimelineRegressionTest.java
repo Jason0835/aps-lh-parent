@@ -89,7 +89,7 @@ class NewSpecTimelineRegressionTest {
         assertEquals("MOULD-01", result.getMouldCode());
         assertEquals("LR", result.getLeftRightMould());
         assertNotNull(result.getClass2StartTime());
-        assertEquals(dateTime(2026, 4, 11, 17, 0), result.getClass2StartTime());
+        assertEquals(dateTime(2026, 4, 11, 16, 0), result.getClass2StartTime());
         assertNotNull(result.getSpecEndTime());
         assertTrue(result.getSpecEndTime().after(result.getClass2StartTime()));
         assertEquals(result.getSpecEndTime(), result.getTdaySpecEndTime());
@@ -140,9 +140,45 @@ class NewSpecTimelineRegressionTest {
         assertEquals(16, result.getSingleMouldShiftQty());
         assertEquals(17, result.getDailyPlanQty());
         assertEquals(50, result.getTotalDailyPlanQty());
-        assertEquals(14, result.getClass1PlanQty());
-        assertEquals(3, result.getClass2PlanQty());
-        assertEquals(dateTime(2026, 4, 11, 7, 0), result.getClass1StartTime());
+        assertEquals(16, result.getClass1PlanQty());
+        assertEquals(1, result.getClass2PlanQty());
+        assertEquals(dateTime(2026, 4, 11, 6, 0), result.getClass1StartTime());
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldAllowNightShiftProductionStartFromInspectionTime() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = machine("M1", "FC-M1", dateTime(2026, 4, 11, 12, 0));
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.getMachineScheduleMap().put("M1", machine);
+
+        SkuScheduleDTO sku = newSku("MAT-NIGHT", "SPEC-NIGHT", "18", 2);
+        sku.setLhTimeSeconds(1800);
+        sku.setShiftCapacity(8);
+        context.getNewSpecSkuList().add(sku);
+
+        MdmSkuMouldRel rel = new MdmSkuMouldRel();
+        rel.setMouldCode("MOULD-03");
+        context.getSkuMouldRelMap().put("MAT-NIGHT", Collections.singletonList(rel));
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("LHGD20260411003");
+        when(machineMatchStrategy.matchMachines(any(), any())).thenReturn(Collections.singletonList(machine));
+        when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any())).thenReturn(machine);
+        when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
+                .thenReturn(dateTime(2026, 4, 11, 15, 0));
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any()))
+                .thenReturn(dateTime(2026, 4, 11, 15, 0));
+        when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
+                .thenReturn(dateTime(2026, 4, 11, 23, 30));
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
+
+        strategy.scheduleNewSpecs(context, machineMatchStrategy, mouldChangeBalanceStrategy,
+                inspectionBalanceStrategy, capacityCalculateStrategy);
+
+        assertEquals(1, context.getScheduleResultList().size());
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals(dateTime(2026, 4, 11, 23, 30), result.getClass3StartTime());
+        assertEquals("MAT-NIGHT", result.getMaterialCode());
     }
 
     private LhScheduleContext newContext() {

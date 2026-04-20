@@ -27,24 +27,25 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
             return true;
         }
 
-        // 规则2：硫化余量 <= 排程期内可生产总产能
+        int targetScheduleQty = sku.resolveTargetScheduleQty();
+
+        // 规则2：排产目标量 <= 排程期内可生产总产能
         int totalScheduleShifts = getTotalScheduleShifts(context);
         int shiftCapacity = sku.getShiftCapacity();
         if (shiftCapacity > 0) {
             int totalCapacity = shiftCapacity * totalScheduleShifts;
-            if (sku.getSurplusQty() <= totalCapacity && sku.getSurplusQty() > 0) {
-                log.debug("SKU[{}]判定为收尾(规则2): 余量{} <= 总产能{}", 
-                        sku.getMaterialCode(), sku.getSurplusQty(), totalCapacity);
+            if (targetScheduleQty <= totalCapacity && targetScheduleQty > 0) {
+                log.debug("SKU[{}]判定为收尾(规则2): 目标量{} <= 总产能{}",
+                        sku.getMaterialCode(), targetScheduleQty, totalCapacity);
                 return true;
             }
         }
 
         // 规则3：待排量 < 日产能（非满产运行）
         int dailyCapacity = sku.getDailyCapacity();
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getSurplusQty();
-        if (dailyCapacity > 0 && pendingQty < dailyCapacity && pendingQty > 0) {
-            log.debug("SKU[{}]判定为收尾(规则3): 待排量{} < 日产能{}", 
-                    sku.getMaterialCode(), pendingQty, dailyCapacity);
+        if (dailyCapacity > 0 && targetScheduleQty < dailyCapacity && targetScheduleQty > 0) {
+            log.debug("SKU[{}]判定为收尾(规则3): 目标量{} < 日产能{}",
+                    sku.getMaterialCode(), targetScheduleQty, dailyCapacity);
             return true;
         }
 
@@ -58,13 +59,13 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
             return -1;
         }
 
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getSurplusQty();
-        if (pendingQty <= 0) {
+        int targetScheduleQty = sku.resolveTargetScheduleQty();
+        if (targetScheduleQty <= 0) {
             return 0;
         }
 
         // 向上取整计算所需班次
-        return (int) Math.ceil((double) pendingQty / shiftCapacity);
+        return (int) Math.ceil((double) targetScheduleQty / shiftCapacity);
     }
 
     @Override

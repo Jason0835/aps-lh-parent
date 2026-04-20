@@ -201,10 +201,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             int targetQty = 0;
             SkuScheduleDTO skuDto = findSkuDto(context, entry.getKey());
             if (skuDto != null) {
-                targetQty = skuDto.getPendingQty() > 0 ? skuDto.getPendingQty() : skuDto.getWindowPlanQty();
+                targetQty = skuDto.resolveTargetScheduleQty();
             }
 
-            // 总计划量超过当前窗口待排量时才降模
+            // 总计划量超过当前排产目标量时才降模
             int totalPlanQty = skuResults.stream().mapToInt(ShiftFieldUtil::resolveScheduledQty).sum();
             if (targetQty <= 0 || totalPlanQty <= targetQty) {
                 continue;
@@ -459,7 +459,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setOrderNo(orderNo);
 
         // 按班次分配计划量
-        int remaining = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        int remaining = sku.resolveTargetScheduleQty();
         distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining);
 
@@ -977,9 +977,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (sku == null) {
             return 0;
         }
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        int targetScheduleQty = sku.resolveTargetScheduleQty();
         int retainedQty = resolveEffectiveScheduledQty(context, materialCode, CONTINUOUS_SCHEDULE_TYPE);
-        return Math.max(pendingQty - retainedQty, 0);
+        return Math.max(targetScheduleQty - retainedQty, 0);
     }
 
     /**

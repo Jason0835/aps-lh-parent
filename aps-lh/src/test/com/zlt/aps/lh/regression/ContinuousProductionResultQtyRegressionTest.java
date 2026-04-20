@@ -56,7 +56,8 @@ class ContinuousProductionResultQtyRegressionTest {
         sku.setContinuousMachineCode("M1");
         sku.setMonthPlanQty(50);
         sku.setWindowPlanQty(30);
-        sku.setPendingQty(30);
+        sku.setPendingQty(1000);
+        sku.setTargetScheduleQty(30);
         sku.setShiftCapacity(16);
         sku.setLhTimeSeconds(3060);
         sku.setScheduleType("01");
@@ -73,6 +74,44 @@ class ContinuousProductionResultQtyRegressionTest {
         assertEquals(30, result.getDailyPlanQty());
         assertEquals(16, result.getClass1PlanQty());
         assertEquals(14, result.getClass2PlanQty());
+    }
+
+    @Test
+    void scheduleContinuousEnding_shouldCapScheduledQtyByEightShiftCapacityWhenTargetExceedsCapacity() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M2");
+        machine.setMachineName("FC-M2");
+        machine.setMaxMoldNum(2);
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.getMachineScheduleMap().put("M2", machine);
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("MAT-C2");
+        sku.setMaterialDesc("MAT-C2-DESC");
+        sku.setStructureName("S2");
+        sku.setSpecCode("SPEC-C2");
+        sku.setEmbryoCode("EMB-2");
+        sku.setContinuousMachineCode("M2");
+        sku.setMonthPlanQty(300);
+        sku.setWindowPlanQty(160);
+        sku.setPendingQty(160);
+        sku.setTargetScheduleQty(160);
+        sku.setShiftCapacity(16);
+        sku.setLhTimeSeconds(3060);
+        sku.setScheduleType("01");
+        context.getContinuousSkuList().add(sku);
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("LHGD20260411012");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
+
+        strategy.scheduleContinuousEnding(context);
+
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals(300, result.getTotalDailyPlanQty());
+        assertEquals(128, result.getDailyPlanQty(), "目标量超过8班总产能时，应按8班最大产能排满");
+        assertEquals(16, result.getClass1PlanQty());
+        assertEquals(16, result.getClass8PlanQty());
     }
 
     private LhScheduleContext newContext() {

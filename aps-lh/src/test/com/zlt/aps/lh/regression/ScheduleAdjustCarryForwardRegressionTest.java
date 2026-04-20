@@ -7,13 +7,11 @@ import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultEndingJudgmentStrategy;
 import com.zlt.aps.lh.handler.ScheduleAdjustHandler;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
-import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.math.BigDecimal;
 import java.util.Calendar;
 import java.util.Collections;
 
@@ -48,10 +46,6 @@ class ScheduleAdjustCarryForwardRegressionTest {
         plan.setDay13(20);
         context.setMonthPlanList(Collections.singletonList(plan));
 
-        MdmMonthSurplus monthSurplus = new MdmMonthSurplus();
-        monthSurplus.setPlanSurplusQty(BigDecimal.valueOf(100));
-        context.getMonthSurplusMap().put("MAT-1", monthSurplus);
-
         MdmSkuLhCapacity capacity = new MdmSkuLhCapacity();
         capacity.setMaterialCode("MAT-1");
         capacity.setClassCapacity(30);
@@ -76,7 +70,39 @@ class ScheduleAdjustCarryForwardRegressionTest {
         assertEquals(20, context.getCarryForwardQtyMap().get("MAT-1").intValue());
         assertEquals(100, sku.getWindowPlanQty());
         assertEquals(120, sku.getPendingQty());
-        assertEquals(100, sku.getSurplusQty());
+        assertEquals(940, sku.getSurplusQty());
+        assertEquals(120, sku.getTargetScheduleQty().intValue());
+    }
+
+    @Test
+    void doHandle_shouldPreferMonthAccumulatedFinishedQtyForSurplus() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-MONTH");
+        plan.setMaterialDesc("MAT-MONTH-DESC");
+        plan.setStructureName("SM");
+        plan.setSpecifications("SPEC-M");
+        plan.setTotalQty(1000);
+        plan.setDay11(40);
+        plan.setDay12(40);
+        plan.setDay13(20);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        // 月累计完成量应优先于前日结果兜底值
+        context.getMaterialMonthFinishedQtyMap().put("MAT-MONTH", 880);
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("SM").get(0);
+        assertEquals(120, sku.getSurplusQty());
+        assertEquals(100, sku.getWindowPlanQty());
+        assertEquals(100, sku.getTargetScheduleQty().intValue());
     }
 
     @Test
@@ -93,14 +119,14 @@ class ScheduleAdjustCarryForwardRegressionTest {
         plan.setMaterialDesc("MAT-2-DESC");
         plan.setStructureName("S2");
         plan.setSpecifications("SPEC-2");
-        plan.setTotalQty(200);
+        plan.setTotalQty(0);
         context.setMonthPlanList(Collections.singletonList(plan));
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 
         assertEquals(0, context.getStructureSkuMap().size());
         assertEquals(1, context.getUnscheduledResultList().size());
-        assertEquals("物料：MAT-2 没有计划量，不进行排产",
+        assertEquals("物料：MAT-2 没有排产目标量，不进行排产",
                 context.getUnscheduledResultList().get(0).getUnscheduledReason());
     }
 
@@ -138,7 +164,33 @@ class ScheduleAdjustCarryForwardRegressionTest {
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S3").get(0);
         assertEquals(0, sku.getWindowPlanQty());
         assertEquals(30, sku.getPendingQty());
+        assertEquals(30, sku.getTargetScheduleQty().intValue());
         assertEquals(0, context.getUnscheduledResultList().size());
+    }
+
+    @Test
+    void doHandle_skipsSkuWhenWindowPlanQtyZeroAndNoCarryForwardEvenIfSurplusPositive() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-4");
+        plan.setMaterialDesc("MAT-4-DESC");
+        plan.setStructureName("S4");
+        plan.setSpecifications("SPEC-4");
+        plan.setTotalQty(300);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        assertEquals(0, context.getStructureSkuMap().size());
+        assertEquals(1, context.getUnscheduledResultList().size());
+        assertEquals("物料：MAT-4 没有排产目标量，不进行排产",
+                context.getUnscheduledResultList().get(0).getUnscheduledReason());
     }
 
     private static java.util.Date date(int y, int month, int day) {

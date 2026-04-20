@@ -180,28 +180,31 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 10. 加载月底计划余量
         loadMonthSurplus(context, factoryCode, year, month);
 
-        // 11. 加载各班次完成量
+        // 11. 加载各班次完成量（T日，用于前日欠/超产差值修正）
         loadShiftFinishQty(context, factoryCode, scheduleDate);
 
-        // 12. 加载物料信息
+        // 12. 加载月累计完成量（截至T-1，用于月余量回退口径）
+        loadMaterialMonthFinishedQty(context, factoryCode, scheduleDate);
+
+        // 13. 加载物料信息
         loadMaterialInfo(context, factoryCode);
 
-        // 13. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
+        // 14. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
         int machineOnlineLookbackDays = context.getParamIntValue(
                 LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS,
                 LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS);
         loadMachineOnlineInfo(context, factoryCode, startDate, machineOnlineLookbackDays);
 
-        // 14. 加载硫化定点机台
+        // 15. 加载硫化定点机台
         loadSpecifyMachine(context, factoryCode);
 
-        // 15. 加载硫化机胶囊已使用次数
+        // 16. 加载硫化机胶囊已使用次数
         loadCapsuleUsage(context, factoryCode);
 
-        // 16. 加载设备保养计划
+        // 17. 加载设备保养计划
         loadMaintenancePlan(context, factoryCode);
 
-        // 17. 加载前日硫化排程结果
+        // 18. 加载前日硫化排程结果
         loadPreviousScheduleResults(context, factoryCode, targetDate);
 
         log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}",
@@ -540,6 +543,64 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         }
         context.setShiftFinishQtyMap(shiftFinishQtyMap);
         log.debug("各班次完成量加载完成, 数量: {}", shiftFinishQtyMap.size());
+    }
+
+    /**
+     * 加载月累计完成量（截至排程窗口起点T日前），按物料编号建立Map。
+     *
+     * @param context      排程上下文
+     * @param factoryCode  分厂编号
+     * @param scheduleDate 排程窗口起点 T 日
+     */
+    private void loadMaterialMonthFinishedQty(LhScheduleContext context, String factoryCode, Date scheduleDate) {
+        Date tDay = LhScheduleTimeUtil.clearTime(scheduleDate);
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(tDay);
+        calendar.set(Calendar.DAY_OF_MONTH, 1);
+        Date monthStart = LhScheduleTimeUtil.clearTime(calendar.getTime());
+
+        List<LhShiftFinishQty> monthFinishList = lhShiftFinishQtyMapper.selectList(
+                new LambdaQueryWrapper<LhShiftFinishQty>()
+                        .eq(LhShiftFinishQty::getFactoryCode, factoryCode)
+                        .ge(LhShiftFinishQty::getScheduleDate, monthStart)
+                        .lt(LhShiftFinishQty::getScheduleDate, tDay)
+                        .eq(LhShiftFinishQty::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+
+        Map<String, Integer> materialMonthFinishedQtyMap = new HashMap<>(64);
+        if (monthFinishList != null) {
+            for (LhShiftFinishQty finishQty : monthFinishList) {
+                if (StringUtils.isEmpty(finishQty.getMaterialCode())) {
+                    continue;
+                }
+                materialMonthFinishedQtyMap.merge(
+                        finishQty.getMaterialCode(),
+                        resolveTotalFinishedQty(finishQty),
+                        Integer::sum);
+            }
+        }
+
+        context.setMaterialMonthFinishedQtyMap(materialMonthFinishedQtyMap);
+        log.debug("月累计完成量加载完成, 数量: {}, 起始日: {}, 截止: {}",
+                materialMonthFinishedQtyMap.size(),
+                LhScheduleTimeUtil.formatDate(monthStart),
+                LhScheduleTimeUtil.formatDate(LhScheduleTimeUtil.addDays(tDay, -1)));
+    }
+
+    /**
+     * 汇总一条班次完成记录的总完成量。
+     *
+     * @param finishQty 班次完成记录
+     * @return 总完成量
+     */
+    private int resolveTotalFinishedQty(LhShiftFinishQty finishQty) {
+        return (finishQty.getClass1FinishQty() != null ? finishQty.getClass1FinishQty() : 0)
+                + (finishQty.getClass2FinishQty() != null ? finishQty.getClass2FinishQty() : 0)
+                + (finishQty.getClass3FinishQty() != null ? finishQty.getClass3FinishQty() : 0)
+                + (finishQty.getClass4FinishQty() != null ? finishQty.getClass4FinishQty() : 0)
+                + (finishQty.getClass5FinishQty() != null ? finishQty.getClass5FinishQty() : 0)
+                + (finishQty.getClass6FinishQty() != null ? finishQty.getClass6FinishQty() : 0)
+                + (finishQty.getClass7FinishQty() != null ? finishQty.getClass7FinishQty() : 0)
+                + (finishQty.getClass8FinishQty() != null ? finishQty.getClass8FinishQty() : 0);
     }
 
     /**

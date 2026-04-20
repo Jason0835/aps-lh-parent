@@ -14,7 +14,6 @@ import com.zlt.aps.lh.util.MonthPlanDayQtyUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
-import com.zlt.aps.mdm.api.domain.entity.MdmMonthSurplus;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
@@ -24,7 +23,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,10 +38,11 @@ import java.util.Map;
 @Component
 public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
-    /** 无计划量未排产提示 */
-    private static final String NO_PLAN_QTY_REASON_TEMPLATE = "物料：%s 没有计划量，不进行排产";
-    /** 无窗口计划量但存在欠产结转提示 */
-    private static final String CARRY_FORWARD_ONLY_WARN_TEMPLATE = "物料：%s 当前排程窗口没有计划量，但存在欠产结转[%d]，按欠产继续排产";
+    /** 无排产目标量未排产提示 */
+    private static final String NO_PLAN_QTY_REASON_TEMPLATE = "物料：%s 没有排产目标量，不进行排产";
+    /** 无窗口计划量但存在余量/正向结转目标量提示 */
+    private static final String TARGET_QTY_ONLY_WARN_TEMPLATE =
+            "物料：%s 当前排程窗口没有计划量，但存在月计划余量/正向结转目标量[%d]，继续排产";
 
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
@@ -100,8 +99,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     /**
      * 从月度计划获取T日SKU数据，按产品结构归集，计算硫化余量
      * <p>
-     * 硫化余量 = 月度计划量 - 硫化已完成合格量<br/>
-     * 若月底计划余量表中有数据，优先使用该数据作为余量
+     * 硫化余量 = 月度计划量 - 硫化已完成量
      * </p>
      *
      * @param context 排程上下文
@@ -126,15 +124,17 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
                 continue;
             }
 
-            // 排程窗口没有计划量，且也没有正向欠产时，直接记未排产并跳过。
-            if (dto.getWindowPlanQty() <= 0 && dto.getPendingQty() <= 0) {
+            int targetScheduleQty = dto.resolveTargetScheduleQty();
+
+            // 当前无排产目标量时，直接记未排产并跳过。
+            if (targetScheduleQty <= 0) {
                 addNoPlanUnscheduledResult(context, dto);
                 continue;
             }
 
-            // 排程窗口没有计划量但存在正向欠产时，允许继续排产，并给出明确告警。
-            if (dto.getWindowPlanQty() <= 0 && dto.getPendingQty() > 0) {
-                log.warn(String.format(CARRY_FORWARD_ONLY_WARN_TEMPLATE, dto.getMaterialCode(), dto.getPendingQty()));
+            // 排程窗口没有计划量但存在余量/正向结转目标量时，允许继续排产，并给出明确告警。
+            if (dto.getWindowPlanQty() <= 0) {
+                log.warn(String.format(TARGET_QTY_ONLY_WARN_TEMPLATE, dto.getMaterialCode(), targetScheduleQty));
             }
 
             structureSkuMap.computeIfAbsent(plan.getStructureName(), k -> new ArrayList<>()).add(dto);
@@ -148,8 +148,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     /**
      * 计算SKU的硫化余量
      * <p>
-     * 优先使用月底计划余量表（T_MDM_MONTH_SURPLUS）中的数据，按物料编号匹配<br/>
-     * 若无数据，则通过 月度计划总量 - 各班次完成量之和 计算
+     * 统一按 月度计划总量 - 已完成量 计算，不再读取月余量表（T_MDM_MONTH_SURPLUS）
      * </p>
      *
      * @param context 排程上下文
@@ -157,20 +156,10 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @return 硫化余量
      */
     private SurplusCalculation calculateSurplusQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
-        String materialCode = plan.getMaterialCode();
-
-        // 先从月底计划余量Map中获取（仅按物料编号）
-        if (StringUtils.isNotEmpty(materialCode)) {
-            MdmMonthSurplus monthSurplus = context.getMonthSurplusMap().get(materialCode);
-            if (monthSurplus != null && monthSurplus.getPlanSurplusQty() != null) {
-                return new SurplusCalculation(monthSurplus.getPlanSurplusQty().intValue(), true);
-            }
-        }
-
-        // 若无余量数据，用月计划总量减去各班次完成量
+        // 统一按月计划总量减前日已完成量计算余量，不再使用月余量表兜底。
         int totalPlanQty = plan.getTotalQty() != null ? plan.getTotalQty() : 0;
         int finishedQty = calculateFinishedQty(context, plan);
-        return new SurplusCalculation(Math.max(0, totalPlanQty - finishedQty), false);
+        return new SurplusCalculation(Math.max(0, totalPlanQty - finishedQty));
     }
 
     /**
@@ -181,17 +170,20 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @return 已完成量
      */
     private int calculateFinishedQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
-        // 从前日排程结果汇总完成量
+        // 优先使用基础数据阶段按物料汇总好的月累计完成量（截至T-1）。
+        String materialCode = plan.getMaterialCode();
+        if (StringUtils.isNotEmpty(materialCode)) {
+            Integer monthFinishedQty = context.getMaterialMonthFinishedQtyMap().get(materialCode);
+            if (monthFinishedQty != null) {
+                return Math.max(monthFinishedQty, 0);
+            }
+        }
+
+        // 兜底：从前日排程结果汇总完成量，且优先复用实际完成量表。
         int finishedQty = 0;
         for (LhScheduleResult result : context.getPreviousScheduleResultList()) {
-            if (plan.getMaterialCode() != null && plan.getMaterialCode().equals(result.getMaterialCode())) {
-                List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
-                if (CollectionUtils.isEmpty(shifts)) {
-                    shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
-                }
-                for (LhShiftConfigVO s : shifts) {
-                    finishedQty += safeInt(ShiftFieldUtil.getShiftFinishQty(result, s.getShiftIndex()));
-                }
+            if (StringUtils.isNotEmpty(materialCode) && materialCode.equals(result.getMaterialCode())) {
+                finishedQty += resolveActualFinishedQty(context, result);
             }
         }
         return finishedQty;
@@ -229,6 +221,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         dto.setWindowPlanQty(windowPlanQty);
         dto.setSurplusQty(surplus.getSurplusQty());
         dto.setPendingQty(windowPlanQty + carryForwardQty);
+        dto.setTargetScheduleQty(resolveTargetScheduleQty(surplus.getSurplusQty(), dto.getPendingQty()));
         dto.setDailyPlanQty(plan.getDayVulcanizationQty() != null ? plan.getDayVulcanizationQty() : 0);
 
         // 产能信息（从SKU日硫化产能Map获取）
@@ -450,24 +443,30 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
+     * 解析排产目标量。
+     * <p>目标量受月计划余量与窗口待排量双重约束，避免重复累加或跨窗口超排。</p>
+     *
+     * @param surplusQty 月计划余量
+     * @param pendingQty 窗口待排量（窗口计划量 + 正向结转）
+     * @return 排产目标量
+     */
+    private int resolveTargetScheduleQty(int surplusQty, int pendingQty) {
+        return Math.max(0, Math.min(Math.max(surplusQty, 0), Math.max(pendingQty, 0)));
+    }
+
+    /**
      * 余量计算结果。
      */
     private static class SurplusCalculation {
 
         private final int surplusQty;
-        private final boolean fromMonthSurplus;
 
-        private SurplusCalculation(int surplusQty, boolean fromMonthSurplus) {
+        private SurplusCalculation(int surplusQty) {
             this.surplusQty = surplusQty;
-            this.fromMonthSurplus = fromMonthSurplus;
         }
 
         public int getSurplusQty() {
             return surplusQty;
-        }
-
-        public boolean isFromMonthSurplus() {
-            return fromMonthSurplus;
         }
     }
 

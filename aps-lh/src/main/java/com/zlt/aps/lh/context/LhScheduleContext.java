@@ -90,6 +90,8 @@ public class LhScheduleContext {
     private Map<String, MdmMonthSurplus> monthSurplusMap = new HashMap<>();
     /** 各班次完成量Map, key=machineCode+materialCode */
     private Map<String, LhShiftFinishQty> shiftFinishQtyMap = new HashMap<>();
+    /** 月累计完成量Map（截至排程窗口起点 T 日前）, key=materialCode */
+    private Map<String, Integer> materialMonthFinishedQtyMap = new HashMap<>();
     /** 物料信息Map, key=materialCode */
     private Map<String, MdmMaterialInfo> materialInfoMap = new HashMap<>();
     /** MES硫化在机信息Map, key=machineCode */

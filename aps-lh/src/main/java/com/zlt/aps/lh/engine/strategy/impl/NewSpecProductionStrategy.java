@@ -398,7 +398,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode()));
 
         // 按班次分配计划量
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        int pendingQty = sku.resolveTargetScheduleQty();
         distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty);
         refreshResultSummary(context, result);
@@ -703,7 +703,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         unscheduled.setMaterialDesc(sku.getMaterialDesc());
         unscheduled.setScheduleDate(context.getScheduleTargetDate());
         unscheduled.setUnscheduledReason(reason);
-        unscheduled.setUnscheduledQty(sku.getPendingQty());
+        unscheduled.setUnscheduledQty(sku.resolveTargetScheduleQty());
         unscheduled.setStructureName(sku.getStructureName());
         unscheduled.setSpecCode(sku.getSpecCode());
         unscheduled.setEmbryoCode(sku.getEmbryoCode());
@@ -776,9 +776,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         if (sku == null) {
             return 0;
         }
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        int targetScheduleQty = sku.resolveTargetScheduleQty();
         int retainedQty = resolveEffectiveScheduledQty(context, materialCode);
-        return Math.max(pendingQty - retainedQty, 0);
+        return Math.max(targetScheduleQty - retainedQty, 0);
     }
 
     /**

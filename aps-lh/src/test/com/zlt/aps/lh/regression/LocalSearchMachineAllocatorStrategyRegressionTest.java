@@ -13,6 +13,7 @@ import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.LocalSearchMachineAllocatorStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -218,6 +219,37 @@ class LocalSearchMachineAllocatorStrategyRegressionTest {
         assertNotNull(capturedEndingTime[0], "局部搜索应执行机台开工时间计算");
         assertEquals(expectedBaseTime, capturedEndingTime[0],
                 "局部搜索兜底时间应与主流程一致，使用排程窗口基准时间");
+    }
+
+    @Test
+    void estimateCapacity_shouldUseTargetScheduleQtyInsteadOfPendingQty() {
+        LocalSearchMachineAllocatorStrategy strategy = new LocalSearchMachineAllocatorStrategy();
+        LhScheduleContext context = newContext();
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M2");
+        machine.setMachineName("M2");
+        machine.setMaxMoldNum(1);
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("MAT-TARGET");
+        sku.setPendingQty(100);
+        sku.setWindowPlanQty(100);
+        sku.setTargetScheduleQty(1);
+        sku.setShiftCapacity(8);
+        sku.setLhTimeSeconds(1800);
+
+        Object estimate = ReflectionTestUtils.invokeMethod(
+                strategy,
+                "estimateCapacity",
+                context,
+                sku,
+                machine,
+                context.getScheduleWindowShifts().get(0).getShiftStartDateTime(),
+                context.getScheduleWindowShifts());
+
+        Integer totalQty = ReflectionTestUtils.invokeMethod(estimate, "getTotalQty");
+        assertEquals(1, totalQty.intValue(), "局部搜索估产应优先受目标量限制，而不是沿用旧待排量");
     }
 
     private LhScheduleContext newContext() {

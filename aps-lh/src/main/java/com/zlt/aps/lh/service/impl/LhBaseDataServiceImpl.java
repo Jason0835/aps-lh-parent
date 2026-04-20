@@ -77,9 +77,6 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /** 查询最新排产版本时返回前两条，用于判断是否存在多条数据 */
     private static final String FINAL_PRODUCTION_VERSION_LIMIT_TWO = "LIMIT 2";
-    /** 查询最新一条记录时使用 */
-    private static final String LIMIT_ONE = "LIMIT 1";
-
     @Resource
     private FactoryMonthPlanProductionFinalResultMapper monthPlanMapper;
 
@@ -674,7 +671,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     }
 
     /**
-     * 加载MES硫化在机信息，按机台编号建立Map
+     * 加载MES硫化在机信息，按机台编号建立“追溯窗口内最近记录”Map
      *
      * @param context       排程上下文
      * @param factoryCode   分厂编号
@@ -686,42 +683,39 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         Date tDay = LhScheduleTimeUtil.clearTime(scheduleTDay);
         Date lookbackStartDay = LhScheduleTimeUtil.addDays(tDay, -safeLookbackDays);
 
-        // 第一步：在 [T-lookbackDays, T) 内找最新一条在机记录，确定命中日期
-        List<LhMachineOnlineInfo> latestOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
+        // 在 [T-lookbackDays, T) 内加载窗口数据，并按机台保留距离T最近的一条记录。
+        List<LhMachineOnlineInfo> machineOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
                 buildMachineOnlineBaseQuery(factoryCode)
                         .isNotNull(LhMachineOnlineInfo::getOnlineDate)
                         .ge(LhMachineOnlineInfo::getOnlineDate, lookbackStartDay)
                         .lt(LhMachineOnlineInfo::getOnlineDate, tDay)
                         .orderByDesc(LhMachineOnlineInfo::getOnlineDate)
-                        .last(LIMIT_ONE));
-        if (CollectionUtils.isEmpty(latestOnlineInfoList)) {
+                        // ONLINE_DATE 为 date 类型；同日多条记录时按更新时间取最近同步版本。
+                        .orderByDesc(LhMachineOnlineInfo::getUpdateTime)
+                        .orderByAsc(LhMachineOnlineInfo::getLhCode));
+        if (CollectionUtils.isEmpty(machineOnlineInfoList)) {
             context.setMachineOnlineInfoMap(new HashMap<>(16));
-            log.info("MES硫化在机信息未命中, 回溯范围: [{} ~ {}), 回溯天数: {}",
+            log.info("MES硫化在机信息未命中, 回溯窗口: [{} ~ {}), 回溯天数: {}, 命中机台: 0",
                     LhScheduleTimeUtil.formatDate(lookbackStartDay),
                     LhScheduleTimeUtil.formatDate(tDay),
                     safeLookbackDays);
             return;
         }
 
-        Date latestOnlineDay = LhScheduleTimeUtil.clearTime(latestOnlineInfoList.get(0).getOnlineDate());
-        Date latestOnlineDayNext = LhScheduleTimeUtil.addDays(latestOnlineDay, 1);
-
-        // 第二步：按命中日期加载该整天快照
-        List<LhMachineOnlineInfo> machineOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
-                buildMachineOnlineBaseQuery(factoryCode)
-                        .ge(LhMachineOnlineInfo::getOnlineDate, latestOnlineDay)
-                        .lt(LhMachineOnlineInfo::getOnlineDate, latestOnlineDayNext));
-        Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>(32);
-        if (!CollectionUtils.isEmpty(machineOnlineInfoList)) {
-            for (LhMachineOnlineInfo onlineInfo : machineOnlineInfoList) {
-                if (StringUtils.isNotEmpty(onlineInfo.getLhCode())) {
-                    machineOnlineInfoMap.put(onlineInfo.getLhCode(), onlineInfo);
-                }
+        Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new LinkedHashMap<>(32);
+        for (LhMachineOnlineInfo onlineInfo : machineOnlineInfoList) {
+            if (StringUtils.isEmpty(onlineInfo.getLhCode())) {
+                continue;
             }
+            // 查询结果已按日期倒序排列，首条即为该机台在追溯窗口内距离T最近的记录。
+            machineOnlineInfoMap.putIfAbsent(onlineInfo.getLhCode(), onlineInfo);
         }
         context.setMachineOnlineInfoMap(machineOnlineInfoMap);
-        log.info("MES硫化在机信息加载完成, 命中日期: {}, 回溯天数: {}, 数量: {}",
-                LhScheduleTimeUtil.formatDate(latestOnlineDay), safeLookbackDays, machineOnlineInfoMap.size());
+        log.info("MES硫化在机信息加载完成, 回溯窗口: [{} ~ {}), 回溯天数: {}, 命中机台: {}",
+                LhScheduleTimeUtil.formatDate(lookbackStartDay),
+                LhScheduleTimeUtil.formatDate(tDay),
+                safeLookbackDays,
+                machineOnlineInfoMap.size());
     }
 
     /**

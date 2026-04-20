@@ -428,21 +428,22 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     private void classifyContinuousAndNewSkus(LhScheduleContext context) {
         List<SkuScheduleDTO> continuousSkuList = new ArrayList<>();
         List<SkuScheduleDTO> newSpecSkuList = new ArrayList<>();
+        Map<String, List<SkuScheduleDTO>> skuByMaterialMap = buildSkuByMaterialMap(context);
+
+        // 先按机台最近MES在机记录反找SKU，命中的SKU按机台顺序消费，避免同一SKU被重复占用。
+        for (Map.Entry<String, LhMachineOnlineInfo> entry : context.getMachineOnlineInfoMap().entrySet()) {
+            assignContinuousSku(entry.getKey(), entry.getValue(), skuByMaterialMap, continuousSkuList);
+        }
 
         for (List<SkuScheduleDTO> skuList : context.getStructureSkuMap().values()) {
             for (SkuScheduleDTO sku : skuList) {
-                // 判断是否为续作：从MES在机信息中查找该SKU是否已在某台机台上生产
-                String continuousMachineCode = findContinuousMachine(context, sku.getMaterialCode());
-                if (StringUtils.isNotEmpty(continuousMachineCode)) {
-                    // 续作SKU：记录所在机台
-                    sku.setScheduleType(ScheduleTypeEnum.CONTINUOUS.getCode());
-                    sku.setContinuousMachineCode(continuousMachineCode);
-                    continuousSkuList.add(sku);
-                } else {
-                    // 新增SKU：需要换模上机
-                    sku.setScheduleType(ScheduleTypeEnum.NEW_SPEC.getCode());
-                    newSpecSkuList.add(sku);
+                if (StringUtils.equals(ScheduleTypeEnum.CONTINUOUS.getCode(), sku.getScheduleType())) {
+                    continue;
                 }
+                // 未命中MES在机记录的SKU按新增规格处理。
+                sku.setScheduleType(ScheduleTypeEnum.NEW_SPEC.getCode());
+                sku.setContinuousMachineCode(null);
+                newSpecSkuList.add(sku);
             }
         }
 
@@ -452,24 +453,51 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 在MES在机信息中查找该SKU是否当前正在某机台上生产
+     * 按物料编码归集待排SKU，保持原有归集顺序供机台依次消费
      *
-     * @param context      排程上下文
-     * @param materialCode 物料编码（SKU）
-     * @return 机台编号，null表示未在产
+     * @param context 排程上下文
+     * @return 物料编码 -> 待匹配SKU列表
      */
-    private String findContinuousMachine(LhScheduleContext context, String materialCode) {
-        if (materialCode == null) {
-            return null;
-        }
-        for (Map.Entry<String, LhMachineOnlineInfo> entry
-                : context.getMachineOnlineInfoMap().entrySet()) {
-            LhMachineOnlineInfo onlineInfo = entry.getValue();
-            if (materialCode.equals(onlineInfo.getMaterialCode())) {
-                return entry.getKey();
+    private Map<String, List<SkuScheduleDTO>> buildSkuByMaterialMap(LhScheduleContext context) {
+        Map<String, List<SkuScheduleDTO>> skuByMaterialMap = new LinkedHashMap<>();
+        for (List<SkuScheduleDTO> skuList : context.getStructureSkuMap().values()) {
+            for (SkuScheduleDTO sku : skuList) {
+                sku.setScheduleType(null);
+                sku.setContinuousMachineCode(null);
+                if (StringUtils.isEmpty(sku.getMaterialCode())) {
+                    continue;
+                }
+                skuByMaterialMap.computeIfAbsent(sku.getMaterialCode(), k -> new ArrayList<>()).add(sku);
             }
         }
-        return null;
+        return skuByMaterialMap;
+    }
+
+    /**
+     * 按机台最近MES在机记录匹配续作SKU
+     *
+     * @param machineCode      机台编码
+     * @param onlineInfo       机台最近MES在机记录
+     * @param skuByMaterialMap 物料编码 -> 待匹配SKU列表
+     * @param continuousSkuList 续作SKU列表
+     */
+    private void assignContinuousSku(String machineCode, LhMachineOnlineInfo onlineInfo,
+                                     Map<String, List<SkuScheduleDTO>> skuByMaterialMap,
+                                     List<SkuScheduleDTO> continuousSkuList) {
+        if (onlineInfo == null
+                || StringUtils.isEmpty(machineCode)
+                || StringUtils.isEmpty(onlineInfo.getMaterialCode())) {
+            return;
+        }
+        List<SkuScheduleDTO> matchedSkuList = skuByMaterialMap.get(onlineInfo.getMaterialCode());
+        if (CollectionUtils.isEmpty(matchedSkuList)) {
+            return;
+        }
+        // 同一物料存在多条SKU时，按归集顺序逐条消费，避免重复占用。
+        SkuScheduleDTO matchedSku = matchedSkuList.remove(0);
+        matchedSku.setScheduleType(ScheduleTypeEnum.CONTINUOUS.getCode());
+        matchedSku.setContinuousMachineCode(machineCode);
+        continuousSkuList.add(matchedSku);
     }
 
     /**

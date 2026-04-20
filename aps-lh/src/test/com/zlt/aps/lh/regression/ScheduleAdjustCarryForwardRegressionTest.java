@@ -1,8 +1,10 @@
 package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
+import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultEndingJudgmentStrategy;
 import com.zlt.aps.lh.handler.ScheduleAdjustHandler;
@@ -13,10 +15,14 @@ import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * 欠产传导：前一日净欠产应进入当天需求对象，而不是回写昨天计划。
@@ -231,6 +237,90 @@ class ScheduleAdjustCarryForwardRegressionTest {
         assertEquals(1, context.getUnscheduledResultList().size());
         assertEquals("物料：MAT-4 没有排产目标量，不进行排产",
                 context.getUnscheduledResultList().get(0).getUnscheduledReason());
+    }
+
+    @Test
+    void doHandle_shouldMatchContinuousSkuByMachineOnlineInfo() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.setMonthPlanList(Arrays.asList(
+                buildPlan("MAT-A", "S1", 100, 10),
+                buildPlan("MAT-B", "S2", 100, 10),
+                buildPlan("MAT-C", "S3", 100, 10)));
+        context.setMachineOnlineInfoMap(buildMachineOnlineInfoMap(
+                buildOnlineInfo("K1501", "MAT-A"),
+                buildOnlineInfo("K1502", "MAT-X")));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO continuousSku = context.getStructureSkuMap().get("S1").get(0);
+        SkuScheduleDTO newSku = context.getStructureSkuMap().get("S2").get(0);
+        SkuScheduleDTO unmatchedSku = context.getStructureSkuMap().get("S3").get(0);
+        assertEquals(1, context.getContinuousSkuList().size());
+        assertEquals(2, context.getNewSpecSkuList().size());
+        assertEquals(ScheduleTypeEnum.CONTINUOUS.getCode(), continuousSku.getScheduleType());
+        assertEquals("K1501", continuousSku.getContinuousMachineCode());
+        assertEquals(ScheduleTypeEnum.NEW_SPEC.getCode(), newSku.getScheduleType());
+        assertNull(newSku.getContinuousMachineCode());
+        assertEquals(ScheduleTypeEnum.NEW_SPEC.getCode(), unmatchedSku.getScheduleType());
+        assertNull(unmatchedSku.getContinuousMachineCode());
+    }
+
+    @Test
+    void doHandle_shouldConsumeDuplicatedMaterialSkusOncePerMachine() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.setMonthPlanList(Arrays.asList(
+                buildPlan("MAT-DUP", "S1", 100, 10),
+                buildPlan("MAT-DUP", "S2", 100, 10)));
+        context.setMachineOnlineInfoMap(buildMachineOnlineInfoMap(
+                buildOnlineInfo("K1501", "MAT-DUP"),
+                buildOnlineInfo("K1502", "MAT-DUP"),
+                buildOnlineInfo("K1503", "MAT-DUP")));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO firstSku = context.getStructureSkuMap().get("S1").get(0);
+        SkuScheduleDTO secondSku = context.getStructureSkuMap().get("S2").get(0);
+        assertEquals(2, context.getContinuousSkuList().size());
+        assertEquals(0, context.getNewSpecSkuList().size());
+        assertEquals("K1501", firstSku.getContinuousMachineCode());
+        assertEquals("K1502", secondSku.getContinuousMachineCode());
+    }
+
+    private FactoryMonthPlanProductionFinalResult buildPlan(String materialCode, String structureName,
+                                                            int totalQty, int day11Qty) {
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode(materialCode);
+        plan.setMaterialDesc(materialCode + "-DESC");
+        plan.setStructureName(structureName);
+        plan.setSpecifications(structureName + "-SPEC");
+        plan.setTotalQty(totalQty);
+        plan.setDay11(day11Qty);
+        return plan;
+    }
+
+    private Map<String, LhMachineOnlineInfo> buildMachineOnlineInfoMap(LhMachineOnlineInfo... onlineInfos) {
+        Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new LinkedHashMap<>();
+        for (LhMachineOnlineInfo onlineInfo : onlineInfos) {
+            machineOnlineInfoMap.put(onlineInfo.getLhCode(), onlineInfo);
+        }
+        return machineOnlineInfoMap;
+    }
+
+    private LhMachineOnlineInfo buildOnlineInfo(String machineCode, String materialCode) {
+        LhMachineOnlineInfo onlineInfo = new LhMachineOnlineInfo();
+        onlineInfo.setLhCode(machineCode);
+        onlineInfo.setMaterialCode(materialCode);
+        return onlineInfo;
     }
 
     private static java.util.Date date(int y, int month, int day) {

@@ -134,27 +134,39 @@ class ScheduleDataWindowRegressionTest {
     }
 
     @Test
-    void loadAllBaseData_shouldUseLatestSnapshotInConfiguredLookbackWindow() {
+    void loadAllBaseData_shouldUseNearestOnlineInfoPerMachineInLookbackWindow() {
         Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 17));
         Date scheduleDate = LhScheduleTimeUtil.addDays(target, -2);
         prepareRequiredBaseMocks();
 
-        // 第一次查询仅用于命中“最近有数据日期”，4/12 有数据，4/14 与 4/13 均为空
-        LhMachineOnlineInfo latestDateRow = new LhMachineOnlineInfo();
-        latestDateRow.setOnlineDate(dateTime(2026, 4, 12, 8, 30, 0));
+        // 模拟查询结果已按 onlineDate/updateTime 倒序；同机台保留第一条即最近记录。
+        LhMachineOnlineInfo machineARecent = new LhMachineOnlineInfo();
+        machineARecent.setOnlineDate(date(2026, 4, 14));
+        machineARecent.setUpdateTime(dateTime(2026, 4, 14, 8, 30, 0));
+        machineARecent.setLhCode("K1501");
+        machineARecent.setMaterialCode("MAT-A-NEW");
 
-        // 第二次查询加载命中日期（4/12）整天快照
-        LhMachineOnlineInfo snapshot1 = new LhMachineOnlineInfo();
-        snapshot1.setOnlineDate(dateTime(2026, 4, 12, 9, 0, 0));
-        snapshot1.setLhCode("K1501");
-        snapshot1.setMaterialCode("MAT-A");
-        LhMachineOnlineInfo snapshot2 = new LhMachineOnlineInfo();
-        snapshot2.setOnlineDate(dateTime(2026, 4, 12, 10, 0, 0));
-        snapshot2.setLhCode("K1502");
-        snapshot2.setMaterialCode("MAT-B");
+        LhMachineOnlineInfo machineAOld = new LhMachineOnlineInfo();
+        machineAOld.setOnlineDate(date(2026, 4, 13));
+        machineAOld.setUpdateTime(dateTime(2026, 4, 13, 9, 0, 0));
+        machineAOld.setLhCode("K1501");
+        machineAOld.setMaterialCode("MAT-A-OLD");
+
+        // 同机台同日记录通过 updateTime 决定优先级（ONLINE_DATE 在数据库是 date 类型）。
+        LhMachineOnlineInfo machineBRecentByUpdateTime = new LhMachineOnlineInfo();
+        machineBRecentByUpdateTime.setOnlineDate(date(2026, 4, 12));
+        machineBRecentByUpdateTime.setUpdateTime(dateTime(2026, 4, 12, 10, 0, 0));
+        machineBRecentByUpdateTime.setLhCode("K1502");
+        machineBRecentByUpdateTime.setMaterialCode("MAT-B-LATE");
+
+        LhMachineOnlineInfo machineBOldByUpdateTime = new LhMachineOnlineInfo();
+        machineBOldByUpdateTime.setOnlineDate(date(2026, 4, 12));
+        machineBOldByUpdateTime.setUpdateTime(dateTime(2026, 4, 12, 9, 0, 0));
+        machineBOldByUpdateTime.setLhCode("K1502");
+        machineBOldByUpdateTime.setMaterialCode("MAT-B-EARLY");
+
         when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(
-                Collections.singletonList(latestDateRow),
-                Arrays.asList(snapshot1, snapshot2));
+                Arrays.asList(machineARecent, machineAOld, machineBRecentByUpdateTime, machineBOldByUpdateTime));
 
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode("FC01");
@@ -165,8 +177,8 @@ class ScheduleDataWindowRegressionTest {
         lhBaseDataService.loadAllBaseData(context);
 
         assertEquals(2, context.getMachineOnlineInfoMap().size());
-        assertEquals("MAT-A", context.getMachineOnlineInfoMap().get("K1501").getMaterialCode());
-        assertEquals("MAT-B", context.getMachineOnlineInfoMap().get("K1502").getMaterialCode());
+        assertEquals("MAT-A-NEW", context.getMachineOnlineInfoMap().get("K1501").getMaterialCode());
+        assertEquals("MAT-B-LATE", context.getMachineOnlineInfoMap().get("K1502").getMaterialCode());
     }
 
     @Test

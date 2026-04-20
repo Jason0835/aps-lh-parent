@@ -84,6 +84,14 @@ public class SkuScheduleDTO {
     private int delayDays = -1;
     /** 供应链优先级 */
     private String supplyChainPriority;
+    /** 高优先级待排量 */
+    private int highPriorityPendingQty;
+    /** 周期排产待排量 */
+    private int cycleProductionPendingQty;
+    /** 中优先级待排量 */
+    private int midPriorityPendingQty;
+    /** 常规储备待排量 */
+    private int conventionProductionPendingQty;
 
     // ========== 机台信息(续作时使用) ==========
     /** 续作机台编号 */

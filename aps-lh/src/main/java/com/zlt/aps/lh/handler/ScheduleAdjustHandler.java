@@ -16,6 +16,7 @@ import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
+import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -24,6 +25,7 @@ import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -241,7 +243,12 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
         // 优先级信息
         dto.setSupplyChainPriority(plan.getProductionType());
-        dto.setDeliveryLocked(isDeliveryLocked(plan));
+        dto.setDeliveryLocked(isDeliveryLocked(context, plan.getMaterialCode()));
+        dto.setDelayDays(resolveDelayDays(context, plan));
+        dto.setHighPriorityPendingQty(safeInt(plan.getHeightProductionQty()));
+        dto.setCycleProductionPendingQty(safeInt(plan.getCycleProductionQty()));
+        dto.setMidPriorityPendingQty(safeInt(plan.getMidProductionQty()));
+        dto.setConventionProductionPendingQty(safeInt(plan.getConventionProductionQty()));
 
         // 施工阶段
         dto.setConstructionStage(plan.getConstructionStage());
@@ -342,12 +349,45 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     /**
      * 判断SKU是否有交期锁定（周程滚动调整有锁定上机日期）
      *
-     * @param plan 月生产计划记录
+     * @param context 排程上下文
+     * @param materialCode 物料编码
      * @return true-有锁定交期
      */
-    private boolean isDeliveryLocked(FactoryMonthPlanProductionFinalResult plan) {
-        // 若高优先级数量 > 0 或者有发货要求，视为有交期锁定
-        return plan.getHeightQty() != null && plan.getHeightQty() > 0;
+    private boolean isDeliveryLocked(LhScheduleContext context, String materialCode) {
+        if (StringUtils.isEmpty(materialCode)) {
+            return false;
+        }
+        List<MpAdjustResult> adjustResults = context.getMpAdjustResultMap().get(materialCode);
+        if (CollectionUtils.isEmpty(adjustResults)) {
+            return false;
+        }
+        for (MpAdjustResult adjustResult : adjustResults) {
+            if (StringUtils.equals("1", StringUtils.trimToEmpty(adjustResult.getIsLockSchedule()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 计算延迟上机天数。
+     *
+     * @param context 排程上下文
+     * @param plan 月生产计划
+     * @return 延迟天数；无首个计划日时返回 -1
+     */
+    private int resolveDelayDays(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
+        if (context.getScheduleDate() == null) {
+            return -1;
+        }
+        int firstPlannedDay = MonthPlanDayQtyUtil.resolveFirstPlannedDay(plan);
+        if (firstPlannedDay < 0) {
+            return -1;
+        }
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(context.getScheduleDate());
+        int scheduleDayOfMonth = calendar.get(Calendar.DAY_OF_MONTH);
+        return Math.max(scheduleDayOfMonth - firstPlannedDay, 0);
     }
 
     /**

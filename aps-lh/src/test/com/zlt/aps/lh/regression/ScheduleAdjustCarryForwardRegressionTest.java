@@ -9,6 +9,7 @@ import com.zlt.aps.lh.handler.ScheduleAdjustHandler;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
+import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -166,6 +167,45 @@ class ScheduleAdjustCarryForwardRegressionTest {
         assertEquals(30, sku.getPendingQty());
         assertEquals(30, sku.getTargetScheduleQty().intValue());
         assertEquals(0, context.getUnscheduledResultList().size());
+    }
+
+    @Test
+    void doHandle_shouldFillDeliveryLockDelayDaysAndSupplyPendingQty() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-LOCK");
+        plan.setMaterialDesc("MAT-LOCK-DESC");
+        plan.setStructureName("S-LOCK");
+        plan.setSpecifications("SPEC-LOCK");
+        plan.setTotalQty(200);
+        plan.setDay9(20);
+        plan.setDay11(40);
+        plan.setHeightProductionQty(11);
+        plan.setCycleProductionQty(9);
+        plan.setMidProductionQty(7);
+        plan.setConventionProductionQty(5);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        MpAdjustResult adjustResult = new MpAdjustResult();
+        adjustResult.setMaterialCode("MAT-LOCK");
+        adjustResult.setIsLockSchedule("1");
+        context.getMpAdjustResultMap().put("MAT-LOCK", Collections.singletonList(adjustResult));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-LOCK").get(0);
+        assertEquals(true, sku.isDeliveryLocked());
+        assertEquals(2, sku.getDelayDays());
+        assertEquals(11, sku.getHighPriorityPendingQty());
+        assertEquals(9, sku.getCycleProductionPendingQty());
+        assertEquals(7, sku.getMidPriorityPendingQty());
+        assertEquals(5, sku.getConventionProductionPendingQty());
     }
 
     @Test

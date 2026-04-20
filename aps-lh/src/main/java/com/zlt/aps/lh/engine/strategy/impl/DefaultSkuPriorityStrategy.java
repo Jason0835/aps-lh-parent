@@ -3,18 +3,22 @@
  */
 package com.zlt.aps.lh.engine.strategy.impl;
 
-import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
-import com.zlt.aps.lh.api.enums.SchedulePriorityEnum;
+import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -30,34 +34,29 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
 
-    /**
-     * 供应链优先级权重：高优先级(04) < 周期排产(05) < 中优先级(06) < 搭配排产(07)，数字越小越优先
-     * 未知优先级排最后
-     */
-    private static final int UNKNOWN_PRIORITY_ORDER = 99;
-
     @Override
     public void sortByPriority(LhScheduleContext context) {
-        log.info("执行SKU优先级排序, 新增SKU数: {}", context.getNewSpecSkuList().size());
+        log.info("执行SKU优先级排序, 续作SKU数: {}, 新增SKU数: {}",
+                context.getContinuousSkuList().size(), context.getNewSpecSkuList().size());
 
         Comparator<SkuScheduleDTO> comparator = buildSkuComparator(context);
+        sortSkuList(context.getContinuousSkuList(), comparator);
+        sortSkuList(context.getNewSpecSkuList(), comparator);
 
-        // 对新增SKU列表排序
-        context.getNewSpecSkuList().sort(comparator);
-
-        // 同时对每个结构下的SKU列表排序（保持结构内部顺序一致）
+        // 同时对每个结构下的SKU列表排序，保证结构内顺序与主排序一致。
         for (Map.Entry<String, List<SkuScheduleDTO>> entry : context.getStructureSkuMap().entrySet()) {
             entry.getValue().sort(comparator);
         }
 
-        // 更新scheduleOrder
+        // 按统一优先级回写顺序号，供后续结果对象复用。
+        List<SkuScheduleDTO> orderedSkuList = buildOrderedSkuList(context, comparator);
         int order = 1;
-        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+        for (SkuScheduleDTO sku : orderedSkuList) {
             sku.setScheduleOrder(order++);
         }
 
         log.debug("SKU优先级排序完成, 排序后第一位: {}",
-                context.getNewSpecSkuList().isEmpty() ? "空" : context.getNewSpecSkuList().get(0).getMaterialCode());
+                CollectionUtils.isEmpty(orderedSkuList) ? "空" : orderedSkuList.get(0).getMaterialCode());
     }
 
     /**
@@ -76,40 +75,110 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
      * @return SKU比较器
      */
     private Comparator<SkuScheduleDTO> buildSkuComparator(LhScheduleContext context) {
+        Map<String, StructurePriorityMeta> structurePriorityMap = buildStructurePriorityMap(context);
         return Comparator
-                // 顺序1：有发货要求的优先（true=1，false=0，降序）
+                // 顺序1：锁定上机日期的优先。
                 .comparingInt((SkuScheduleDTO s) -> s.isDeliveryLocked() ? 0 : 1)
-                // 顺序2：仅已知延误天数参与排序，未知值排后
+                // 顺序2：延迟上机越久越优先，未知值排后。
                 .thenComparingInt((SkuScheduleDTO s) -> s.getDelayDays() >= 0 ? 0 : 1)
                 .thenComparingInt((SkuScheduleDTO s) -> s.getDelayDays() >= 0 ? -s.getDelayDays() : 0)
-                // 顺序3：收尾SKU优先；收尾日越晚（剩余天数越多）的越先上机
-                .thenComparingInt((SkuScheduleDTO s) -> endingJudgmentStrategy.isEnding(context, s) ? 0 : 1)
-                .thenComparingInt((SkuScheduleDTO s) -> -s.getEndingDaysRemaining())
-                // 顺序4：供应链优先级权重（数字越小越优先）
-                .thenComparingInt(this::getSupplyChainPriorityOrder);
+                // 顺序3：未来结构要收尾的优先，该结构下收尾更晚的SKU优先。
+                .thenComparingInt((SkuScheduleDTO s) -> isStructureEndingPriority(structurePriorityMap, s) ? 0 : 1)
+                .thenComparingInt((SkuScheduleDTO s) -> isStructureEndingPriority(structurePriorityMap, s)
+                        && hasKnownEndingDays(s)
+                        && endingJudgmentStrategy.isEnding(context, s) ? 0 : 1)
+                .thenComparingInt((SkuScheduleDTO s) -> isStructureEndingPriority(structurePriorityMap, s)
+                        && hasKnownEndingDays(s) ? -s.getEndingDaysRemaining() : 0)
+                // 顺序4：供应链优先按四类待排量逐级比较。
+                .thenComparingInt((SkuScheduleDTO s) -> -s.getHighPriorityPendingQty())
+                .thenComparingInt((SkuScheduleDTO s) -> -s.getCycleProductionPendingQty())
+                .thenComparingInt((SkuScheduleDTO s) -> -s.getMidPriorityPendingQty())
+                .thenComparingInt((SkuScheduleDTO s) -> -s.getConventionProductionPendingQty())
+                .thenComparing(SkuScheduleDTO::getMaterialCode, Comparator.nullsLast(String::compareTo));
     }
 
     /**
-     * 获取供应链优先级排序权重
-     * <p>高优先级(04)=1, 周期排产(05)=2, 中优先级(06)=3, 搭配排产(07)=4, 未知=99</p>
+     * 构建结构收尾优先级快照，避免比较器中重复扫描结构列表。
      */
-    private int getSupplyChainPriorityOrder(SkuScheduleDTO sku) {
-        String priority = sku.getSupplyChainPriority();
-        if (priority == null) {
-            return UNKNOWN_PRIORITY_ORDER;
+    private Map<String, StructurePriorityMeta> buildStructurePriorityMap(LhScheduleContext context) {
+        Map<String, StructurePriorityMeta> structurePriorityMap = new LinkedHashMap<>(16);
+        if (CollectionUtils.isEmpty(context.getStructureSkuMap())) {
+            return structurePriorityMap;
         }
-        if (SchedulePriorityEnum.HIGH_PRIORITY.getCode().equals(priority)) {
-            return 1;
+        int structureEndingDays = context.getScheduleConfig() != null
+                ? context.getScheduleConfig().getStructureEndingDays()
+                : LhScheduleConstant.DEFAULT_STRUCTURE_ENDING_DAYS;
+        for (Map.Entry<String, List<SkuScheduleDTO>> entry : context.getStructureSkuMap().entrySet()) {
+            if (StringUtils.isEmpty(entry.getKey()) || CollectionUtils.isEmpty(entry.getValue())) {
+                continue;
+            }
+            int latestEndingDays = -1;
+            boolean hasEndingSku = false;
+            for (SkuScheduleDTO sku : entry.getValue()) {
+                if (!endingJudgmentStrategy.isEnding(context, sku) || !hasKnownEndingDays(sku)) {
+                    continue;
+                }
+                hasEndingSku = true;
+                latestEndingDays = Math.max(latestEndingDays, sku.getEndingDaysRemaining());
+            }
+            StructurePriorityMeta meta = new StructurePriorityMeta();
+            meta.setLatestEndingDays(latestEndingDays);
+            meta.setStructureEndingPriority(hasEndingSku
+                    && latestEndingDays >= 0
+                    && latestEndingDays <= structureEndingDays);
+            structurePriorityMap.put(entry.getKey(), meta);
         }
-        if (SchedulePriorityEnum.CYCLE_PRODUCTION.getCode().equals(priority)) {
-            return 2;
+        return structurePriorityMap;
+    }
+
+    /**
+     * 判断SKU所属结构是否进入“未来结构要收尾”优先级。
+     */
+    private boolean isStructureEndingPriority(Map<String, StructurePriorityMeta> structurePriorityMap, SkuScheduleDTO sku) {
+        if (sku == null || StringUtils.isEmpty(sku.getStructureName())) {
+            return false;
         }
-        if (SchedulePriorityEnum.MID_PRIORITY.getCode().equals(priority)) {
-            return 3;
+        StructurePriorityMeta meta = structurePriorityMap.get(sku.getStructureName());
+        return meta != null && meta.isStructureEndingPriority();
+    }
+
+    /**
+     * 判断SKU是否具备可比较的收尾天数。
+     */
+    private boolean hasKnownEndingDays(SkuScheduleDTO sku) {
+        return sku != null && sku.getEndingDaysRemaining() >= 0;
+    }
+
+    /**
+     * 排序列表，为空时直接跳过。
+     */
+    private void sortSkuList(List<SkuScheduleDTO> skuList, Comparator<SkuScheduleDTO> comparator) {
+        if (CollectionUtils.isEmpty(skuList)) {
+            return;
         }
-        if (SchedulePriorityEnum.MATCH_PRODUCTION.getCode().equals(priority)) {
-            return 4;
-        }
-        return UNKNOWN_PRIORITY_ORDER;
+        skuList.sort(comparator);
+    }
+
+    /**
+     * 汇总所有SKU并按统一优先级排序，用于回写顺序号。
+     */
+    private List<SkuScheduleDTO> buildOrderedSkuList(LhScheduleContext context, Comparator<SkuScheduleDTO> comparator) {
+        List<SkuScheduleDTO> orderedSkus = new ArrayList<>(
+                context.getContinuousSkuList().size() + context.getNewSpecSkuList().size());
+        orderedSkus.addAll(context.getContinuousSkuList());
+        orderedSkus.addAll(context.getNewSpecSkuList());
+        orderedSkus.sort(comparator);
+        return orderedSkus;
+    }
+
+    /**
+     * 结构收尾排序元数据。
+     */
+    @lombok.Data
+    private static class StructurePriorityMeta {
+        /** 结构是否进入未来收尾优先级 */
+        private boolean structureEndingPriority;
+        /** 结构内最晚收尾天数 */
+        private int latestEndingDays;
     }
 }

@@ -26,6 +26,7 @@ import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
 import com.zlt.aps.lh.mapper.MdmWorkCalendarMapper;
+import com.zlt.aps.lh.mapper.MpAdjustResultMapper;
 import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
@@ -42,6 +43,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
+import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
@@ -83,6 +85,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     @Resource
     private MpFactoryProductionVersionMapper mpFactoryProductionVersionMapper;
+
+    @Resource
+    private MpAdjustResultMapper mpAdjustResultMapper;
 
     @Resource
     private MdmWorkCalendarMapper workCalendarMapper;
@@ -156,55 +161,58 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 2. 加载月生产计划
         loadMonthPlan(context, factoryCode, yearMonth);
 
-        // 3. 加载工作日历
+        // 3. 加载周程滚动调整结果
+        loadAdjustResult(context, factoryCode, year, month);
+
+        // 4. 加载工作日历
         loadWorkCalendar(context, factoryCode, startDate, endDate);
 
-        // 4. 加载SKU日硫化产能
+        // 5. 加载SKU日硫化产能
         loadSkuLhCapacity(context, factoryCode);
 
-        // 5. 加载设备停机计划
+        // 6. 加载设备停机计划
         loadDevicePlanShut(context, factoryCode, startDate, endDate);
 
-        // 6. 加载SKU与模具关系
+        // 7. 加载SKU与模具关系
         loadSkuMouldRel(context, factoryCode);
 
-        // 7. 加载模具台账
+        // 8. 加载模具台账
         loadModelInfo(context, factoryCode);
 
-        // 8. 加载硫化机台信息
+        // 9. 加载硫化机台信息
         loadMachineInfo(context, factoryCode);
 
-        // 9. 加载模具清洗计划
+        // 10. 加载模具清洗计划
         loadCleaningPlan(context, factoryCode, startDate, endDate);
 
-        // 10. 加载月底计划余量
+        // 11. 加载月底计划余量
         loadMonthSurplus(context, factoryCode, year, month);
 
-        // 11. 加载各班次完成量（T日，用于前日欠/超产差值修正）
+        // 12. 加载各班次完成量（T日，用于前日欠/超产差值修正）
         loadShiftFinishQty(context, factoryCode, scheduleDate);
 
-        // 12. 加载月累计完成量（截至T-1，用于月余量回退口径）
+        // 13. 加载月累计完成量（截至T-1，用于月余量回退口径）
         loadMaterialMonthFinishedQty(context, factoryCode, scheduleDate);
 
-        // 13. 加载物料信息
+        // 14. 加载物料信息
         loadMaterialInfo(context, factoryCode);
 
-        // 14. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
+        // 15. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
         int machineOnlineLookbackDays = context.getParamIntValue(
                 LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS,
                 LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS);
         loadMachineOnlineInfo(context, factoryCode, startDate, machineOnlineLookbackDays);
 
-        // 15. 加载硫化定点机台
+        // 16. 加载硫化定点机台
         loadSpecifyMachine(context, factoryCode);
 
-        // 16. 加载硫化机胶囊已使用次数
+        // 17. 加载硫化机胶囊已使用次数
         loadCapsuleUsage(context, factoryCode);
 
-        // 17. 加载设备保养计划
+        // 18. 加载设备保养计划
         loadMaintenancePlan(context, factoryCode);
 
-        // 18. 加载前日硫化排程结果
+        // 19. 加载前日硫化排程结果
         loadPreviousScheduleResults(context, factoryCode, targetDate);
 
         log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}",
@@ -330,6 +338,45 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         List<FactoryMonthPlanProductionFinalResult> monthPlanList = monthPlanMapper.selectList(wrapper);
         context.setMonthPlanList(monthPlanList != null ? monthPlanList : context.getMonthPlanList());
         log.debug("月生产计划加载完成, 数量: {}", context.getMonthPlanList().size());
+    }
+
+    /**
+     * 加载周程滚动调整结果，按物料编码聚合。
+     *
+     * @param context 排程上下文
+     * @param factoryCode 分厂编号
+     * @param year 年份
+     * @param month 月份
+     */
+    private void loadAdjustResult(LhScheduleContext context, String factoryCode, int year, int month) {
+        String monthPlanVersion = context.getMonthPlanVersion();
+        String productionVersion = context.getProductionVersion();
+        if (StringUtils.isEmpty(monthPlanVersion) || StringUtils.isEmpty(productionVersion)) {
+            context.setMpAdjustResultMap(new HashMap<>(16));
+            log.warn("月计划版本或排产版本为空，跳过周程滚动调整结果加载, 工厂: {}, monthPlanVersion: {}, productionVersion: {}",
+                    factoryCode, monthPlanVersion, productionVersion);
+            return;
+        }
+
+        List<MpAdjustResult> adjustResults = mpAdjustResultMapper.selectList(new LambdaQueryWrapper<MpAdjustResult>()
+                .eq(MpAdjustResult::getFactoryCode, factoryCode)
+                .eq(MpAdjustResult::getYear, year)
+                .eq(MpAdjustResult::getMonth, month)
+                .eq(MpAdjustResult::getMonthPlanVersion, monthPlanVersion)
+                .eq(MpAdjustResult::getProductionVersion, productionVersion)
+                .eq(MpAdjustResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        Map<String, List<MpAdjustResult>> adjustResultMap = new HashMap<>(64);
+        if (!CollectionUtils.isEmpty(adjustResults)) {
+            for (MpAdjustResult adjustResult : adjustResults) {
+                if (StringUtils.isEmpty(adjustResult.getMaterialCode())) {
+                    continue;
+                }
+                adjustResultMap.computeIfAbsent(adjustResult.getMaterialCode(), key -> new ArrayList<>()).add(adjustResult);
+            }
+        }
+        context.setMpAdjustResultMap(adjustResultMap);
+        log.debug("周程滚动调整结果加载完成, 记录数: {}, 物料数: {}",
+                CollectionUtils.isEmpty(adjustResults) ? 0 : adjustResults.size(), adjustResultMap.size());
     }
 
     /**

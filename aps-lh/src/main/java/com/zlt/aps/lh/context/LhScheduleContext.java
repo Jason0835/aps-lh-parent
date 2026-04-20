@@ -23,6 +23,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
+import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
 
@@ -72,6 +73,8 @@ public class LhScheduleContext {
 
     /** 月生产计划列表 */
     private List<FactoryMonthPlanProductionFinalResult> monthPlanList = new ArrayList<>();
+    /** 周程滚动调整结果Map, key=materialCode */
+    private Map<String, List<MpAdjustResult>> mpAdjustResultMap = new HashMap<>();
     /** 工作日历列表 */
     private List<MdmWorkCalendar> workCalendarList = new ArrayList<>();
     /** SKU日硫化产能Map, key=materialCode */

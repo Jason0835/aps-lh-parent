@@ -3,6 +3,7 @@ package com.zlt.aps.lh.handler;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.factory.ScheduleStrategyFactory;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -26,16 +27,21 @@ class ContinuousProductionHandlerTest {
     @Mock
     private IProductionStrategy strategy;
 
+    @Mock
+    private ISkuPriorityStrategy skuPriorityStrategy;
+
     @InjectMocks
     private ContinuousProductionHandler handler;
 
     @Test
-    void handle_shouldRunContinuousEndingBeforeTypeBlockChange() {
+    void handle_shouldSortBeforeContinuousEnding() {
+        when(strategyFactory.getSkuPriorityStrategy()).thenReturn(skuPriorityStrategy);
         when(strategyFactory.getProductionStrategy("01")).thenReturn(strategy);
 
         handler.handle(new LhScheduleContext());
 
-        InOrder inOrder = inOrder(strategy);
+        InOrder inOrder = inOrder(skuPriorityStrategy, strategy);
+        inOrder.verify(skuPriorityStrategy).sortByPriority(any(LhScheduleContext.class));
         inOrder.verify(strategy).scheduleContinuousEnding(any(LhScheduleContext.class));
         inOrder.verify(strategy).scheduleTypeBlockChange(any(LhScheduleContext.class));
         inOrder.verify(strategy).allocateShiftPlanQty(any(LhScheduleContext.class));

@@ -5,6 +5,7 @@ import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.factory.ScheduleStrategyFactory;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -25,6 +26,9 @@ public class ContinuousProductionHandler extends AbsScheduleStepHandler {
 
     @Override
     protected void doHandle(LhScheduleContext context) {
+        ISkuPriorityStrategy priorityStrategy = strategyFactory.getSkuPriorityStrategy();
+        priorityStrategy.sortByPriority(context);
+
         IProductionStrategy strategy = strategyFactory.getProductionStrategy(
                 ScheduleTypeEnum.CONTINUOUS.getCode());
 

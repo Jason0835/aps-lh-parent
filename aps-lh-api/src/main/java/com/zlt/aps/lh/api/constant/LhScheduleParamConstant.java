@@ -82,6 +82,8 @@ public final class LhScheduleParamConstant {
     public static final String SCHEDULE_DAYS = "SCHEDULE_DAYS";
     /** 是否按产能满排 */
     public static final String ENABLE_FULL_CAPACITY_SCHEDULING = "ENABLE_FULL_CAPACITY_SCHEDULING";
+    /** 满排模式是否按余量命中收尾规则2 */
+    public static final String ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE = "ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE";
     /** MES在机信息往前追溯天数 */
     public static final String MACHINE_ONLINE_LOOKBACK_DAYS = "MACHINE_ONLINE_LOOKBACK_DAYS";
     /** 停机超时阈值（小时） */

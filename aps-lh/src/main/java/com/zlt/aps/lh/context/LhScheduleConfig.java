@@ -100,6 +100,11 @@ public class LhScheduleConfig {
                 LhScheduleConstant.ENABLE_FULL_CAPACITY_SCHEDULING) == 1;
     }
 
+    public boolean isEndingBySurplusInFullModeEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE,
+                LhScheduleConstant.ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE) == 1;
+    }
+
     public ScheduleTargetModeEnum getScheduleTargetMode() {
         return isFullCapacitySchedulingEnabled()
                 ? ScheduleTargetModeEnum.CAPACITY_FULL

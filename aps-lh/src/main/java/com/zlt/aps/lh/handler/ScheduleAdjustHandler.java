@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.handler;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
@@ -47,9 +48,14 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     /** 无窗口计划量但存在余量/正向结转目标量提示 */
     private static final String TARGET_QTY_ONLY_WARN_TEMPLATE =
             "物料：%s 当前排程窗口没有计划量，但存在月计划余量/正向结转目标量[%d]，继续排产";
+    /** 满排模式下无窗口计划量仍继续排产提示 */
+    private static final String FULL_CAPACITY_WARN_TEMPLATE =
+            "物料：%s 当前排程窗口没有计划量，但按产能满排模式生成排产目标量[%d]，继续排产";
 
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
+    @Resource
+    private TargetScheduleQtyResolver targetScheduleQtyResolver;
 
     @Override
     protected void doHandle(LhScheduleContext context) {
@@ -138,7 +144,11 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
             // 排程窗口没有计划量但存在余量/正向结转目标量时，允许继续排产，并给出明确告警。
             if (dto.getWindowPlanQty() <= 0) {
-                log.warn(String.format(TARGET_QTY_ONLY_WARN_TEMPLATE, dto.getMaterialCode(), targetScheduleQty));
+                if (getTargetScheduleQtyResolver().isFullCapacityMode(context)) {
+                    log.warn(String.format(FULL_CAPACITY_WARN_TEMPLATE, dto.getMaterialCode(), targetScheduleQty));
+                } else {
+                    log.warn(String.format(TARGET_QTY_ONLY_WARN_TEMPLATE, dto.getMaterialCode(), targetScheduleQty));
+                }
             }
 
             structureSkuMap.computeIfAbsent(plan.getStructureName(), k -> new ArrayList<>()).add(dto);
@@ -225,7 +235,6 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         dto.setWindowPlanQty(windowPlanQty);
         dto.setSurplusQty(surplus.getSurplusQty());
         dto.setPendingQty(windowPlanQty + carryForwardQty);
-        dto.setTargetScheduleQty(resolveTargetScheduleQty(surplus.getSurplusQty(), dto.getPendingQty()));
         dto.setDailyPlanQty(plan.getDayVulcanizationQty() != null ? plan.getDayVulcanizationQty() : 0);
 
         // 产能信息（从SKU日硫化产能Map获取）
@@ -242,6 +251,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
         // 填充日硫化产能
         fillDailyCapacity(dto, capacity);
+        dto.setTargetScheduleQty(getTargetScheduleQtyResolver().resolveInitialTargetQty(context, dto));
 
         // 优先级信息
         dto.setSupplyChainPriority(plan.getProductionType());
@@ -518,15 +528,14 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 解析排产目标量。
-     * <p>目标量受月计划余量与窗口待排量双重约束，避免重复累加或跨窗口超排。</p>
+     * 获取目标排产量解析器。
      *
-     * @param surplusQty 月计划余量
-     * @param pendingQty 窗口待排量（窗口计划量 + 正向结转）
-     * @return 排产目标量
+     * @return 目标排产量解析器
      */
-    private int resolveTargetScheduleQty(int surplusQty, int pendingQty) {
-        return Math.max(0, Math.min(Math.max(surplusQty, 0), Math.max(pendingQty, 0)));
+    private TargetScheduleQtyResolver getTargetScheduleQtyResolver() {
+        return Objects.nonNull(targetScheduleQtyResolver)
+                ? targetScheduleQtyResolver
+                : new TargetScheduleQtyResolver();
     }
 
     /**

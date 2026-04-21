@@ -26,6 +26,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 局部搜索选机回归：开产时间应与首检分配时间一致，不再额外叠加首检时长。
@@ -250,6 +251,74 @@ class LocalSearchMachineAllocatorStrategyRegressionTest {
 
         Integer totalQty = ReflectionTestUtils.invokeMethod(estimate, "getTotalQty");
         assertEquals(1, totalQty.intValue(), "局部搜索估产应优先受目标量限制，而不是沿用旧待排量");
+    }
+
+    @Test
+    void estimateCapacity_shouldRefineTargetQtyByActualRemainingShifts() {
+        LocalSearchMachineAllocatorStrategy strategy = new LocalSearchMachineAllocatorStrategy();
+        LhScheduleContext context = newContext();
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M3");
+        machine.setMachineName("M3");
+        machine.setMaxMoldNum(1);
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("MAT-CAPACITY");
+        sku.setPendingQty(8);
+        sku.setWindowPlanQty(8);
+        sku.setTargetScheduleQty(128);
+        sku.setShiftCapacity(16);
+        sku.setLhTimeSeconds(1800);
+
+        Object estimate = ReflectionTestUtils.invokeMethod(
+                strategy,
+                "estimateCapacity",
+                context,
+                sku,
+                machine,
+                context.getScheduleWindowShifts().get(1).getShiftStartDateTime(),
+                context.getScheduleWindowShifts());
+
+        Integer totalQty = ReflectionTestUtils.invokeMethod(estimate, "getTotalQty");
+        assertEquals(112, totalQty.intValue(), "局部搜索估产应按实际开产后的剩余班次产能收敛目标量");
+    }
+
+    @Test
+    void estimateCapacity_shouldKeepUnscheduledPenaltyWhenTargetExceedsMachineCapacity() {
+        LocalSearchMachineAllocatorStrategy strategy = new LocalSearchMachineAllocatorStrategy();
+        LhScheduleContext context = newContext();
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M4");
+        machine.setMachineName("M4");
+        machine.setMaxMoldNum(1);
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("MAT-PENALTY");
+        sku.setPendingQty(8);
+        sku.setWindowPlanQty(8);
+        sku.setTargetScheduleQty(200);
+        sku.setShiftCapacity(16);
+        sku.setLhTimeSeconds(1800);
+
+        Date productionStartTime = context.getScheduleWindowShifts().get(1).getShiftStartDateTime();
+        Object estimate = ReflectionTestUtils.invokeMethod(
+                strategy,
+                "estimateCapacity",
+                context,
+                sku,
+                machine,
+                productionStartTime,
+                context.getScheduleWindowShifts());
+
+        Integer totalQty = ReflectionTestUtils.invokeMethod(estimate, "getTotalQty");
+        Long penaltyScore = ReflectionTestUtils.invokeMethod(estimate, "getPenaltyScore");
+        assertEquals(112, totalQty.intValue(), "候选机台估产总量应受实际剩余班次上限约束");
+        assertTrue(penaltyScore.longValue() >= 88L * 1_000_000L,
+                "目标量超出机台能力时应保留未满足量罚分，不能在估产前被预先截断");
     }
 
     private LhScheduleContext newContext() {

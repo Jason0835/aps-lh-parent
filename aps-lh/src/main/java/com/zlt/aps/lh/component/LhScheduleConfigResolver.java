@@ -128,6 +128,8 @@ public class LhScheduleConfigResolver {
 
         // 排程窗口与设备约束参数
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.SCHEDULE_DAYS, LhScheduleConstant.SCHEDULE_DAYS, 1);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.ENABLE_FULL_CAPACITY_SCHEDULING,
+                LhScheduleConstant.ENABLE_FULL_CAPACITY_SCHEDULING);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS,
                 LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS, 1);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MACHINE_STOP_TIMEOUT_HOURS,

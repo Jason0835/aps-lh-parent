@@ -80,6 +80,8 @@ public final class LhScheduleParamConstant {
     public static final String CAPSULE_PREHEAT_HOURS = "CAPSULE_PREHEAT_HOURS";
     /** 排程天数 */
     public static final String SCHEDULE_DAYS = "SCHEDULE_DAYS";
+    /** 是否按产能满排 */
+    public static final String ENABLE_FULL_CAPACITY_SCHEDULING = "ENABLE_FULL_CAPACITY_SCHEDULING";
     /** MES在机信息往前追溯天数 */
     public static final String MACHINE_ONLINE_LOOKBACK_DAYS = "MACHINE_ONLINE_LOOKBACK_DAYS";
     /** 停机超时阈值（小时） */

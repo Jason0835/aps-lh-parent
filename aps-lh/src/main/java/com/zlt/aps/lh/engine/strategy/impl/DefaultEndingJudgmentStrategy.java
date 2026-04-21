@@ -28,11 +28,13 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
         }
 
         int targetScheduleQty = sku.resolveTargetScheduleQty();
+        boolean fullCapacityMode = isFullCapacityMode(context);
 
-        // 规则2：排产目标量 <= 排程期内可生产总产能
+        // 规则2：排产目标量 <= 排程期内可生产总产能。
+        // 满排模式下目标量本身就按窗口产能封顶，继续沿用该规则会把大部分 SKU 误判成收尾。
         int totalScheduleShifts = getTotalScheduleShifts(context);
         int shiftCapacity = sku.getShiftCapacity();
-        if (shiftCapacity > 0) {
+        if (!fullCapacityMode && shiftCapacity > 0) {
             int totalCapacity = shiftCapacity * totalScheduleShifts;
             if (targetScheduleQty <= totalCapacity && targetScheduleQty > 0) {
                 log.debug("SKU[{}]判定为收尾(规则2): 目标量{} <= 总产能{}",
@@ -92,5 +94,17 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
             return context.getScheduleWindowShifts().size();
         }
         return LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate()).size();
+    }
+
+    /**
+     * 判断当前是否为按产能满排模式。
+     *
+     * @param context 排程上下文
+     * @return true-按产能满排，false-按需求排产
+     */
+    private boolean isFullCapacityMode(LhScheduleContext context) {
+        return context != null
+                && context.getScheduleConfig() != null
+                && context.getScheduleConfig().isFullCapacitySchedulingEnabled();
     }
 }

@@ -8,6 +8,7 @@ import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.observer.ScheduleEventPublisher;
 import com.zlt.aps.lh.engine.factory.ScheduleStrategyFactory;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
+import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.ContinuousProductionStrategy;
 import com.zlt.aps.lh.handler.ContinuousProductionHandler;
 import com.zlt.aps.lh.handler.ResultValidationHandler;
@@ -51,6 +52,9 @@ class ContinuousFollowUpResultValidationRegressionTest {
     @Mock
     private ScheduleStrategyFactory strategyFactory;
 
+    @Mock
+    private ISkuPriorityStrategy skuPriorityStrategy;
+
     @InjectMocks
     private ContinuousProductionHandler continuousProductionHandler;
 
@@ -77,6 +81,7 @@ class ContinuousFollowUpResultValidationRegressionTest {
             SkuScheduleDTO sku = invocation.getArgument(1);
             return "MAT-C1".equals(sku.getMaterialCode());
         });
+        when(strategyFactory.getSkuPriorityStrategy()).thenReturn(skuPriorityStrategy);
         when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
 
         // 走真实 S4.4 全链路，覆盖收尾、衔接、班次重分配、胎胚库存调整与降模步骤。
@@ -122,6 +127,7 @@ class ContinuousFollowUpResultValidationRegressionTest {
             SkuScheduleDTO sku = invocation.getArgument(1);
             return "MAT-C1".equals(sku.getMaterialCode());
         });
+        when(strategyFactory.getSkuPriorityStrategy()).thenReturn(skuPriorityStrategy);
         when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
 
         continuousProductionHandler.handle(context);
@@ -157,6 +163,7 @@ class ContinuousFollowUpResultValidationRegressionTest {
 
         when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
         when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(true);
+        when(strategyFactory.getSkuPriorityStrategy()).thenReturn(skuPriorityStrategy);
         when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
 
         continuousProductionHandler.handle(context);
@@ -186,6 +193,7 @@ class ContinuousFollowUpResultValidationRegressionTest {
 
         when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
         when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(true);
+        when(strategyFactory.getSkuPriorityStrategy()).thenReturn(skuPriorityStrategy);
         when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
 
         continuousProductionHandler.handle(context);

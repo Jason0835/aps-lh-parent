@@ -1,8 +1,10 @@
 package com.zlt.aps.lh.regression;
 
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.component.OrderNoGenerator;
+import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
@@ -17,6 +19,7 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -192,6 +195,134 @@ class NewSpecProductionStrategyRegressionTest {
     }
 
     @Test
+    void scheduleNewSpecs_shouldRefineTargetQtyByActualWindowCapacity() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        SkuScheduleDTO sku = buildSku();
+        sku.setPendingQty(8);
+        sku.setTargetScheduleQty(128);
+        sku.setShiftCapacity(16);
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M-REFINE");
+        machine.setMachineName("收敛机台");
+        machine.setMaxMoldNum(1);
+        machine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+
+        IMouldChangeBalanceStrategy mouldChangeBalanceStrategy = new IMouldChangeBalanceStrategy() {
+            @Override
+            public boolean hasCapacity(LhScheduleContext ctx, Date targetDate) {
+                return true;
+            }
+
+            @Override
+            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+                return dateTime(2026, 4, 17, 6, 0);
+            }
+
+            @Override
+            public int getRemainingCapacity(LhScheduleContext ctx, Date targetDate) {
+                return 99;
+            }
+        };
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), mouldChangeBalanceStrategy,
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "应生成新增排产结果");
+        assertEquals(112, context.getScheduleResultList().get(0).getDailyPlanQty().intValue(),
+                "新增规格应按实际开产后的窗口剩余产能收敛目标量");
+        assertEquals(112, sku.getTargetScheduleQty().intValue(),
+                "收敛后的目标量应回写到SKU，供后续未排与收尾口径复用");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldRestoreTargetQtyAfterFailedCandidateBuild() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        SkuScheduleDTO sku = buildSku();
+        sku.setPendingQty(8);
+        sku.setTargetScheduleQty(128);
+        sku.setShiftCapacity(16);
+        context.getNewSpecSkuList().add(sku);
+
+        List<com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
+        Date firstShiftStart = shifts.get(0).getShiftStartDateTime();
+        Date secondLastShiftStart = shifts.get(shifts.size() - 2).getShiftStartDateTime();
+        Date lastShiftStart = shifts.get(shifts.size() - 1).getShiftStartDateTime();
+        Date lastShiftEnd = shifts.get(shifts.size() - 1).getShiftEndDateTime();
+
+        MachineScheduleDTO failedMachineCandidate = new MachineScheduleDTO();
+        failedMachineCandidate.setMachineCode("M-ROLLBACK-FAIL");
+        failedMachineCandidate.setMachineName("回滚失败机台");
+        failedMachineCandidate.setMaxMoldNum(1);
+        failedMachineCandidate.setEstimatedEndTime(secondLastShiftStart);
+
+        MachineScheduleDTO successMachineCandidate = new MachineScheduleDTO();
+        successMachineCandidate.setMachineCode("M-ROLLBACK-OK");
+        successMachineCandidate.setMachineName("回滚成功机台");
+        successMachineCandidate.setMaxMoldNum(1);
+        successMachineCandidate.setEstimatedEndTime(firstShiftStart);
+
+        MachineScheduleDTO failedMachineInContext = new MachineScheduleDTO();
+        failedMachineInContext.setMachineCode("M-ROLLBACK-FAIL");
+        failedMachineInContext.setMachineName("回滚失败机台");
+        failedMachineInContext.setMaxMoldNum(1);
+        MachineCleaningWindowDTO fullBlockWindow = new MachineCleaningWindowDTO();
+        fullBlockWindow.setCleanType("01");
+        fullBlockWindow.setCleanStartTime(lastShiftStart);
+        fullBlockWindow.setCleanEndTime(lastShiftEnd);
+        fullBlockWindow.setReadyTime(lastShiftEnd);
+        failedMachineInContext.setCleaningWindowList(Arrays.asList(fullBlockWindow));
+        context.getMachineScheduleMap().put(failedMachineInContext.getMachineCode(), failedMachineInContext);
+
+        MachineScheduleDTO successMachineInContext = new MachineScheduleDTO();
+        successMachineInContext.setMachineCode("M-ROLLBACK-OK");
+        successMachineInContext.setMachineName("回滚成功机台");
+        successMachineInContext.setMaxMoldNum(1);
+        context.getMachineScheduleMap().put(successMachineInContext.getMachineCode(), successMachineInContext);
+
+        IMachineMatchStrategy machineMatchStrategy = new IMachineMatchStrategy() {
+            @Override
+            public List<MachineScheduleDTO> matchMachines(LhScheduleContext ctx, SkuScheduleDTO scheduleSku) {
+                return Arrays.asList(failedMachineCandidate, successMachineCandidate);
+            }
+
+            @Override
+            public MachineScheduleDTO selectBestMachine(LhScheduleContext ctx, SkuScheduleDTO scheduleSku,
+                                                        List<MachineScheduleDTO> candidates,
+                                                        Set<String> excludedMachineCodes) {
+                if (candidates == null || candidates.isEmpty()) {
+                    return null;
+                }
+                for (MachineScheduleDTO candidate : candidates) {
+                    if (candidate == null || excludedMachineCodes.contains(candidate.getMachineCode())) {
+                        continue;
+                    }
+                    return candidate;
+                }
+                return null;
+            }
+        };
+
+        strategy.scheduleNewSpecs(context, machineMatchStrategy, defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "候选机台失败回退后应继续尝试后续机台");
+        assertEquals("M-ROLLBACK-OK", context.getScheduleResultList().get(0).getLhMachineCode());
+        assertEquals(112, context.getScheduleResultList().get(0).getDailyPlanQty().intValue(),
+                "失败候选机台的收敛目标量不应泄漏到后续成功机台");
+        assertEquals(112, sku.getTargetScheduleQty().intValue(),
+                "最终成功机台应按自身能力重新收敛目标量");
+    }
+
+    @Test
     void adjustEmbryoStock_shouldRemoveZeroPlanResultAndRestoreMachineState() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, false);
@@ -351,6 +482,10 @@ class NewSpecProductionStrategyRegressionTest {
         Field endingField = NewSpecProductionStrategy.class.getDeclaredField("endingJudgmentStrategy");
         endingField.setAccessible(true);
         endingField.set(strategy, endingJudgmentStrategy);
+
+        Field targetResolverField = NewSpecProductionStrategy.class.getDeclaredField("targetScheduleQtyResolver");
+        targetResolverField.setAccessible(true);
+        targetResolverField.set(strategy, new TargetScheduleQtyResolver());
     }
 
     private static Date dateTime(int year, int month, int day, int hour, int minute) {

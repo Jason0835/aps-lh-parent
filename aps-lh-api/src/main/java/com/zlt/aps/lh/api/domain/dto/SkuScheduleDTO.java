@@ -50,7 +50,7 @@ public class SkuScheduleDTO {
     private int dailyPlanQty;
     /** 待排产量(排程过程中动态递减) */
     private int pendingQty;
-    /** 排产目标量（由调度侧计算后写入，当前口径为余量与窗口待排量双重约束） */
+    /** 排产目标量（由调度侧按模式计算后写入：按需求或按产能满排） */
     private Integer targetScheduleQty;
 
     // ========== 产能信息 ==========

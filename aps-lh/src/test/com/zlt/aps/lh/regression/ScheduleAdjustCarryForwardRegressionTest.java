@@ -1,10 +1,12 @@
 package com.zlt.aps.lh.regression;
 
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
+import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultEndingJudgmentStrategy;
 import com.zlt.aps.lh.handler.ScheduleAdjustHandler;
@@ -19,6 +21,7 @@ import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -37,6 +40,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -87,6 +91,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -118,6 +123,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -143,6 +149,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -181,6 +188,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -220,6 +228,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -241,10 +250,43 @@ class ScheduleAdjustCarryForwardRegressionTest {
     }
 
     @Test
+    void doHandle_shouldUseWindowCapacityWhenFullCapacityModeEnabled() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("1"));
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-FULL");
+        plan.setMaterialDesc("MAT-FULL-DESC");
+        plan.setStructureName("S-FULL");
+        plan.setSpecifications("SPEC-FULL");
+        plan.setTotalQty(300);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        MdmSkuLhCapacity capacity = new MdmSkuLhCapacity();
+        capacity.setMaterialCode("MAT-FULL");
+        capacity.setClassCapacity(16);
+        context.getSkuLhCapacityMap().put("MAT-FULL", capacity);
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-FULL").get(0);
+        assertEquals(0, sku.getWindowPlanQty());
+        assertEquals(0, sku.getPendingQty());
+        assertEquals(128, sku.getTargetScheduleQty().intValue());
+        assertEquals(0, context.getUnscheduledResultList().size());
+    }
+
+    @Test
     void doHandle_shouldMatchContinuousSkuByMachineOnlineInfo() {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -276,6 +318,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
         context.setScheduleDate(date(2026, 4, 11));
         context.setScheduleTargetDate(date(2026, 4, 13));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
@@ -331,5 +374,11 @@ class ScheduleAdjustCarryForwardRegressionTest {
         c.set(Calendar.MONTH, month - 1);
         c.set(Calendar.DAY_OF_MONTH, day);
         return c.getTime();
+    }
+
+    private static LhScheduleConfig createConfig(String fullCapacityMode) {
+        Map<String, String> paramMap = new HashMap<>(4);
+        paramMap.put(LhScheduleParamConstant.ENABLE_FULL_CAPACITY_SCHEDULING, fullCapacityMode);
+        return new LhScheduleConfig(paramMap);
     }
 }

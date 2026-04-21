@@ -6,6 +6,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
@@ -66,6 +67,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     private IEndingJudgmentStrategy endingJudgmentStrategy;
     @Resource
     private LocalSearchMachineAllocatorStrategy localSearchMachineAllocator;
+    @Resource
+    private TargetScheduleQtyResolver targetScheduleQtyResolver;
 
     @Override
     public String getStrategyType() {
@@ -163,6 +166,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             boolean scheduled = false;
             NewSpecFailReasonEnum failReason = NewSpecFailReasonEnum.MACHINE_SELECTION_FAILED;
             Set<String> excludedMachineCodes = new HashSet<>(candidates.size());
+            Integer originalTargetScheduleQty = sku.getTargetScheduleQty();
             while (true) {
                 MachineScheduleDTO candidateMachine;
                 if (!preferredMachineTried && preferredMachine != null
@@ -216,6 +220,17 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 // 业务口径：换模总时长已包含首检时长，不再额外叠加 FIRST_INSPECTION_HOURS
                 Date productionStartTime = inspectionTime;
                 int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(candidateMachine);
+                int refinedTargetQty = getTargetScheduleQtyResolver().refineTargetQtyByMachineCapacity(
+                        context, sku, candidateMachine, productionStartTime, shifts);
+                if (refinedTargetQty <= 0) {
+                    inspectionBalance.rollbackInspection(context, inspectionTime);
+                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    excludedMachineCodes.add(machineCode);
+                    failReason = selectHigherPriorityFailReason(
+                            failReason, NewSpecFailReasonEnum.NO_CAPACITY_IN_SCHEDULE_WINDOW);
+                    continue;
+                }
+                sku.setTargetScheduleQty(refinedTargetQty);
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, productionStartTime, mouldChangeStartTime,
                         mouldChangeCompleteTime, shifts, machineMouldQty, isEnding);
@@ -223,6 +238,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                     // 无有效产能时回滚首检和换模占用，避免影响后续SKU排产
                     inspectionBalance.rollbackInspection(context, inspectionTime);
                     mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    // 候选机台失败时恢复原目标量，避免把本次失败收敛值泄漏到后续候选机台。
+                    sku.setTargetScheduleQty(originalTargetScheduleQty);
                     excludedMachineCodes.add(machineCode);
                     failReason = selectHigherPriorityFailReason(
                             failReason, NewSpecFailReasonEnum.NO_CAPACITY_IN_SCHEDULE_WINDOW);
@@ -643,6 +660,17 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 .filter(code -> code != null && !code.trim().isEmpty())
                 .distinct()
                 .collect(Collectors.joining(","));
+    }
+
+    /**
+     * 获取目标排产量解析器。
+     *
+     * @return 目标排产量解析器
+     */
+    private TargetScheduleQtyResolver getTargetScheduleQtyResolver() {
+        return targetScheduleQtyResolver != null
+                ? targetScheduleQtyResolver
+                : new TargetScheduleQtyResolver();
     }
 
     private void updateMachineState(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {

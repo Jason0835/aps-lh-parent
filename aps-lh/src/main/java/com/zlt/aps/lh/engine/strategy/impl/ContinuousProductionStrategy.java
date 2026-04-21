@@ -6,6 +6,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
@@ -66,6 +67,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
+    @Resource
+    private TargetScheduleQtyResolver targetScheduleQtyResolver;
 
     @Override
     public String getStrategyType() {
@@ -372,12 +375,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (startTime == null) {
             return false;
         }
+        Integer originalTargetScheduleQty = sku.getTargetScheduleQty();
         boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
         int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
         sku.setMouldQty(machineMouldQty);
         LhScheduleResult result = buildScheduleResult(
                 context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
         if (result == null || result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
+            sku.setTargetScheduleQty(originalTargetScheduleQty);
             return false;
         }
         result.setScheduleType("01");
@@ -458,8 +463,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         String orderNo = generateOrderNo(context);
         result.setOrderNo(orderNo);
 
+        int refinedTargetQty = getTargetScheduleQtyResolver().refineTargetQtyByMachineCapacity(
+                context, sku, machine, startTime, shifts);
+
         // 按班次分配计划量
-        int remaining = sku.resolveTargetScheduleQty();
+        int remaining = refinedTargetQty;
         distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining);
 
@@ -1464,5 +1472,16 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      */
     private String generateOrderNo(LhScheduleContext context) {
         return orderNoGenerator.generateOrderNo(context.getScheduleTargetDate());
+    }
+
+    /**
+     * 获取目标排产量解析器。
+     *
+     * @return 目标排产量解析器
+     */
+    private TargetScheduleQtyResolver getTargetScheduleQtyResolver() {
+        return targetScheduleQtyResolver != null
+                ? targetScheduleQtyResolver
+                : new TargetScheduleQtyResolver();
     }
 }

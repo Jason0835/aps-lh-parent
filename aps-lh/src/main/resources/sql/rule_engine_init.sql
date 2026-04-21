@@ -36,6 +36,7 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 
 -- ======================== 排程参数 ========================
 ('116', 'SCHEDULE_DAYS', '3', '排程天数', '排程计划覆盖天数'),
+('116', 'ENABLE_FULL_CAPACITY_SCHEDULING', '1', '是否按产能满排', '0-按需求排产，1-按产能满排'),
 ('116', 'MACHINE_ONLINE_LOOKBACK_DAYS', '90', '往前追溯天数', 'MES在机信息从T-1开始向前回溯的最大天数'),
 ('116', 'ENDING_DETECT_DAYS', '3', '收尾判定天数', '触发收尾判定的天数'),
 ('116', 'ENDING_TIME_TOLERANCE_MINUTES', '20', '机台收尾时间容差', '单位：分钟'),

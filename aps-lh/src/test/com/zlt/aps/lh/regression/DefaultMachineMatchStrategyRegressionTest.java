@@ -4,12 +4,16 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultMachineMatchStrategy;
+import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -21,7 +25,7 @@ class DefaultMachineMatchStrategyRegressionTest {
     @Test
     void matchMachines_usesMouldQtyInsteadOfRelationCount() {
         DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
-        LhScheduleContext context = new LhScheduleContext();
+        LhScheduleContext context = buildContext();
 
         MachineScheduleDTO machine = new MachineScheduleDTO();
         machine.setMachineCode("M1");
@@ -47,9 +51,191 @@ class DefaultMachineMatchStrategyRegressionTest {
         assertEquals("M1", candidates.get(0).getMachineCode());
     }
 
+    @Test
+    void matchMachines_shouldPreferEarlierEndingTimeBeforeSpecWhenBeyondTolerance() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO earlierMachine = machine("M-EARLY", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-X", "22.5", "MAT-EARLY");
+        MachineScheduleDTO specMatchedButLateMachine = machine("M-LATE", dateTime(2026, 4, 21, 8, 30),
+                "SPEC-A", "22.5", "MAT-LATE");
+        context.getMachineScheduleMap().put(earlierMachine.getMachineCode(), earlierMachine);
+        context.getMachineScheduleMap().put(specMatchedButLateMachine.getMachineCode(), specMatchedButLateMachine);
+
+        SkuScheduleDTO sku = sku("MAT-1", "SPEC-A", "22.5");
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku);
+
+        assertEquals(2, candidates.size());
+        assertEquals("M-EARLY", candidates.get(0).getMachineCode(),
+                "收尾时间差超过阈值时，应优先更早收尾的机台，而不是先看规格");
+    }
+
+    @Test
+    void matchMachines_shouldPreferSpecMatchWhenEndingTimeWithinTolerance() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO unmatchedSpecMachine = machine("M-UNMATCHED", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-X", "22.5", "MAT-A");
+        MachineScheduleDTO matchedSpecMachine = machine("M-MATCHED", dateTime(2026, 4, 21, 8, 10),
+                "SPEC-A", "20.0", "MAT-B");
+        context.getMachineScheduleMap().put(unmatchedSpecMachine.getMachineCode(), unmatchedSpecMachine);
+        context.getMachineScheduleMap().put(matchedSpecMachine.getMachineCode(), matchedSpecMachine);
+
+        SkuScheduleDTO sku = sku("MAT-1", "SPEC-A", "22.5");
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku);
+
+        assertEquals(2, candidates.size());
+        assertEquals("M-MATCHED", candidates.get(0).getMachineCode(),
+                "收尾时间在阈值内时，应进入规格优先比较");
+    }
+
+    @Test
+    void matchMachines_shouldPreferCapsuleAffinityBeforeEmbryoShareCount() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+        context.setCapsuleSpecPeerMap(new HashMap<String, String>() {{
+            put("SPEC-A", "SPEC-A,SPEC-B");
+            put("SPEC-B", "SPEC-A,SPEC-B");
+        }});
+
+        MachineScheduleDTO capsuleMatchedMachine = machine("M-CAPSULE", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-B", "20.0", "MAT-CAPSULE");
+        MachineScheduleDTO embryoMoreMachine = machine("M-EMBRYO", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-C", "20.0", "MAT-EMBRYO");
+        context.getMachineScheduleMap().put(capsuleMatchedMachine.getMachineCode(), capsuleMatchedMachine);
+        context.getMachineScheduleMap().put(embryoMoreMachine.getMachineCode(), embryoMoreMachine);
+
+        material(context, "MAT-CAPSULE", "胎胚-A");
+        material(context, "MAT-EMBRYO", "胎胚-B");
+        context.setEmbryoDescMaterialCountMap(new HashMap<String, Integer>() {{
+            put("胎胚-A", 3);
+            put("胎胚-B", 9);
+        }});
+
+        SkuScheduleDTO sku = sku("MAT-1", "SPEC-A", "22.5");
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku);
+
+        assertEquals(2, candidates.size());
+        assertEquals("M-CAPSULE", candidates.get(0).getMachineCode(),
+                "前序层级完全相同且仅胶囊共用性不同，应先按胶囊共用性排序，再看胎胚共用数量");
+    }
+
+    @Test
+    void matchMachines_shouldPreferHigherEmbryoShareCountWhenAllPreviousRulesTie() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO smallerEmbryoShareMachine = machine("M-SMALL", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-X", "20.0", "MAT-SMALL");
+        MachineScheduleDTO biggerEmbryoShareMachine = machine("M-BIG", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-X", "20.0", "MAT-BIG");
+        context.getMachineScheduleMap().put(smallerEmbryoShareMachine.getMachineCode(), smallerEmbryoShareMachine);
+        context.getMachineScheduleMap().put(biggerEmbryoShareMachine.getMachineCode(), biggerEmbryoShareMachine);
+
+        material(context, "MAT-SMALL", "胎胚-A");
+        material(context, "MAT-BIG", "胎胚-B");
+        context.setEmbryoDescMaterialCountMap(new HashMap<String, Integer>() {{
+            put("胎胚-A", 2);
+            put("胎胚-B", 8);
+        }});
+
+        SkuScheduleDTO sku = sku("MAT-1", "SPEC-A", "22.5");
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku);
+
+        assertEquals(2, candidates.size());
+        assertEquals("M-BIG", candidates.get(0).getMachineCode(),
+                "前序规则都相同的情况下，应优先胎胚共用数量更多的机台");
+    }
+
+    @Test
+    void matchMachines_shouldFallbackToProSizeGroupWhenSpecificationsMissing() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+        context.setCapsuleProSizePeerMap(new HashMap<String, String>() {{
+            put("22.5", "22.5,23.5");
+            put("23.5", "22.5,23.5");
+        }});
+
+        MachineScheduleDTO proSizeMatchedMachine = machine("M-PROSIZE", dateTime(2026, 4, 21, 8, 0),
+                null, "23.5", "MAT-PROSIZE");
+        MachineScheduleDTO noAffinityMachine = machine("M-NONE", dateTime(2026, 4, 21, 8, 0),
+                null, "24.5", "MAT-NONE");
+        context.getMachineScheduleMap().put(proSizeMatchedMachine.getMachineCode(), proSizeMatchedMachine);
+        context.getMachineScheduleMap().put(noAffinityMachine.getMachineCode(), noAffinityMachine);
+
+        material(context, "MAT-PROSIZE", "胎胚-A");
+        material(context, "MAT-NONE", "胎胚-B");
+        context.setEmbryoDescMaterialCountMap(new HashMap<String, Integer>() {{
+            put("胎胚-A", 1);
+            put("胎胚-B", 1);
+        }});
+
+        SkuScheduleDTO sku = sku("MAT-1", "SPEC-A", "22.5");
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku);
+
+        assertEquals(2, candidates.size());
+        assertEquals("M-PROSIZE", candidates.get(0).getMachineCode(),
+                "规格组缺失时，应回退按英寸组判断胶囊共用性");
+    }
+
     private MdmSkuMouldRel mouldRel(String mouldCode) {
         MdmSkuMouldRel rel = new MdmSkuMouldRel();
         rel.setMouldCode(mouldCode);
         return rel;
+    }
+
+    private LhScheduleContext buildContext() {
+        LhScheduleContext context = new LhScheduleContext();
+        context.setMachineScheduleMap(new LinkedHashMap<String, MachineScheduleDTO>());
+        context.setMachineAssignmentMap(new LinkedHashMap<String, List<com.zlt.aps.lh.api.domain.entity.LhScheduleResult>>());
+        context.setMaterialInfoMap(new HashMap<String, MdmMaterialInfo>());
+        return context;
+    }
+
+    private MachineScheduleDTO machine(String machineCode, Date estimatedEndTime, String previousSpecCode,
+                                       String previousProSize, String previousMaterialCode) {
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode(machineCode);
+        machine.setStatus("1");
+        machine.setMaxMoldNum(1);
+        machine.setMachineOrder(1);
+        machine.setEstimatedEndTime(estimatedEndTime);
+        machine.setPreviousSpecCode(previousSpecCode);
+        machine.setPreviousProSize(previousProSize);
+        machine.setPreviousMaterialCode(previousMaterialCode);
+        return machine;
+    }
+
+    private SkuScheduleDTO sku(String materialCode, String specCode, String proSize) {
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode(materialCode);
+        sku.setSpecCode(specCode);
+        sku.setProSize(proSize);
+        return sku;
+    }
+
+    private void material(LhScheduleContext context, String materialCode, String embryoDesc) {
+        MdmMaterialInfo materialInfo = new MdmMaterialInfo();
+        materialInfo.setMaterialCode(materialCode);
+        materialInfo.setEmbryoDesc(embryoDesc);
+        context.getMaterialInfoMap().put(materialCode, materialInfo);
+    }
+
+    private Date dateTime(int year, int month, int day, int hour, int minute) {
+        java.util.Calendar calendar = java.util.Calendar.getInstance();
+        calendar.clear();
+        calendar.set(java.util.Calendar.YEAR, year);
+        calendar.set(java.util.Calendar.MONTH, month - 1);
+        calendar.set(java.util.Calendar.DAY_OF_MONTH, day);
+        calendar.set(java.util.Calendar.HOUR_OF_DAY, hour);
+        calendar.set(java.util.Calendar.MINUTE, minute);
+        return calendar.getTime();
     }
 }

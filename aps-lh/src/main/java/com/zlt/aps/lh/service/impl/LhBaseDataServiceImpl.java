@@ -20,6 +20,7 @@ import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
 import com.zlt.aps.lh.mapper.LhMachineOnlineInfoMapper;
 import com.zlt.aps.lh.mapper.LhRepairCapsuleMapper;
+import com.zlt.aps.lh.mapper.MdmCapsuleChuckMapper;
 import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
 import com.zlt.aps.lh.mapper.MdmModelInfoMapper;
 import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
@@ -33,6 +34,7 @@ import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.util.MachineStatusUtil;
 import com.zlt.aps.mp.api.domain.entity.MdmDevMaintenancePlan;
+import com.zlt.aps.mp.api.domain.entity.MdmCapsuleChuck;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhRepairCapsule;
@@ -63,6 +65,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * 硫化排程基础数据服务实现
@@ -117,6 +121,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     @Resource
     private MdmMaterialInfoMapper mdmMaterialInfoMapper;
+
+    @Resource
+    private MdmCapsuleChuckMapper mdmCapsuleChuckMapper;
 
     @Resource
     private LhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
@@ -195,6 +202,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
         // 14. 加载物料信息
         loadMaterialInfo(context, factoryCode);
+
+        // 14.1 加载胶囊卡盘分组
+        loadCapsuleChuck(context, factoryCode);
 
         // 15. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
         int machineOnlineLookbackDays = context.getParamIntValue(
@@ -666,15 +676,99 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                         .eq(MdmMaterialInfo::getFactoryCode, factoryCode)
                         .eq(MdmMaterialInfo::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmMaterialInfo> materialInfoMap = new HashMap<>(256);
+        Map<String, Integer> embryoDescMaterialCountMap = new HashMap<>(128);
         if (materialInfoList != null) {
             for (MdmMaterialInfo materialInfo : materialInfoList) {
                 if (materialInfo.getMaterialCode() != null) {
                     materialInfoMap.put(materialInfo.getMaterialCode(), materialInfo);
                 }
+                String embryoDesc = normalizeGroupToken(materialInfo.getEmbryoDesc());
+                if (StringUtils.isNotEmpty(embryoDesc)) {
+                    embryoDescMaterialCountMap.merge(embryoDesc, 1, Integer::sum);
+                }
             }
         }
         context.setMaterialInfoMap(materialInfoMap);
+        context.setEmbryoDescMaterialCountMap(embryoDescMaterialCountMap);
         log.debug("物料信息加载完成, 数量: {}", materialInfoMap.size());
+    }
+
+    /**
+     * 加载胶囊卡盘分组，按规格和英寸分别建立快速判定Map。
+     *
+     * @param context 排程上下文
+     * @param factoryCode 分厂编号
+     */
+    private void loadCapsuleChuck(LhScheduleContext context, String factoryCode) {
+        List<MdmCapsuleChuck> capsuleChuckList = mdmCapsuleChuckMapper.selectList(
+                new LambdaQueryWrapper<MdmCapsuleChuck>()
+                        .eq(MdmCapsuleChuck::getFactoryCode, factoryCode)
+                        .eq(MdmCapsuleChuck::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+
+        Map<String, String> capsuleSpecPeerMap = new HashMap<>(64);
+        Map<String, String> capsuleProSizePeerMap = new HashMap<>(64);
+        if (!CollectionUtils.isEmpty(capsuleChuckList)) {
+            for (MdmCapsuleChuck capsuleChuck : capsuleChuckList) {
+                registerCapsuleGroup(capsuleSpecPeerMap, capsuleChuck.getSpecifications());
+                registerCapsuleGroup(capsuleProSizePeerMap, capsuleChuck.getProSize());
+            }
+        }
+        context.setCapsuleSpecPeerMap(capsuleSpecPeerMap);
+        context.setCapsuleProSizePeerMap(capsuleProSizePeerMap);
+        log.debug("胶囊卡盘分组加载完成, 规格组: {}, 英寸组: {}",
+                capsuleSpecPeerMap.size(), capsuleProSizePeerMap.size());
+    }
+
+    /**
+     * 注册一条胶囊卡盘分组。
+     *
+     * @param capsuleGroupMap 分组Map
+     * @param rawGroupValue 原始逗号分隔值
+     */
+    private void registerCapsuleGroup(Map<String, String> capsuleGroupMap, String rawGroupValue) {
+        Set<String> normalizedTokens = splitGroupTokens(rawGroupValue);
+        if (CollectionUtils.isEmpty(normalizedTokens)) {
+            return;
+        }
+        String groupKey = String.join(",", normalizedTokens);
+        for (String token : normalizedTokens) {
+            capsuleGroupMap.putIfAbsent(token, groupKey);
+        }
+    }
+
+    /**
+     * 解析逗号分隔分组并做trim去重。
+     *
+     * @param rawGroupValue 原始分组值
+     * @return 去重后的分组元素
+     */
+    private Set<String> splitGroupTokens(String rawGroupValue) {
+        Set<String> normalizedTokens = new TreeSet<>();
+        if (StringUtils.isEmpty(rawGroupValue)) {
+            return normalizedTokens;
+        }
+        String[] tokenArray = rawGroupValue.split(",");
+        for (String token : tokenArray) {
+            String normalizedToken = normalizeGroupToken(token);
+            if (StringUtils.isNotEmpty(normalizedToken)) {
+                normalizedTokens.add(normalizedToken);
+            }
+        }
+        return normalizedTokens;
+    }
+
+    /**
+     * 统一分组字段格式，屏蔽前后空格和空串脏数据。
+     *
+     * @param token 原始值
+     * @return 归一化结果
+     */
+    private String normalizeGroupToken(String token) {
+        if (StringUtils.isEmpty(token)) {
+            return null;
+        }
+        String normalizedToken = token.trim();
+        return StringUtils.isEmpty(normalizedToken) ? null : normalizedToken;
     }
 
     /**

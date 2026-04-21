@@ -97,6 +97,12 @@ public class LhScheduleContext {
     private Map<String, Integer> materialMonthFinishedQtyMap = new HashMap<>();
     /** 物料信息Map, key=materialCode */
     private Map<String, MdmMaterialInfo> materialInfoMap = new HashMap<>();
+    /** 胶囊规格分组Map, key=规格, value=归一化后的分组编码 */
+    private Map<String, String> capsuleSpecPeerMap = new HashMap<>();
+    /** 胶囊英寸分组Map, key=英寸, value=归一化后的分组编码 */
+    private Map<String, String> capsuleProSizePeerMap = new HashMap<>();
+    /** 胎胚描述对应物料数量Map, key=胎胚描述 */
+    private Map<String, Integer> embryoDescMaterialCountMap = new HashMap<>();
     /** MES硫化在机信息Map, key=machineCode */
     private Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>();
     /** 硫化定点机台Map, key=specCode */

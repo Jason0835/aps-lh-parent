@@ -11,8 +11,10 @@ import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
+import com.zlt.aps.lh.engine.strategy.impl.DefaultMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.NewSpecProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
@@ -361,6 +363,60 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals(dateTime(2026, 4, 17, 6, 0), machine.getEstimatedEndTime(), "机台完工时刻应回滚到初始状态");
     }
 
+    @Test
+    void scheduleNewSpecs_shouldUseUpdatedMachinePriorityRules() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        SkuScheduleDTO sku = buildSku();
+        context.getNewSpecSkuList().add(sku);
+        context.setEmbryoDescMaterialCountMap(new java.util.HashMap<String, Integer>() {{
+            put("胎胚-早机", 1);
+            put("胎胚-晚机", 9);
+        }});
+
+        MachineScheduleDTO earlierMachine = new MachineScheduleDTO();
+        earlierMachine.setMachineCode("M-EARLY");
+        earlierMachine.setMachineName("更早收尾机台");
+        earlierMachine.setStatus("1");
+        earlierMachine.setMaxMoldNum(1);
+        earlierMachine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+        earlierMachine.setPreviousSpecCode("SPEC-X");
+        earlierMachine.setPreviousProSize("22.5");
+        earlierMachine.setPreviousMaterialCode("MAT-EARLY");
+
+        MachineScheduleDTO matchedSpecLateMachine = new MachineScheduleDTO();
+        matchedSpecLateMachine.setMachineCode("M-LATE");
+        matchedSpecLateMachine.setMachineName("更晚但同规格机台");
+        matchedSpecLateMachine.setStatus("1");
+        matchedSpecLateMachine.setMaxMoldNum(1);
+        matchedSpecLateMachine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 30));
+        matchedSpecLateMachine.setPreviousSpecCode("11R22.5");
+        matchedSpecLateMachine.setPreviousProSize("22.5");
+        matchedSpecLateMachine.setPreviousMaterialCode("MAT-LATE");
+
+        context.getMachineScheduleMap().put(earlierMachine.getMachineCode(), earlierMachine);
+        context.getMachineScheduleMap().put(matchedSpecLateMachine.getMachineCode(), matchedSpecLateMachine);
+
+        MdmMaterialInfo earlyMaterial = new MdmMaterialInfo();
+        earlyMaterial.setMaterialCode("MAT-EARLY");
+        earlyMaterial.setEmbryoDesc("胎胚-早机");
+        context.getMaterialInfoMap().put(earlyMaterial.getMaterialCode(), earlyMaterial);
+
+        MdmMaterialInfo lateMaterial = new MdmMaterialInfo();
+        lateMaterial.setMaterialCode("MAT-LATE");
+        lateMaterial.setEmbryoDesc("胎胚-晚机");
+        context.getMaterialInfoMap().put(lateMaterial.getMaterialCode(), lateMaterial);
+
+        strategy.scheduleNewSpecs(context, new DefaultMachineMatchStrategy(), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "应生成新增排产结果");
+        assertEquals("M-EARLY", context.getScheduleResultList().get(0).getLhMachineCode(),
+                "新增排产应复用更新后的选机优先级，先按收尾时间比较");
+    }
+
     private LhScheduleContext buildContext() {
         LhScheduleContext context = new LhScheduleContext();
         Date scheduleDate = dateTime(2026, 4, 17, 0, 0);
@@ -369,6 +425,9 @@ class NewSpecProductionStrategyRegressionTest {
         context.setScheduleDate(scheduleDate);
         context.setScheduleTargetDate(scheduleDate);
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+        context.setMachineScheduleMap(new java.util.LinkedHashMap<String, MachineScheduleDTO>());
+        context.setMachineAssignmentMap(new java.util.LinkedHashMap<String, List<com.zlt.aps.lh.api.domain.entity.LhScheduleResult>>());
+        context.setMaterialInfoMap(new java.util.HashMap<String, MdmMaterialInfo>());
         return context;
     }
 

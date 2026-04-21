@@ -3,7 +3,7 @@ package com.zlt.aps.lh.regression;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
-import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
+import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultEndingJudgmentStrategy;
@@ -15,6 +15,7 @@ import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
@@ -65,11 +66,11 @@ class ScheduleAdjustCarryForwardRegressionTest {
         previous.setClass1PlanQty(80);
         context.setPreviousScheduleResultList(Collections.singletonList(previous));
 
-        LhShiftFinishQty finishQty = new LhShiftFinishQty();
+        LhScheFinishQty finishQty = new LhScheFinishQty();
         finishQty.setLhMachineCode("M1");
         finishQty.setMaterialCode("MAT-1");
-        finishQty.setClass1FinishQty(60);
-        context.getShiftFinishQtyMap().put("M1_MAT-1", finishQty);
+        finishQty.setClass1FinishQty(BigDecimal.valueOf(60));
+        context.getScheFinishQtyMap().put("M1_MAT-1", finishQty);
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 
@@ -160,11 +161,11 @@ class ScheduleAdjustCarryForwardRegressionTest {
         previous.setClass1PlanQty(50);
         context.setPreviousScheduleResultList(Collections.singletonList(previous));
 
-        LhShiftFinishQty finishQty = new LhShiftFinishQty();
+        LhScheFinishQty finishQty = new LhScheFinishQty();
         finishQty.setLhMachineCode("M3");
         finishQty.setMaterialCode("MAT-3");
-        finishQty.setClass1FinishQty(20);
-        context.getShiftFinishQtyMap().put("M3_MAT-3", finishQty);
+        finishQty.setClass1FinishQty(BigDecimal.valueOf(20));
+        context.getScheFinishQtyMap().put("M3_MAT-3", finishQty);
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 

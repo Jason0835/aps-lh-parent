@@ -13,7 +13,7 @@ import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
-import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
+import com.zlt.aps.lh.mapper.LhScheFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
@@ -45,14 +45,15 @@ import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
+import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
-import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
@@ -61,6 +62,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * 硫化排程基础数据服务实现
@@ -111,7 +113,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     private MdmMonthSurplusMapper monthSurplusMapper;
 
     @Resource
-    private LhShiftFinishQtyMapper lhShiftFinishQtyMapper;
+    private LhScheFinishQtyMapper lhScheFinishQtyMapper;
 
     @Resource
     private MdmMaterialInfoMapper mdmMaterialInfoMapper;
@@ -186,7 +188,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         loadMonthSurplus(context, factoryCode, year, month);
 
         // 12. 加载各班次完成量（T日，用于前日欠/超产差值修正）
-        loadShiftFinishQty(context, factoryCode, scheduleDate);
+        loadScheFinishQty(context, factoryCode, scheduleDate);
 
         // 13. 加载月累计完成量（截至T-1，用于月余量回退口径）
         loadMaterialMonthFinishedQty(context, factoryCode, scheduleDate);
@@ -571,22 +573,22 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param factoryCode  分厂编号
      * @param scheduleDate 排程日期
      */
-    private void loadShiftFinishQty(LhScheduleContext context, String factoryCode, Date scheduleDate) {
+    private void loadScheFinishQty(LhScheduleContext context, String factoryCode, Date scheduleDate) {
         Date day = LhScheduleTimeUtil.clearTime(scheduleDate);
-        List<LhShiftFinishQty> shiftFinishQtyList = lhShiftFinishQtyMapper.selectList(
-                new LambdaQueryWrapper<LhShiftFinishQty>()
-                        .eq(LhShiftFinishQty::getFactoryCode, factoryCode)
-                        .eq(LhShiftFinishQty::getScheduleDate, day)
-                        .eq(LhShiftFinishQty::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
-        Map<String, LhShiftFinishQty> shiftFinishQtyMap = new HashMap<>(64);
-        if (shiftFinishQtyList != null) {
-            for (LhShiftFinishQty finishQty : shiftFinishQtyList) {
+        List<LhScheFinishQty> scheFinishQtyList = lhScheFinishQtyMapper.selectList(
+                new LambdaQueryWrapper<LhScheFinishQty>()
+                        .eq(LhScheFinishQty::getFactoryCode, factoryCode)
+                        .eq(LhScheFinishQty::getScheduleDate, day)
+                        .eq(LhScheFinishQty::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        Map<String, LhScheFinishQty> scheFinishQtyMap = new HashMap<>(64);
+        if (!CollectionUtils.isEmpty(scheFinishQtyList)) {
+            for (LhScheFinishQty finishQty : scheFinishQtyList) {
                 String key = finishQty.getLhMachineCode() + "_" + finishQty.getMaterialCode();
-                shiftFinishQtyMap.put(key, finishQty);
+                scheFinishQtyMap.put(key, finishQty);
             }
         }
-        context.setShiftFinishQtyMap(shiftFinishQtyMap);
-        log.debug("各班次完成量加载完成, 数量: {}", shiftFinishQtyMap.size());
+        context.setScheFinishQtyMap(scheFinishQtyMap);
+        log.debug("排程完成量加载完成, 数量: {}", scheFinishQtyMap.size());
     }
 
     /**
@@ -603,16 +605,16 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         calendar.set(Calendar.DAY_OF_MONTH, 1);
         Date monthStart = LhScheduleTimeUtil.clearTime(calendar.getTime());
 
-        List<LhShiftFinishQty> monthFinishList = lhShiftFinishQtyMapper.selectList(
-                new LambdaQueryWrapper<LhShiftFinishQty>()
-                        .eq(LhShiftFinishQty::getFactoryCode, factoryCode)
-                        .ge(LhShiftFinishQty::getScheduleDate, monthStart)
-                        .lt(LhShiftFinishQty::getScheduleDate, tDay)
-                        .eq(LhShiftFinishQty::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        List<LhScheFinishQty> monthFinishList = lhScheFinishQtyMapper.selectList(
+                new LambdaQueryWrapper<LhScheFinishQty>()
+                        .eq(LhScheFinishQty::getFactoryCode, factoryCode)
+                        .ge(LhScheFinishQty::getScheduleDate, monthStart)
+                        .lt(LhScheFinishQty::getScheduleDate, tDay)
+                        .eq(LhScheFinishQty::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
 
         Map<String, Integer> materialMonthFinishedQtyMap = new HashMap<>(64);
-        if (monthFinishList != null) {
-            for (LhShiftFinishQty finishQty : monthFinishList) {
+        if (!CollectionUtils.isEmpty(monthFinishList)) {
+            for (LhScheFinishQty finishQty : monthFinishList) {
                 if (StringUtils.isEmpty(finishQty.getMaterialCode())) {
                     continue;
                 }
@@ -636,15 +638,20 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param finishQty 班次完成记录
      * @return 总完成量
      */
-    private int resolveTotalFinishedQty(LhShiftFinishQty finishQty) {
-        return (finishQty.getClass1FinishQty() != null ? finishQty.getClass1FinishQty() : 0)
-                + (finishQty.getClass2FinishQty() != null ? finishQty.getClass2FinishQty() : 0)
-                + (finishQty.getClass3FinishQty() != null ? finishQty.getClass3FinishQty() : 0)
-                + (finishQty.getClass4FinishQty() != null ? finishQty.getClass4FinishQty() : 0)
-                + (finishQty.getClass5FinishQty() != null ? finishQty.getClass5FinishQty() : 0)
-                + (finishQty.getClass6FinishQty() != null ? finishQty.getClass6FinishQty() : 0)
-                + (finishQty.getClass7FinishQty() != null ? finishQty.getClass7FinishQty() : 0)
-                + (finishQty.getClass8FinishQty() != null ? finishQty.getClass8FinishQty() : 0);
+    private int resolveTotalFinishedQty(LhScheFinishQty finishQty) {
+        return resolveFinishQtyValue(finishQty.getClass1FinishQty())
+                + resolveFinishQtyValue(finishQty.getClass2FinishQty())
+                + resolveFinishQtyValue(finishQty.getClass3FinishQty());
+    }
+
+    /**
+     * 将完成量安全转换为整数件数，供月累计完成量汇总使用。
+     *
+     * @param finishQty 完成量
+     * @return 整数件数
+     */
+    private int resolveFinishQtyValue(BigDecimal finishQty) {
+        return Objects.nonNull(finishQty) ? finishQty.intValue() : 0;
     }
 
     /**

@@ -5,11 +5,12 @@ import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
-import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
+import com.zlt.aps.lh.mapper.LhScheFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
@@ -31,7 +32,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
@@ -70,7 +73,7 @@ class ScheduleDataWindowRegressionTest {
     @Mock
     private MdmMonthSurplusMapper monthSurplusMapper;
     @Mock
-    private LhShiftFinishQtyMapper lhShiftFinishQtyMapper;
+    private LhScheFinishQtyMapper lhScheFinishQtyMapper;
     @Mock
     private MdmMaterialInfoMapper mdmMaterialInfoMapper;
     @Mock
@@ -199,6 +202,67 @@ class ScheduleDataWindowRegressionTest {
         assertTrue(context.getMachineOnlineInfoMap().isEmpty());
     }
 
+    @Test
+    void loadAllBaseData_shouldLoadScheFinishQtyAndAggregateMonthFinishedQtyUntilTMinusOne() {
+        Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 17));
+        Date scheduleDate = LhScheduleTimeUtil.addDays(target, -2);
+        prepareRequiredBaseMocks();
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        LhScheFinishQty tDayFinishQty = new LhScheFinishQty();
+        tDayFinishQty.setLhMachineCode("K1501");
+        tDayFinishQty.setMaterialCode("MAT-TODAY");
+        tDayFinishQty.setClass1FinishQty(BigDecimal.valueOf(12));
+        tDayFinishQty.setClass2FinishQty(BigDecimal.valueOf(8));
+        tDayFinishQty.setClass3FinishQty(BigDecimal.ZERO);
+
+        LhScheFinishQty monthFinishQtyA = new LhScheFinishQty();
+        monthFinishQtyA.setMaterialCode("MAT-MONTH");
+        monthFinishQtyA.setClass1FinishQty(BigDecimal.TEN);
+        monthFinishQtyA.setClass2FinishQty(BigDecimal.valueOf(20));
+        monthFinishQtyA.setClass3FinishQty(BigDecimal.valueOf(30));
+
+        LhScheFinishQty monthFinishQtyB = new LhScheFinishQty();
+        monthFinishQtyB.setMaterialCode("MAT-MONTH");
+        monthFinishQtyB.setClass1FinishQty(BigDecimal.valueOf(5));
+        monthFinishQtyB.setClass2FinishQty(null);
+        monthFinishQtyB.setClass3FinishQty(BigDecimal.valueOf(15));
+
+        LhScheFinishQty otherMaterialMonthFinishQty = new LhScheFinishQty();
+        otherMaterialMonthFinishQty.setMaterialCode("MAT-OTHER");
+        otherMaterialMonthFinishQty.setClass1FinishQty(BigDecimal.valueOf(7));
+        otherMaterialMonthFinishQty.setClass2FinishQty(BigDecimal.valueOf(2));
+        otherMaterialMonthFinishQty.setClass3FinishQty(null);
+
+        when(lhScheFinishQtyMapper.selectList(any())).thenReturn(
+                Collections.singletonList(tDayFinishQty),
+                Arrays.asList(monthFinishQtyA, monthFinishQtyB, otherMaterialMonthFinishQty));
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("FC01");
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        assertEquals(1, context.getScheFinishQtyMap().size());
+        assertEquals(80, context.getMaterialMonthFinishedQtyMap().get("MAT-MONTH").intValue());
+        assertEquals(9, context.getMaterialMonthFinishedQtyMap().get("MAT-OTHER").intValue());
+    }
+
+    @Test
+    void resolveTotalFinishedQty_shouldSumThreeShiftsAndTreatNullAsZero() {
+        LhScheFinishQty finishQty = new LhScheFinishQty();
+        finishQty.setClass1FinishQty(BigDecimal.valueOf(11));
+        finishQty.setClass2FinishQty(null);
+        finishQty.setClass3FinishQty(BigDecimal.valueOf(9));
+
+        Integer totalFinishedQty = ReflectionTestUtils.invokeMethod(lhBaseDataService,
+                "resolveTotalFinishedQty", finishQty);
+
+        assertEquals(20, totalFinishedQty.intValue());
+    }
+
     private void prepareRequiredBaseMocks() {
         MpFactoryProductionVersion finalVersion = new MpFactoryProductionVersion();
         finalVersion.setProductionVersion("PV_REGRESSION_01");
@@ -219,7 +283,7 @@ class ScheduleDataWindowRegressionTest {
 
         when(lhMouldCleanPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(monthSurplusMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(lhShiftFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(lhScheFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(mdmMaterialInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhSpecifyMachineMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhRepairCapsuleMapper.selectList(any())).thenReturn(Collections.emptyList());

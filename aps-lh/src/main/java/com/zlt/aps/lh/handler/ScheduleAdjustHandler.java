@@ -14,21 +14,23 @@ import com.zlt.aps.lh.util.MonthPlanDayQtyUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
-import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * S4.3 排程调整与SKU归集处理器
@@ -300,16 +302,11 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
     private int resolveActualFinishedQty(LhScheduleContext context, LhScheduleResult result) {
         String key = result.getLhMachineCode() + "_" + result.getMaterialCode();
-        LhShiftFinishQty finishQty = context.getShiftFinishQtyMap().get(key);
-        if (finishQty != null) {
-            return safeInt(finishQty.getClass1FinishQty())
-                    + safeInt(finishQty.getClass2FinishQty())
-                    + safeInt(finishQty.getClass3FinishQty())
-                    + safeInt(finishQty.getClass4FinishQty())
-                    + safeInt(finishQty.getClass5FinishQty())
-                    + safeInt(finishQty.getClass6FinishQty())
-                    + safeInt(finishQty.getClass7FinishQty())
-                    + safeInt(finishQty.getClass8FinishQty());
+        LhScheFinishQty finishQty = context.getScheFinishQtyMap().get(key);
+        if (Objects.nonNull(finishQty)) {
+            return safeFinishQty(finishQty.getClass1FinishQty())
+                    + safeFinishQty(finishQty.getClass2FinishQty())
+                    + safeFinishQty(finishQty.getClass3FinishQty());
         }
         List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
         if (CollectionUtils.isEmpty(shifts)) {
@@ -507,7 +504,17 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @return int值
      */
     private int safeInt(Integer value) {
-        return value != null ? value : 0;
+        return Objects.nonNull(value) ? value : 0;
+    }
+
+    /**
+     * 安全获取完成量值，null时返回0。
+     *
+     * @param value 完成量
+     * @return 整数件数
+     */
+    private int safeFinishQty(BigDecimal value) {
+        return Objects.nonNull(value) ? value.intValue() : 0;
     }
 
     /**

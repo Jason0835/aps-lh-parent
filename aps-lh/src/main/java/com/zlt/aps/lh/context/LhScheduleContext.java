@@ -165,6 +165,8 @@ public class LhScheduleContext {
     private String currentStep;
     /** 校验错误信息集合 */
     private List<String> validationErrorList = new ArrayList<>();
+    /** 优先级跟踪日志静默深度（局部搜索模拟分支时递增） */
+    private int priorityTraceMuteDepth = 0;
 
     /**
      * 追加一条校验错误信息（空串或 null 将被忽略）
@@ -222,6 +224,32 @@ public class LhScheduleContext {
     public void interruptSchedule(String reason) {
         this.interrupted = true;
         this.interruptReason = reason;
+    }
+
+    /**
+     * 进入优先级跟踪日志静默区间。
+     * <p>用于局部搜索等模拟分支，避免输出非最终决策日志。</p>
+     */
+    public void enterPriorityTraceMuteScope() {
+        priorityTraceMuteDepth++;
+    }
+
+    /**
+     * 退出优先级跟踪日志静默区间。
+     */
+    public void exitPriorityTraceMuteScope() {
+        if (priorityTraceMuteDepth > 0) {
+            priorityTraceMuteDepth--;
+        }
+    }
+
+    /**
+     * 当前是否处于优先级跟踪日志静默区间。
+     *
+     * @return true-静默，false-正常输出
+     */
+    public boolean isPriorityTraceMuted() {
+        return priorityTraceMuteDepth > 0;
     }
 
     /**

@@ -2,6 +2,8 @@ package com.zlt.aps.lh.engine.strategy.impl;
 
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
+import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
@@ -15,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
@@ -132,6 +135,33 @@ class DefaultSkuPriorityStrategyTest {
         assertEquals("MAT-H2", context.getNewSpecSkuList().get(0).getMaterialCode());
         assertEquals("MAT-H1", context.getNewSpecSkuList().get(1).getMaterialCode());
         assertEquals("MAT-C", context.getNewSpecSkuList().get(2).getMaterialCode());
+    }
+
+    @Test
+    void sortByPriority_shouldWriteContinuousPriorityTraceLogWhenEnabled() {
+        SkuScheduleDTO normal = sku("MAT-N");
+        normal.setDelayDays(1);
+        SkuScheduleDTO locked = sku("MAT-L");
+        locked.setDeliveryLocked(true);
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("116");
+        context.setBatchNo("TRACE-BATCH");
+        context.setCurrentStep(ScheduleStepEnum.S4_4_CONTINUOUS_PRODUCTION.getCode());
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG, "1")));
+        context.setContinuousSkuList(new java.util.ArrayList<>(Arrays.asList(normal, locked)));
+
+        strategy.sortByPriority(context);
+
+        assertEquals("MAT-L", context.getContinuousSkuList().get(0).getMaterialCode());
+        assertEquals(1, context.getScheduleLogList().size());
+        LhScheduleProcessLog processLog = context.getScheduleLogList().get(0);
+        assertEquals("续作SKU排序明细", processLog.getTitle());
+        assertTrue(processLog.getLogDetail().contains("MAT-L"));
+        assertTrue(processLog.getLogDetail().contains("MAT-N"));
+        assertTrue(processLog.getLogDetail().contains("锁交期"));
+        assertTrue(processLog.getLogDetail().indexOf("MAT-L") < processLog.getLogDetail().indexOf("MAT-N"));
     }
 
     private LhScheduleContext contextWithNewSpec(SkuScheduleDTO... skus) {

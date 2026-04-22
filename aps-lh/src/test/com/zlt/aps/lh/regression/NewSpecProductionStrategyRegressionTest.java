@@ -1,11 +1,14 @@
 package com.zlt.aps.lh.regression;
 
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
+import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
@@ -13,6 +16,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultMachineMatchStrategy;
+import com.zlt.aps.lh.engine.strategy.impl.LocalSearchMachineAllocatorStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.NewSpecProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
@@ -22,10 +26,13 @@ import java.lang.reflect.Field;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 新增排产回归：首选机台窗口内无产能时，应继续尝试后续候选机台，避免直接误判未排产。
@@ -458,6 +465,110 @@ class NewSpecProductionStrategyRegressionTest {
                 "新增排产应复用更新后的选机优先级，先按收尾时间比较");
     }
 
+    @Test
+    void scheduleNewSpecs_shouldWriteMachineDecisionTraceLogWhenEnabled() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Map<String, String> scheduleParamMap = new HashMap<>(4);
+        scheduleParamMap.put(LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG, "1");
+        scheduleParamMap.put(LhScheduleParamConstant.ENABLE_LOCAL_SEARCH, "0");
+        context.setScheduleConfig(new LhScheduleConfig(scheduleParamMap));
+        SkuScheduleDTO sku = buildSku();
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("M-TRACE");
+        machine.setMachineName("跟踪机台");
+        machine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size());
+        assertEquals(1, context.getScheduleLogList().size());
+        LhScheduleProcessLog processLog = context.getScheduleLogList().get(0);
+        assertEquals("新增排产机台决策", processLog.getTitle());
+        assertTrue(processLog.getLogDetail().contains("MAT-1"));
+        assertTrue(processLog.getLogDetail().contains("M-TRACE"));
+        assertTrue(processLog.getLogDetail().contains("决策结果=成功"));
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldControlTraceLogVolumeWhenLocalSearchAndTraceEnabled() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Map<String, String> scheduleParamMap = new HashMap<>(8);
+        scheduleParamMap.put(LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG, "1");
+        scheduleParamMap.put(LhScheduleParamConstant.ENABLE_LOCAL_SEARCH, "1");
+        scheduleParamMap.put(LhScheduleParamConstant.LOCAL_SEARCH_MACHINE_THRESHOLD, "10");
+        scheduleParamMap.put(LhScheduleParamConstant.LOCAL_SEARCH_DEPTH, "2");
+        scheduleParamMap.put(LhScheduleParamConstant.LOCAL_SEARCH_TIME_BUDGET_MS, "200");
+        context.setScheduleConfig(new LhScheduleConfig(scheduleParamMap));
+
+        SkuScheduleDTO firstSku = buildSku();
+        SkuScheduleDTO secondSku = buildSku();
+        secondSku.setMaterialCode("MAT-2");
+        secondSku.setMaterialDesc("测试物料2");
+        context.getNewSpecSkuList().add(firstSku);
+        context.getNewSpecSkuList().add(secondSku);
+
+        MachineScheduleDTO firstMachine = new MachineScheduleDTO();
+        firstMachine.setMachineCode("M-LS-1");
+        firstMachine.setMachineName("局部搜索机台1");
+        firstMachine.setStatus("1");
+        firstMachine.setMaxMoldNum(1);
+        firstMachine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+        firstMachine.setPreviousSpecCode("11R22.5");
+        firstMachine.setPreviousProSize("22.5");
+        firstMachine.setPreviousMaterialCode("MAT-PREV-1");
+
+        MachineScheduleDTO secondMachine = new MachineScheduleDTO();
+        secondMachine.setMachineCode("M-LS-2");
+        secondMachine.setMachineName("局部搜索机台2");
+        secondMachine.setStatus("1");
+        secondMachine.setMaxMoldNum(1);
+        secondMachine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 30));
+        secondMachine.setPreviousSpecCode("11R22.5");
+        secondMachine.setPreviousProSize("22.5");
+        secondMachine.setPreviousMaterialCode("MAT-PREV-2");
+
+        context.getMachineScheduleMap().put(firstMachine.getMachineCode(), firstMachine);
+        context.getMachineScheduleMap().put(secondMachine.getMachineCode(), secondMachine);
+
+        MdmMaterialInfo prevMaterial1 = new MdmMaterialInfo();
+        prevMaterial1.setMaterialCode("MAT-PREV-1");
+        prevMaterial1.setEmbryoDesc("胎胚-A");
+        context.getMaterialInfoMap().put(prevMaterial1.getMaterialCode(), prevMaterial1);
+
+        MdmMaterialInfo prevMaterial2 = new MdmMaterialInfo();
+        prevMaterial2.setMaterialCode("MAT-PREV-2");
+        prevMaterial2.setEmbryoDesc("胎胚-B");
+        context.getMaterialInfoMap().put(prevMaterial2.getMaterialCode(), prevMaterial2);
+
+        strategy.scheduleNewSpecs(context, new DefaultMachineMatchStrategy(), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(2, context.getScheduleResultList().size());
+        int candidateTraceLogCount = 0;
+        int decisionTraceLogCount = 0;
+        for (LhScheduleProcessLog processLog : context.getScheduleLogList()) {
+            if ("新增排产候选机台排序明细".equals(processLog.getTitle())) {
+                candidateTraceLogCount++;
+            }
+            if ("新增排产机台决策".equals(processLog.getTitle())) {
+                decisionTraceLogCount++;
+            }
+        }
+        assertEquals(2, candidateTraceLogCount,
+                "启用局部搜索后，候选机台日志应按真实SKU决策输出，不应写入DFS模拟分支日志");
+        assertEquals(2, decisionTraceLogCount, "应为每个真实决策SKU输出一条机台决策日志");
+        assertEquals(4, context.getScheduleLogList().size(), "日志数量应受控在真实决策口径内");
+    }
+
     private LhScheduleContext buildContext() {
         LhScheduleContext context = new LhScheduleContext();
         Date scheduleDate = dateTime(2026, 4, 17, 0, 0);
@@ -586,6 +697,10 @@ class NewSpecProductionStrategyRegressionTest {
         Field targetResolverField = NewSpecProductionStrategy.class.getDeclaredField("targetScheduleQtyResolver");
         targetResolverField.setAccessible(true);
         targetResolverField.set(strategy, new TargetScheduleQtyResolver());
+
+        Field localSearchField = NewSpecProductionStrategy.class.getDeclaredField("localSearchMachineAllocator");
+        localSearchField.setAccessible(true);
+        localSearchField.set(strategy, new LocalSearchMachineAllocatorStrategy());
     }
 
     private static Date dateTime(int year, int month, int day, int hour, int minute) {

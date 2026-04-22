@@ -114,4 +114,6 @@ public final class LhScheduleParamConstant {
     public static final String LOCAL_SEARCH_DEPTH = "LOCAL_SEARCH_DEPTH";
     /** 局部搜索单次耗时预算（毫秒） */
     public static final String LOCAL_SEARCH_TIME_BUDGET_MS = "LOCAL_SEARCH_TIME_BUDGET_MS";
+    /** 优先级跟踪日志开关（0-关闭，1-开启） */
+    public static final String ENABLE_PRIORITY_TRACE_LOG = "ENABLE_PRIORITY_TRACE_LOG";
 }

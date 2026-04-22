@@ -248,4 +248,9 @@ public class LhScheduleConfig {
         return Math.max(1, getParamIntValue(LhScheduleParamConstant.LOCAL_SEARCH_TIME_BUDGET_MS,
                 LhScheduleConstant.LOCAL_SEARCH_TIME_BUDGET_MS));
     }
+
+    public boolean isPriorityTraceLogEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG,
+                LhScheduleConstant.ENABLE_PRIORITY_TRACE_LOG) == 1;
+    }
 }

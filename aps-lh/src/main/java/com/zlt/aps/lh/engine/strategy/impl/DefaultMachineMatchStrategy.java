@@ -11,6 +11,7 @@ import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.util.MachineStatusUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.PriorityTraceLogHelper;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import lombok.extern.slf4j.Slf4j;
@@ -57,16 +58,26 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         // 4. 过滤候选机台：状态启用 + 寸口范围匹配 + 模具兼容 + 模具未被占用
         BigDecimal skuInch = parseInch(sku.getProSize());
         List<MachineScheduleDTO> candidates = new ArrayList<>();
+        MachineFilterTrace trace = new MachineFilterTrace(context.getMachineScheduleMap().size());
 
         for (MachineScheduleDTO machine : context.getMachineScheduleMap().values()) {
-            if (canProduceSku(allowedMachineCodes, machine)
-                    && isMachineAvailable(sku, skuMouldCodes, occupiedMouldCodes, skuInch, machine)) {
-                candidates.add(machine);
+            if (!canProduceSku(allowedMachineCodes, machine)) {
+                trace.allowedMachineFilteredCount++;
+                trace.recordFilteredMachine(machine, "定点机台限制");
+                continue;
             }
+            MachineAvailabilityReason availabilityReason = resolveMachineAvailabilityReason(
+                    sku, skuMouldCodes, occupiedMouldCodes, skuInch, machine);
+            if (MachineAvailabilityReason.AVAILABLE != availabilityReason) {
+                trace.recordAvailabilityReason(machine, availabilityReason);
+                continue;
+            }
+            candidates.add(machine);
         }
 
         // 5. 按多维度排序
         sortCandidates(context, candidates, sku);
+        traceMachineCandidates(context, sku, candidates, trace);
 
         log.debug("SKU: {} 匹配到 {} 台候选机台", sku.getMaterialCode(), candidates.size());
         return candidates;
@@ -161,16 +172,18 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
      * @param machine 候选机台
      * @return true-可用，false-不可用
      */
-    private boolean isMachineAvailable(SkuScheduleDTO sku, List<String> skuMouldCodes,
-                                       Set<String> occupiedMouldCodes, BigDecimal skuInch,
-                                       MachineScheduleDTO machine) {
+    private MachineAvailabilityReason resolveMachineAvailabilityReason(SkuScheduleDTO sku, List<String> skuMouldCodes,
+                                                                      Set<String> occupiedMouldCodes, BigDecimal skuInch,
+                                                                      MachineScheduleDTO machine) {
         if (!MachineStatusUtil.isEnabled(machine.getStatus())) {
-            return false;
+            return MachineAvailabilityReason.DISABLED;
         }
         if (!isInchInRange(skuInch, machine.getDimensionMinimum(), machine.getDimensionMaximum())) {
-            return false;
+            return MachineAvailabilityReason.INCH_MISMATCH;
         }
-        return isMouldCompatible(sku, skuMouldCodes, machine, occupiedMouldCodes);
+        return isMouldCompatible(sku, skuMouldCodes, machine, occupiedMouldCodes)
+                ? MachineAvailabilityReason.AVAILABLE
+                : MachineAvailabilityReason.MOULD_CONFLICT;
     }
 
     /**
@@ -523,5 +536,112 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
             return Double.MAX_VALUE;
         }
         return skuInch.subtract(machineInch).abs().doubleValue();
+    }
+
+    /**
+     * 输出候选机台排序跟踪日志。
+     *
+     * @param context 排程上下文
+     * @param sku 待排SKU
+     * @param candidates 候选机台
+     * @param trace 过滤统计
+     */
+    private void traceMachineCandidates(LhScheduleContext context, SkuScheduleDTO sku,
+                                        List<MachineScheduleDTO> candidates, MachineFilterTrace trace) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "新增排产候选机台排序明细";
+        StringBuilder detailBuilder = new StringBuilder(1024);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "SKU=" + PriorityTraceLogHelper.safeText(sku.getMaterialCode())
+                        + ", 规格=" + PriorityTraceLogHelper.safeText(sku.getSpecCode())
+                        + ", 寸口=" + PriorityTraceLogHelper.safeText(sku.getProSize()));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "候选过滤概况: 机台总数=" + trace.totalMachineCount
+                        + ", 定点限制过滤=" + trace.allowedMachineFilteredCount
+                        + ", 机台禁用过滤=" + trace.disabledCount
+                        + ", 寸口不符过滤=" + trace.inchMismatchCount
+                        + ", 模具占用过滤=" + trace.mouldConflictCount
+                        + ", 候选数=" + PriorityTraceLogHelper.sizeOf(candidates));
+        if (!CollectionUtils.isEmpty(trace.filteredMachineMessages)) {
+            PriorityTraceLogHelper.appendLine(detailBuilder,
+                    "过滤明细: " + String.join("; ", trace.filteredMachineMessages));
+        }
+        PriorityTraceLogHelper.appendLine(detailBuilder, "TOP5候选排序:");
+        int topCount = Math.min(PriorityTraceLogHelper.MACHINE_TRACE_TOP_N, PriorityTraceLogHelper.sizeOf(candidates));
+        for (int i = 0; i < topCount; i++) {
+            MachineScheduleDTO machine = candidates.get(i);
+            PriorityTraceLogHelper.appendLine(detailBuilder,
+                    (i + 1)
+                            + ". 机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                            + ", 名称=" + PriorityTraceLogHelper.safeText(machine.getMachineName())
+                            + ", 收尾时间=" + PriorityTraceLogHelper.formatDateTime(machine.getEstimatedEndTime())
+                            + ", 同规格=" + PriorityTraceLogHelper.yesNo(resolveSpecMatchScore(sku, machine) == 0)
+                            + ", 同英寸=" + PriorityTraceLogHelper.yesNo(resolveProSizeMatchScore(sku, machine) == 0)
+                            + ", 英寸差=" + resolveInchDistance(sku, machine)
+                            + ", 胶囊共用=" + PriorityTraceLogHelper.yesNo(resolveCapsuleAffinityScore(context, sku, machine) == 0)
+                            + ", 胎胚共用数=" + resolveEmbryoShareCount(context, machine)
+                            + ", 机台顺序号=" + machine.getMachineOrder());
+        }
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
+    }
+
+    /**
+     * 机台不可用原因枚举。
+     */
+    private enum MachineAvailabilityReason {
+        AVAILABLE,
+        DISABLED,
+        INCH_MISMATCH,
+        MOULD_CONFLICT
+    }
+
+    /**
+     * 候选机台过滤统计。
+     */
+    private static class MachineFilterTrace {
+        /** 机台总数 */
+        private final int totalMachineCount;
+        /** 定点限制过滤数 */
+        private int allowedMachineFilteredCount;
+        /** 禁用过滤数 */
+        private int disabledCount;
+        /** 寸口不符过滤数 */
+        private int inchMismatchCount;
+        /** 模具冲突过滤数 */
+        private int mouldConflictCount;
+        /** 过滤明细 */
+        private final List<String> filteredMachineMessages = new ArrayList<>(8);
+
+        private MachineFilterTrace(int totalMachineCount) {
+            this.totalMachineCount = totalMachineCount;
+        }
+
+        private void recordFilteredMachine(MachineScheduleDTO machine, String reason) {
+            filteredMachineMessages.add(buildMachineMessage(machine, reason));
+        }
+
+        private void recordAvailabilityReason(MachineScheduleDTO machine, MachineAvailabilityReason reason) {
+            if (MachineAvailabilityReason.DISABLED == reason) {
+                disabledCount++;
+                recordFilteredMachine(machine, "机台禁用");
+            } else if (MachineAvailabilityReason.INCH_MISMATCH == reason) {
+                inchMismatchCount++;
+                recordFilteredMachine(machine, "寸口不匹配");
+            } else if (MachineAvailabilityReason.MOULD_CONFLICT == reason) {
+                mouldConflictCount++;
+                recordFilteredMachine(machine, "模具占用");
+            }
+        }
+
+        private String buildMachineMessage(MachineScheduleDTO machine, String reason) {
+            StringBuilder builder = new StringBuilder(64);
+            builder.append(PriorityTraceLogHelper.safeText(machine.getMachineCode()))
+                    .append('[').append(reason).append(']');
+            return builder.toString();
+        }
     }
 }

@@ -24,6 +24,7 @@ import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.PriorityTraceLogHelper;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
@@ -91,6 +92,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 .filter(m -> m.isEnding() && m.getEstimatedEndTime() != null)
                 .sorted(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime))
                 .collect(Collectors.toList());
+        traceEndingMachineOrder(context, endingMachines);
 
         for (MachineScheduleDTO machine : endingMachines) {
             // 按当前业务要求，先停用同产品结构直续逻辑，保留代码便于后续恢复。
@@ -102,12 +104,24 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             // }
 
             // 续作收尾机台候选SKU按“同胎胚描述+同主花纹 -> 同规格”分层筛选。
-            SkuScheduleDTO typeBlockSku = findPriorityTypeBlockSku(context, machine);
+            List<SkuScheduleDTO> priorityOneCandidates = filterSameEmbryoDescAndMainPatternCandidates(context, machine);
+            List<SkuScheduleDTO> priorityTwoCandidates = CollectionUtils.isEmpty(priorityOneCandidates)
+                    ? filterSameSpecCandidates(context, machine) : new ArrayList<SkuScheduleDTO>(0);
+            SkuScheduleDTO typeBlockSku = !CollectionUtils.isEmpty(priorityOneCandidates)
+                    ? selectPreferredSkuFromCandidates(context, priorityOneCandidates)
+                    : selectPreferredSkuFromCandidates(context, priorityTwoCandidates);
+            String matchedLayer = !CollectionUtils.isEmpty(priorityOneCandidates) ? "第一层"
+                    : (!CollectionUtils.isEmpty(priorityTwoCandidates) ? "第二层" : "未命中");
             if (typeBlockSku == null) {
                 // 两级都未命中时，本轮不再给该收尾机台补衔接SKU。
+                traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                        null, matchedLayer, false, null);
                 continue;
             }
-            appendFollowUpResult(context, machine, typeBlockSku, calcTypeBlockStartTime(context, machine), shifts, true);
+            Date typeBlockStartTime = calcTypeBlockStartTime(context, machine);
+            boolean success = appendFollowUpResult(context, machine, typeBlockSku, typeBlockStartTime, shifts, true);
+            traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                    typeBlockSku, matchedLayer, success, typeBlockStartTime);
         }
     }
 
@@ -140,8 +154,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
                 // 如果是收尾，更新机台收尾信息
                 if (isEnding && result.getSpecEndTime() != null) {
+                    Date actualCompletionTime = resolveActualCompletionTime(context, result);
                     machine.setEnding(true);
-                    machine.setEstimatedEndTime(resolveActualCompletionTime(context, result));
+                    machine.setEstimatedEndTime(actualCompletionTime);
+                    traceContinuousEndingUpdate(context, machine, sku, result, actualCompletionTime);
                 }
             }
         }
@@ -524,6 +540,129 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 typeBlock ? "换活字块" : "同产品结构续作",
                 machine.getMachineCode(), sku.getMaterialCode());
         return true;
+    }
+
+    /**
+     * 输出续作收尾时间回写日志。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param sku 续作SKU
+     * @param result 排产结果
+     * @param actualCompletionTime 实际完工时间
+     */
+    private void traceContinuousEndingUpdate(LhScheduleContext context, MachineScheduleDTO machine,
+                                             SkuScheduleDTO sku, LhScheduleResult result,
+                                             Date actualCompletionTime) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "续作收尾真实时间回写";
+        StringBuilder detailBuilder = new StringBuilder(256);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                        + ", SKU=" + PriorityTraceLogHelper.safeText(sku.getMaterialCode())
+                        + ", 是否收尾=" + PriorityTraceLogHelper.yesNo(machine.isEnding()));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "结果specEndTime=" + PriorityTraceLogHelper.formatDateTime(result.getSpecEndTime())
+                        + ", 回写estimatedEndTime=" + PriorityTraceLogHelper.formatDateTime(actualCompletionTime));
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
+    }
+
+    /**
+     * 输出收尾机台排序总览日志。
+     *
+     * @param context 排程上下文
+     * @param endingMachines 收尾机台列表
+     */
+    private void traceEndingMachineOrder(LhScheduleContext context, List<MachineScheduleDTO> endingMachines) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "收尾机台排序总览";
+        StringBuilder detailBuilder = new StringBuilder(512);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "收尾机台数=" + PriorityTraceLogHelper.sizeOf(endingMachines));
+        int index = 1;
+        for (MachineScheduleDTO machine : endingMachines) {
+            Date estimatedEndTime = machine.getEstimatedEndTime();
+            PriorityTraceLogHelper.appendLine(detailBuilder,
+                    index++
+                            + ". 机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                            + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
+                            + ", 真实收尾时间=" + PriorityTraceLogHelper.formatDateTime(estimatedEndTime)
+                            + ", 实际切换起点=" + PriorityTraceLogHelper.formatDateTime(
+                            resolveAllowedSwitchStartTime(context, estimatedEndTime)));
+        }
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
+    }
+
+    /**
+     * 输出单机台续作衔接决策日志。
+     *
+     * @param context 排程上下文
+     * @param machine 收尾机台
+     * @param priorityOneCandidates 第一层候选
+     * @param priorityTwoCandidates 第二层候选
+     * @param selectedSku 选中SKU
+     * @param matchedLayer 命中层级
+     * @param success 是否成功
+     * @param startTime 开产时间
+     */
+    private void traceTypeBlockDecision(LhScheduleContext context, MachineScheduleDTO machine,
+                                        List<SkuScheduleDTO> priorityOneCandidates,
+                                        List<SkuScheduleDTO> priorityTwoCandidates,
+                                        SkuScheduleDTO selectedSku,
+                                        String matchedLayer,
+                                        boolean success,
+                                        Date startTime) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "收尾机台衔接决策";
+        StringBuilder detailBuilder = new StringBuilder(512);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                        + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
+                        + ", 真实收尾时间=" + PriorityTraceLogHelper.formatDateTime(machine.getEstimatedEndTime()));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "第一层候选(同胎胚描述+同主花纹)=" + buildSkuCodeSummary(priorityOneCandidates));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "第二层候选(同规格)=" + buildSkuCodeSummary(priorityTwoCandidates));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "命中层级=" + PriorityTraceLogHelper.safeText(matchedLayer)
+                        + ", 选中SKU=" + PriorityTraceLogHelper.safeText(
+                        selectedSku == null ? null : selectedSku.getMaterialCode())
+                        + ", 是否换活字块=" + PriorityTraceLogHelper.yesNo(selectedSku != null));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "衔接结果=" + (success ? "成功" : "未衔接")
+                        + ", 换活字块开始时间=" + PriorityTraceLogHelper.formatDateTime(
+                        startTime == null ? null : resolveTypeBlockChangeStartTime(context, startTime))
+                        + ", 开产时间=" + PriorityTraceLogHelper.formatDateTime(startTime));
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
+    }
+
+    /**
+     * 组装候选SKU编码摘要。
+     *
+     * @param skuList SKU列表
+     * @return 摘要文本
+     */
+    private String buildSkuCodeSummary(List<SkuScheduleDTO> skuList) {
+        if (CollectionUtils.isEmpty(skuList)) {
+            return "-";
+        }
+        List<String> materialCodes = new ArrayList<>(skuList.size());
+        for (SkuScheduleDTO sku : skuList) {
+            materialCodes.add(PriorityTraceLogHelper.safeText(sku.getMaterialCode()));
+        }
+        return String.join(",", materialCodes);
     }
 
     /**

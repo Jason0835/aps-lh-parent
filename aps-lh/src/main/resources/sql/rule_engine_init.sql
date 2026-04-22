@@ -88,7 +88,10 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 ('116', 'ENABLE_LOCAL_SEARCH', '1', '局部搜索开关', '0-关闭，1-开启'),
 ('116', 'LOCAL_SEARCH_MACHINE_THRESHOLD', '10', '局部搜索候选机台阈值', '候选机台数小于该值时启用'),
 ('116', 'LOCAL_SEARCH_DEPTH', '3', '局部搜索深度', '包含当前 SKU 的回看深度'),
-('116', 'LOCAL_SEARCH_TIME_BUDGET_MS', '50', '局部搜索耗时预算', '单位：毫秒')
+('116', 'LOCAL_SEARCH_TIME_BUDGET_MS', '50', '局部搜索耗时预算', '单位：毫秒'),
+
+-- ======================== 优先级跟踪日志规则 ========================
+('116', 'ENABLE_PRIORITY_TRACE_LOG', '0', '优先级跟踪日志开关', '0-关闭，1-开启')
 ;
 
 -- 工厂 F002 的规则配置示例（如有需要）

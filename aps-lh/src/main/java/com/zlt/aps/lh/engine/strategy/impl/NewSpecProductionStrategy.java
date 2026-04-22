@@ -26,6 +26,7 @@ import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.PriorityTraceLogHelper;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
@@ -154,6 +155,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             // 1. 匹配候选机台
             List<MachineScheduleDTO> candidates = machineMatch.matchMachines(context, sku);
             if (candidates.isEmpty()) {
+                traceNewSpecMachineDecision(context, sku, candidates, null, null,
+                        new HashSet<String>(0), NewSpecFailReasonEnum.MACHINE_SELECTION_FAILED,
+                        false, false, "无可用硫化机台");
                 addUnscheduledResult(context, sku, "无可用硫化机台", unscheduledReasonCountMap);
                 iterator.remove();
                 continue;
@@ -169,13 +173,18 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             NewSpecFailReasonEnum failReason = NewSpecFailReasonEnum.MACHINE_SELECTION_FAILED;
             Set<String> excludedMachineCodes = new HashSet<>(candidates.size());
             Integer originalTargetScheduleQty = sku.getTargetScheduleQty();
+            MachineScheduleDTO finalMachine = null;
+            Date finalProductionStartTime = null;
+            boolean finalUsedPreferredMachine = false;
             while (true) {
                 MachineScheduleDTO candidateMachine;
+                boolean selectedFromPreferredMachine = false;
                 if (!preferredMachineTried && preferredMachine != null
                         && StringUtils.isNotEmpty(preferredMachine.getMachineCode())
                         && !excludedMachineCodes.contains(preferredMachine.getMachineCode())) {
                     candidateMachine = preferredMachine;
                     preferredMachineTried = true;
+                    selectedFromPreferredMachine = true;
                 } else {
                     candidateMachine = machineMatch.selectBestMachine(
                             context, sku, candidates, excludedMachineCodes);
@@ -255,6 +264,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 updateMachineState(context, candidateMachine, sku, result);
                 registerMachineAssignment(context, machineCode, result);
                 scheduledCount++;
+                finalMachine = candidateMachine;
+                finalProductionStartTime = productionStartTime;
+                finalUsedPreferredMachine = selectedFromPreferredMachine;
                 iterator.remove();
                 scheduled = true;
                 log.debug("新增排产完成, SKU: {}, 机台: {}, 机台就绪: {}, 换模开始: {}, 换模结束: {}, 首检开始: {}, 开产时间: {}",
@@ -269,8 +281,14 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
             if (!scheduled) {
                 // 所有候选机台都失败，记录未排产原因并移出待排队列
+                traceNewSpecMachineDecision(context, sku, candidates, preferredMachine, null,
+                        excludedMachineCodes, failReason, false, false, null);
                 addUnscheduledResult(context, sku, failReason.getDescription(), unscheduledReasonCountMap);
                 iterator.remove();
+            } else {
+                traceNewSpecMachineDecision(context, sku, candidates, preferredMachine, finalMachine,
+                        excludedMachineCodes, null, true, finalUsedPreferredMachine,
+                        PriorityTraceLogHelper.formatDateTime(finalProductionStartTime));
             }
         }
         log.info("新增排产完成, 成功: {}, 未排: {}, 原因分布: {}",
@@ -341,6 +359,61 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             return false;
         }
         return candidates.size() < scheduleConfig.getLocalSearchMachineThreshold();
+    }
+
+    /**
+     * 输出新增排产机台决策跟踪日志。
+     *
+     * @param context 排程上下文
+     * @param sku 当前SKU
+     * @param candidates 候选机台
+     * @param preferredMachine 局部搜索首选机台
+     * @param finalMachine 最终机台
+     * @param excludedMachineCodes 已排除机台
+     * @param failReason 失败原因
+     * @param success 是否成功
+     * @param usedPreferredMachine 是否使用局部搜索首选
+     * @param startTimeText 开产时间文本或附加说明
+     */
+    private void traceNewSpecMachineDecision(LhScheduleContext context, SkuScheduleDTO sku,
+                                             List<MachineScheduleDTO> candidates,
+                                             MachineScheduleDTO preferredMachine,
+                                             MachineScheduleDTO finalMachine,
+                                             Set<String> excludedMachineCodes,
+                                             NewSpecFailReasonEnum failReason,
+                                             boolean success,
+                                             boolean usedPreferredMachine,
+                                             String startTimeText) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "新增排产机台决策";
+        StringBuilder detailBuilder = new StringBuilder(512);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "SKU=" + PriorityTraceLogHelper.safeText(sku.getMaterialCode())
+                        + ", 候选数=" + PriorityTraceLogHelper.sizeOf(candidates)
+                        + ", 启用局部搜索首选=" + PriorityTraceLogHelper.yesNo(preferredMachine != null));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "局部搜索首选机台=" + PriorityTraceLogHelper.safeText(
+                        preferredMachine == null ? null : preferredMachine.getMachineCode())
+                        + ", 最终选中机台=" + PriorityTraceLogHelper.safeText(
+                        finalMachine == null ? null : finalMachine.getMachineCode())
+                        + ", 实际采用首选=" + PriorityTraceLogHelper.yesNo(usedPreferredMachine));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "已排除机台=" + (CollectionUtils.isEmpty(excludedMachineCodes)
+                        ? "-" : String.join(",", excludedMachineCodes)));
+        if (success) {
+            PriorityTraceLogHelper.appendLine(detailBuilder,
+                    "决策结果=成功, 开产时间=" + PriorityTraceLogHelper.safeText(startTimeText));
+        } else {
+            PriorityTraceLogHelper.appendLine(detailBuilder,
+                    "决策结果=失败, 原因=" + PriorityTraceLogHelper.safeText(
+                            failReason == null ? null : failReason.getDescription())
+                            + ", 备注=" + PriorityTraceLogHelper.safeText(startTimeText));
+        }
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
     }
 
     /**

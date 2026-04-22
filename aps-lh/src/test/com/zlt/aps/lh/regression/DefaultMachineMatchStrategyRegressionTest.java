@@ -1,7 +1,10 @@
 package com.zlt.aps.lh.regression;
 
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
+import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultMachineMatchStrategy;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
@@ -9,6 +12,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -16,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 机台匹配回归：SKU存在多条模具关系时，不应把关系条数误当成待选前的用模数。
@@ -185,6 +190,43 @@ class DefaultMachineMatchStrategyRegressionTest {
                 "规格组缺失时，应回退按英寸组判断胶囊共用性");
     }
 
+    @Test
+    void matchMachines_shouldWritePriorityTraceLogWhenEnabled() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildTraceContext();
+
+        MachineScheduleDTO enabledMachine = machine("M-TRACE-1", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-A");
+        enabledMachine.setMachineName("优先机台");
+        MachineScheduleDTO fallbackMachine = machine("M-TRACE-2", dateTime(2026, 4, 21, 8, 15),
+                "SPEC-X", "22.5", "MAT-B");
+        fallbackMachine.setMachineName("兜底机台");
+        MachineScheduleDTO disabledMachine = machine("M-DISABLED", dateTime(2026, 4, 21, 7, 0),
+                "SPEC-A", "22.5", "MAT-C");
+        disabledMachine.setStatus("0");
+        context.getMachineScheduleMap().put(enabledMachine.getMachineCode(), enabledMachine);
+        context.getMachineScheduleMap().put(fallbackMachine.getMachineCode(), fallbackMachine);
+        context.getMachineScheduleMap().put(disabledMachine.getMachineCode(), disabledMachine);
+
+        material(context, "MAT-A", "胎胚-A");
+        material(context, "MAT-B", "胎胚-B");
+        context.setEmbryoDescMaterialCountMap(Collections.singletonMap("胎胚-A", 2));
+
+        SkuScheduleDTO sku = sku("MAT-TRACE", "SPEC-A", "22.5");
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku);
+
+        assertEquals(2, candidates.size());
+        assertEquals(1, context.getScheduleLogList().size());
+        LhScheduleProcessLog processLog = context.getScheduleLogList().get(0);
+        assertEquals("新增排产候选机台排序明细", processLog.getTitle());
+        assertTrue(processLog.getLogDetail().contains("候选过滤概况"));
+        assertTrue(processLog.getLogDetail().contains("M-TRACE-1"));
+        assertTrue(processLog.getLogDetail().contains("M-TRACE-2"));
+        assertTrue(processLog.getLogDetail().contains("M-DISABLED"));
+        assertTrue(processLog.getLogDetail().contains("TOP5"));
+    }
+
     private MdmSkuMouldRel mouldRel(String mouldCode) {
         MdmSkuMouldRel rel = new MdmSkuMouldRel();
         rel.setMouldCode(mouldCode);
@@ -196,6 +238,15 @@ class DefaultMachineMatchStrategyRegressionTest {
         context.setMachineScheduleMap(new LinkedHashMap<String, MachineScheduleDTO>());
         context.setMachineAssignmentMap(new LinkedHashMap<String, List<com.zlt.aps.lh.api.domain.entity.LhScheduleResult>>());
         context.setMaterialInfoMap(new HashMap<String, MdmMaterialInfo>());
+        return context;
+    }
+
+    private LhScheduleContext buildTraceContext() {
+        LhScheduleContext context = buildContext();
+        context.setFactoryCode("116");
+        context.setBatchNo("TRACE-BATCH");
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG, "1")));
         return context;
     }
 

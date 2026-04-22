@@ -4,6 +4,7 @@ import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.context.LhScheduleConfig;
@@ -34,6 +35,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
@@ -441,6 +443,50 @@ class ContinuousProductionTypeBlockRegressionTest {
                 "20:00及之后收尾应顺延到次日早班发起，再叠加换活字块总耗时");
     }
 
+    @Test
+    void scheduleTypeBlockChange_shouldWriteTraceLogsAfterActualEndTimeUpdate() {
+        LhScheduleContext context = newTraceContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getMachineScheduleMap().put("M2", buildMachine("M2", "MAT-C2"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C2", "M2", "EMB-2", "STRUCT-D", "SPEC-D", "PAT-D", 3));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 4));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T2", "EMB-2", "STRUCT-E", "SPEC-D", "PAT-E", 4));
+        putMaterialInfo(context, "MAT-C1", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-C2", "胎胚描述-B", "SPEC-D", "PAT-D", "PAT-D");
+        putMaterialInfo(context, "MAT-T1", "胎胚描述-A", "SPEC-A", "PAT-B", "PAT-B");
+        putMaterialInfo(context, "MAT-T2", "胎胚描述-B", "SPEC-D", "PAT-E", "PAT-E");
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-C2", "MOULD-2");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+        putMouldRel(context, "MAT-T2", "MOULD-2");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2", "ORD-3", "ORD-4");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return sku.getMaterialCode().startsWith("MAT-C");
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        strategy.scheduleTypeBlockChange(context);
+
+        assertTrue(context.getScheduleLogList().size() >= 4);
+        StringBuilder allLogText = new StringBuilder();
+        for (LhScheduleProcessLog scheduleLog : context.getScheduleLogList()) {
+            allLogText.append(scheduleLog.getTitle()).append('\n')
+                    .append(scheduleLog.getLogDetail()).append('\n');
+        }
+        String logText = allLogText.toString();
+        assertTrue(logText.contains("续作收尾真实时间回写"));
+        assertTrue(logText.contains("收尾机台排序总览"));
+        assertTrue(logText.contains("收尾机台衔接决策"));
+        assertTrue(logText.contains("M1"));
+        assertTrue(logText.contains("M2"));
+        assertTrue(logText.contains("MAT-T1"));
+        assertTrue(logText.contains("MAT-T2"));
+        assertTrue(logText.contains("第一层"));
+    }
+
     private LhScheduleContext newContext() {
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode("116");
@@ -449,6 +495,14 @@ class ContinuousProductionTypeBlockRegressionTest {
         context.setScheduleTargetDate(date(2026, 4, 20));
         context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
         context.setMachineScheduleMap(new LinkedHashMap<>());
+        return context;
+    }
+
+    private LhScheduleContext newTraceContext() {
+        LhScheduleContext context = newContext();
+        Map<String, String> paramMap = new HashMap<>(4);
+        paramMap.put(LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG, "1");
+        context.setScheduleConfig(new LhScheduleConfig(paramMap));
         return context;
     }
 

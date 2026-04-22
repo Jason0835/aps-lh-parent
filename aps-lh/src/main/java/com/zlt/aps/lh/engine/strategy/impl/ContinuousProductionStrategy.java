@@ -93,16 +93,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 .collect(Collectors.toList());
 
         for (MachineScheduleDTO machine : endingMachines) {
-            // 第一步：同产品结构直接续作，命中后本机台不再尝试换活字块。
-            SkuScheduleDTO sameStructureSku = findSameStructureContinuousSku(context, machine);
-            if (sameStructureSku != null
-                    && appendFollowUpResult(context, machine, sameStructureSku, machine.getEstimatedEndTime(), shifts, false)) {
-                continue;
-            }
+            // 按当前业务要求，先停用同产品结构直续逻辑，保留代码便于后续恢复。
+            // SkuScheduleDTO sameStructureSku = findSameStructureContinuousSku(context, machine);
+            // if (sameStructureSku != null
+            //         && appendFollowUpResult(context, machine, sameStructureSku,
+            //         machine.getEstimatedEndTime(), shifts, false)) {
+            //     continue;
+            // }
 
-            // 第二步：同胎胚同规格不同花纹，执行换活字块衔接。
-            SkuScheduleDTO typeBlockSku = findTypeBlockChangeSku(context, machine);
+            // 续作收尾机台候选SKU按“同胎胚描述+同主花纹 -> 同规格”分层筛选。
+            SkuScheduleDTO typeBlockSku = findPriorityTypeBlockSku(context, machine);
             if (typeBlockSku == null) {
+                // 两级都未命中时，本轮不再给该收尾机台补衔接SKU。
                 continue;
             }
             appendFollowUpResult(context, machine, typeBlockSku, calcTypeBlockStartTime(context, machine), shifts, true);
@@ -284,6 +286,71 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
+     * 续作收尾机台候选SKU分层筛选：同胎胚描述+同主花纹，其次同规格。
+     */
+    private SkuScheduleDTO findPriorityTypeBlockSku(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
+            return null;
+        }
+
+        // 命中更高优先级后直接返回，不再继续降级筛选。
+        List<SkuScheduleDTO> priorityOneCandidates = filterSameEmbryoDescAndMainPatternCandidates(context, machine);
+        if (!CollectionUtils.isEmpty(priorityOneCandidates)) {
+            return selectPreferredSkuFromCandidates(context, priorityOneCandidates);
+        }
+
+        List<SkuScheduleDTO> priorityTwoCandidates = filterSameSpecCandidates(context, machine);
+        if (!CollectionUtils.isEmpty(priorityTwoCandidates)) {
+            return selectPreferredSkuFromCandidates(context, priorityTwoCandidates);
+        }
+        return null;
+    }
+
+    /**
+     * 过滤同胎胚描述且同主花纹的候选SKU。
+     */
+    private List<SkuScheduleDTO> filterSameEmbryoDescAndMainPatternCandidates(LhScheduleContext context,
+                                                                              MachineScheduleDTO machine) {
+        List<SkuScheduleDTO> candidateList = new ArrayList<>(context.getNewSpecSkuList().size());
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            // 优先级1：同时命中胎胚描述和主花纹，才进入本层候选集。
+            if (isSameEmbryoDesc(context, machine, sku)
+                    && isSameMainPatternStrict(context, machine, sku)) {
+                candidateList.add(sku);
+            }
+        }
+        return candidateList;
+    }
+
+    /**
+     * 过滤同规格的候选SKU。
+     */
+    private List<SkuScheduleDTO> filterSameSpecCandidates(LhScheduleContext context, MachineScheduleDTO machine) {
+        List<SkuScheduleDTO> candidateList = new ArrayList<>(context.getNewSpecSkuList().size());
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (isSameSpec(context, machine, sku)) {
+                candidateList.add(sku);
+            }
+        }
+        return candidateList;
+    }
+
+    /**
+     * 复用现有候选优先级：收尾SKU优先，其次按列表顺序取首个。
+     */
+    private SkuScheduleDTO selectPreferredSkuFromCandidates(LhScheduleContext context, List<SkuScheduleDTO> candidates) {
+        if (CollectionUtils.isEmpty(candidates)) {
+            return null;
+        }
+        for (SkuScheduleDTO sku : candidates) {
+            if (endingJudgmentStrategy.isEnding(context, sku)) {
+                return sku;
+            }
+        }
+        return candidates.get(0);
+    }
+
+    /**
      * 判断SKU是否满足同产品结构直接续作。
      */
     private boolean isSameStructureContinuousCandidate(LhScheduleContext context,
@@ -325,6 +392,37 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         return StringUtils.isNotEmpty(machineEmbryoCode)
                 && StringUtils.isNotEmpty(sku.getEmbryoCode())
                 && StringUtils.equals(machineEmbryoCode, sku.getEmbryoCode());
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同胎胚描述。
+     */
+    private boolean isSameEmbryoDesc(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineEmbryoDesc = resolveMachineEmbryoDesc(context, machine);
+        String skuEmbryoDesc = resolveSkuEmbryoDesc(context, sku);
+        return StringUtils.isNotEmpty(machineEmbryoDesc)
+                && StringUtils.equals(machineEmbryoDesc, skuEmbryoDesc);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同主花纹（严格只看mainPattern）。
+     */
+    private boolean isSameMainPatternStrict(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineMainPattern = resolveMachineMainPatternStrict(context, machine);
+        String skuMainPattern = resolveSkuMainPatternStrict(context, sku);
+        // 主花纹按严格口径比较，不回退到普通花纹字段。
+        return StringUtils.isNotEmpty(machineMainPattern)
+                && StringUtils.equals(machineMainPattern, skuMainPattern);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同规格。
+     */
+    private boolean isSameSpec(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineSpecCode = normalizeCompareToken(resolveMachineSpecCode(context, machine));
+        String skuSpecCode = normalizeCompareToken(sku.getSpecCode());
+        return StringUtils.isNotEmpty(machineSpecCode)
+                && StringUtils.equals(machineSpecCode, skuSpecCode);
     }
 
     /**
@@ -1337,6 +1435,26 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         return currentSku != null ? currentSku.getEmbryoCode() : null;
     }
 
+    private String resolveMachineEmbryoDesc(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getEmbryoDesc())) {
+            return normalizeCompareToken(materialInfo.getEmbryoDesc());
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? normalizeCompareToken(currentSku.getMainMaterialDesc()) : null;
+    }
+
+    private String resolveSkuEmbryoDesc(LhScheduleContext context, SkuScheduleDTO sku) {
+        if (context == null || sku == null) {
+            return null;
+        }
+        MdmMaterialInfo materialInfo = context.getMaterialInfoMap().get(sku.getMaterialCode());
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getEmbryoDesc())) {
+            return normalizeCompareToken(materialInfo.getEmbryoDesc());
+        }
+        return normalizeCompareToken(sku.getMainMaterialDesc());
+    }
+
     private String resolveMachineSpecCode(LhScheduleContext context, MachineScheduleDTO machine) {
         if (StringUtils.isNotEmpty(machine.getPreviousSpecCode())) {
             return machine.getPreviousSpecCode();
@@ -1359,6 +1477,26 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             return null;
         }
         return resolvePatternKey(currentSku.getMainPattern(), currentSku.getPattern());
+    }
+
+    private String resolveMachineMainPatternStrict(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getMainPattern())) {
+            return normalizeCompareToken(materialInfo.getMainPattern());
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? normalizeCompareToken(currentSku.getMainPattern()) : null;
+    }
+
+    private String resolveSkuMainPatternStrict(LhScheduleContext context, SkuScheduleDTO sku) {
+        if (context == null || sku == null) {
+            return null;
+        }
+        MdmMaterialInfo materialInfo = context.getMaterialInfoMap().get(sku.getMaterialCode());
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getMainPattern())) {
+            return normalizeCompareToken(materialInfo.getMainPattern());
+        }
+        return normalizeCompareToken(sku.getMainPattern());
     }
 
     private String resolveMachineStructureKey(LhScheduleContext context, MachineScheduleDTO machine) {
@@ -1418,6 +1556,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             return mainPattern;
         }
         return StringUtils.isNotEmpty(pattern) ? pattern : null;
+    }
+
+    private String normalizeCompareToken(String value) {
+        if (StringUtils.isEmpty(value)) {
+            return null;
+        }
+        String normalizedValue = value.trim();
+        return StringUtils.isEmpty(normalizedValue) ? null : normalizedValue;
     }
 
     private String resolveMouldCode(LhScheduleContext context, String... materialCodes) {

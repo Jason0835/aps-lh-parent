@@ -15,6 +15,7 @@ import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
+import com.zlt.aps.lh.mapper.MdmCapsuleChuckMapper;
 import com.zlt.aps.lh.mapper.LhMachineOnlineInfoMapper;
 import com.zlt.aps.lh.mapper.LhRepairCapsuleMapper;
 import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
@@ -76,6 +77,8 @@ class ScheduleDataWindowRegressionTest {
     private LhScheFinishQtyMapper lhScheFinishQtyMapper;
     @Mock
     private MdmMaterialInfoMapper mdmMaterialInfoMapper;
+    @Mock
+    private MdmCapsuleChuckMapper mdmCapsuleChuckMapper;
     @Mock
     private LhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
     @Mock
@@ -285,6 +288,7 @@ class ScheduleDataWindowRegressionTest {
         when(monthSurplusMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhScheFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(mdmMaterialInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(mdmCapsuleChuckMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhSpecifyMachineMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhRepairCapsuleMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devMaintenancePlanMapper.selectList(any())).thenReturn(Collections.emptyList());

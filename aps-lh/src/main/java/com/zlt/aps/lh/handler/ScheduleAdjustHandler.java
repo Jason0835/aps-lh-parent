@@ -51,6 +51,10 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     /** 满排模式下无窗口计划量仍继续排产提示 */
     private static final String FULL_CAPACITY_WARN_TEMPLATE =
             "物料：%s 当前排程窗口没有计划量，但按产能满排模式生成排产目标量[%d]，继续排产";
+    /** 月计划最小自然日 */
+    private static final int MIN_DAY_OF_MONTH = 1;
+    /** 月计划最大自然日 */
+    private static final int MAX_DAY_OF_MONTH = 31;
 
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
@@ -377,24 +381,24 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 计算延迟上机天数。
+     * 基于月计划开始日期（BEGIN_DAY）计算延迟上机天数。
      *
      * @param context 排程上下文
      * @param plan 月生产计划
-     * @return 延迟天数；无首个计划日时返回 -1
+     * @return 延迟天数；BEGIN_DAY 为空或非法时返回 -1
      */
     private int resolveDelayDays(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
         if (context.getScheduleDate() == null) {
             return -1;
         }
-        int firstPlannedDay = MonthPlanDayQtyUtil.resolveFirstPlannedDay(plan);
-        if (firstPlannedDay < 0) {
+        Integer beginDay = plan != null ? plan.getBeginDay() : null;
+        if (beginDay == null || beginDay < MIN_DAY_OF_MONTH || beginDay > MAX_DAY_OF_MONTH) {
             return -1;
         }
         Calendar calendar = Calendar.getInstance();
         calendar.setTime(context.getScheduleDate());
         int scheduleDayOfMonth = calendar.get(Calendar.DAY_OF_MONTH);
-        return Math.max(scheduleDayOfMonth - firstPlannedDay, 0);
+        return Math.max(scheduleDayOfMonth - beginDay, 0);
     }
 
     /**

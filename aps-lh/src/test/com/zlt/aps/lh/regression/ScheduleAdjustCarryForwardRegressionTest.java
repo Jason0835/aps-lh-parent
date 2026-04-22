@@ -200,6 +200,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         plan.setStructureName("S-LOCK");
         plan.setSpecifications("SPEC-LOCK");
         plan.setTotalQty(200);
+        plan.setBeginDay(7);
         plan.setDay9(20);
         plan.setDay11(40);
         plan.setHeightProductionQty(11);
@@ -217,11 +218,48 @@ class ScheduleAdjustCarryForwardRegressionTest {
 
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S-LOCK").get(0);
         assertEquals(true, sku.isDeliveryLocked());
-        assertEquals(2, sku.getDelayDays());
+        assertEquals(4, sku.getDelayDays());
         assertEquals(11, sku.getHighPriorityPendingQty());
         assertEquals(9, sku.getCycleProductionPendingQty());
         assertEquals(7, sku.getMidPriorityPendingQty());
         assertEquals(5, sku.getConventionProductionPendingQty());
+    }
+
+    @Test
+    void doHandle_shouldSetDelayDaysToMinusOneWhenBeginDayMissingOrInvalid() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult missingBeginDayPlan = new FactoryMonthPlanProductionFinalResult();
+        missingBeginDayPlan.setMaterialCode("MAT-BEGIN-MISS");
+        missingBeginDayPlan.setMaterialDesc("MAT-BEGIN-MISS-DESC");
+        missingBeginDayPlan.setStructureName("S-BEGIN-MISS");
+        missingBeginDayPlan.setSpecifications("SPEC-BEGIN-MISS");
+        missingBeginDayPlan.setTotalQty(100);
+        missingBeginDayPlan.setDay11(30);
+
+        FactoryMonthPlanProductionFinalResult invalidBeginDayPlan = new FactoryMonthPlanProductionFinalResult();
+        invalidBeginDayPlan.setMaterialCode("MAT-BEGIN-INVALID");
+        invalidBeginDayPlan.setMaterialDesc("MAT-BEGIN-INVALID-DESC");
+        invalidBeginDayPlan.setStructureName("S-BEGIN-INVALID");
+        invalidBeginDayPlan.setSpecifications("SPEC-BEGIN-INVALID");
+        invalidBeginDayPlan.setTotalQty(100);
+        invalidBeginDayPlan.setBeginDay(0);
+        invalidBeginDayPlan.setDay11(30);
+
+        context.setMonthPlanList(Arrays.asList(missingBeginDayPlan, invalidBeginDayPlan));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO missingBeginDaySku = context.getStructureSkuMap().get("S-BEGIN-MISS").get(0);
+        SkuScheduleDTO invalidBeginDaySku = context.getStructureSkuMap().get("S-BEGIN-INVALID").get(0);
+        assertEquals(-1, missingBeginDaySku.getDelayDays());
+        assertEquals(-1, invalidBeginDaySku.getDelayDays());
     }
 
     @Test

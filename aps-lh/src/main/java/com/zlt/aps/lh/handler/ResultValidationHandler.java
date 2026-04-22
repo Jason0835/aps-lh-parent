@@ -158,10 +158,11 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             plan.setLhMachineName(result.getLhMachineName());
             plan.setLeftRightMould(LeftRightMouldUtil.resolveLeftRightMould(
                     result.getLeftRightMould(), result.getLhMachineCode()));
-            plan.setBeforeMaterialCode(state.getPreviousMaterialCode());
-            plan.setBeforeMaterialDesc(state.getPreviousMaterialDesc());
-            plan.setAfterMaterialCode(state.getCurrentMaterialCode());
-            plan.setAfterMaterialDesc(state.getCurrentMaterialDesc());
+            // 前规格取换模前机台当前在产规格，后规格取本次换模上机规格。
+            plan.setBeforeMaterialCode(state.getCurrentMaterialCode());
+            plan.setBeforeMaterialDesc(state.getCurrentMaterialDesc());
+            plan.setAfterMaterialCode(result.getMaterialCode());
+            plan.setAfterMaterialDesc(result.getMaterialDesc());
             plan.setMouldCode(result.getMouldCode());
             plan.setIsRelease("0");
             plan.setMouldStatus("0");

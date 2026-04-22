@@ -13,7 +13,6 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * 结果校验处理器左右模回归测试。
@@ -49,7 +48,7 @@ class ResultValidationHandlerLeftRightMouldRegressionTest {
     }
 
     @Test
-    void generateMouldChangePlan_shouldUseSnapshotMaterialForFirstPlan() {
+    void generateMouldChangePlan_shouldUseSnapshotAsBeforeAndResultAsAfterForFirstPlan() {
         ResultValidationHandler handler = new ResultValidationHandler();
         LhScheduleContext context = newContext();
         context.setMachineScheduleMap(new LinkedHashMap<>());
@@ -68,10 +67,10 @@ class ResultValidationHandlerLeftRightMouldRegressionTest {
         ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
         assertEquals(1, context.getMouldChangePlanList().size());
         LhMouldChangePlan plan = context.getMouldChangePlanList().get(0);
-        assertNull(plan.getBeforeMaterialCode());
-        assertNull(plan.getBeforeMaterialDesc());
-        assertEquals("MAT-ONLINE", plan.getAfterMaterialCode());
-        assertEquals("当前在机物料", plan.getAfterMaterialDesc());
+        assertEquals("MAT-ONLINE", plan.getBeforeMaterialCode());
+        assertEquals("当前在机物料", plan.getBeforeMaterialDesc());
+        assertEquals("MAT-NEW", plan.getAfterMaterialCode());
+        assertEquals("排程物料", plan.getAfterMaterialDesc());
     }
 
     @Test
@@ -98,16 +97,53 @@ class ResultValidationHandlerLeftRightMouldRegressionTest {
         assertEquals(2, context.getMouldChangePlanList().size());
 
         LhMouldChangePlan firstPlan = context.getMouldChangePlanList().get(0);
-        assertNull(firstPlan.getBeforeMaterialCode());
-        assertNull(firstPlan.getBeforeMaterialDesc());
-        assertEquals("MAT-ONLINE", firstPlan.getAfterMaterialCode());
-        assertEquals("当前在机物料", firstPlan.getAfterMaterialDesc());
+        assertEquals("MAT-ONLINE", firstPlan.getBeforeMaterialCode());
+        assertEquals("当前在机物料", firstPlan.getBeforeMaterialDesc());
+        assertEquals("MAT-A", firstPlan.getAfterMaterialCode());
+        assertEquals("物料A", firstPlan.getAfterMaterialDesc());
 
         LhMouldChangePlan secondPlan = context.getMouldChangePlanList().get(1);
-        assertEquals("MAT-ONLINE", secondPlan.getBeforeMaterialCode());
-        assertEquals("当前在机物料", secondPlan.getBeforeMaterialDesc());
-        assertEquals("MAT-A", secondPlan.getAfterMaterialCode());
-        assertEquals("物料A", secondPlan.getAfterMaterialDesc());
+        assertEquals("MAT-A", secondPlan.getBeforeMaterialCode());
+        assertEquals("物料A", secondPlan.getBeforeMaterialDesc());
+        assertEquals("MAT-B", secondPlan.getAfterMaterialCode());
+        assertEquals("物料B", secondPlan.getAfterMaterialDesc());
+    }
+
+    @Test
+    void generateMouldChangePlan_shouldKeepEndingToNewSkuFlowAcrossDays() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        context.setScheduleTargetDate(date(2026, 4, 23));
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.setInitialMachineScheduleMap(new LinkedHashMap<>());
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("K1113");
+        machine.setCurrentMaterialCode("MAT-MES");
+        machine.setCurrentMaterialDesc("MES在机物料");
+        context.getMachineScheduleMap().put("K1113", machine);
+        context.getInitialMachineScheduleMap().put("K1113", machine);
+
+        LhScheduleResult endingResult = buildChangeResult("K1113", "MAT-END", "收尾物料",
+                dateTime(2026, 4, 21, 14, 0), dateTime(2026, 4, 22, 14, 0));
+        LhScheduleResult newSkuResult = buildChangeResult("K1113", "MAT-NEW", "新上物料",
+                dateTime(2026, 4, 23, 14, 0), dateTime(2026, 4, 23, 22, 0));
+        context.getScheduleResultList().add(endingResult);
+        context.getScheduleResultList().add(newSkuResult);
+
+        ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
+        assertEquals(2, context.getMouldChangePlanList().size());
+
+        LhMouldChangePlan firstPlan = context.getMouldChangePlanList().get(0);
+        assertEquals("MAT-MES", firstPlan.getBeforeMaterialCode());
+        assertEquals("MES在机物料", firstPlan.getBeforeMaterialDesc());
+        assertEquals("MAT-END", firstPlan.getAfterMaterialCode());
+        assertEquals("收尾物料", firstPlan.getAfterMaterialDesc());
+
+        LhMouldChangePlan secondPlan = context.getMouldChangePlanList().get(1);
+        assertEquals("MAT-END", secondPlan.getBeforeMaterialCode());
+        assertEquals("收尾物料", secondPlan.getBeforeMaterialDesc());
+        assertEquals("MAT-NEW", secondPlan.getAfterMaterialCode());
+        assertEquals("新上物料", secondPlan.getAfterMaterialDesc());
     }
 
     private LhScheduleContext newContext() {

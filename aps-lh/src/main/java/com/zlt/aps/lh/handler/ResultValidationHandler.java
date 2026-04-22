@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
+import com.zlt.aps.lh.component.IncrSerialGenerator;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.observer.ScheduleEvent;
 import com.zlt.aps.lh.engine.observer.ScheduleEventPublisher;
@@ -17,6 +18,7 @@ import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 import java.text.SimpleDateFormat;
@@ -50,23 +52,31 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
 
     @Override
     protected void doHandle(LhScheduleContext context) {
-        // S4.6.1 排程后置校验
-        postValidation(context);
+        String scheduleOrderBusinessKey = buildScheduleOrderBusinessKey(context);
+        try {
+            // S4.6.1 排程后置校验
+            postValidation(context);
 
-        // S4.6.2 生成模具交替计划
-        generateMouldChangePlan(context);
+            // S4.6.2 生成模具交替计划
+            generateMouldChangePlan(context);
 
-        // S4.6.3 补全工单号和发布状态
-        assignOrderNumbers(context);
+            // S4.6.3 补全工单号和发布状态
+            assignOrderNumbers(context);
 
-        // S4.6.4 添加排程汇总日志
-        addSummaryLog(context);
+            // S4.6.4 赋值排程顺序
+            assignScheduleOrder(context, scheduleOrderBusinessKey);
 
-        // S4.6.5 保存排程结果到数据库
-        schedulePersistenceService.replaceScheduleAtomically(context);
+            // S4.6.5 添加排程汇总日志
+            addSummaryLog(context);
 
-        // S4.6.6 发布排程完成事件（观察者模式）
-        scheduleEventPublisher.publish(ScheduleEvent.completed(context));
+            // S4.6.6 保存排程结果到数据库
+            schedulePersistenceService.replaceScheduleAtomically(context);
+
+            // S4.6.7 发布排程完成事件（观察者模式）
+            scheduleEventPublisher.publish(ScheduleEvent.completed(context));
+        } finally {
+            clearScheduleOrderCounter(scheduleOrderBusinessKey);
+        }
     }
 
     /**
@@ -240,6 +250,50 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
         ));
         summaryLog.setIsDelete(0);
         context.getScheduleLogList().add(summaryLog);
+    }
+
+    /**
+     * 为排程结果赋值排程顺序。
+     *
+     * @param context 排程上下文
+     * @param businessKey 自增序列业务键
+     */
+    private void assignScheduleOrder(LhScheduleContext context, String businessKey) {
+        if (StringUtils.isEmpty(businessKey)) {
+            log.warn("排程顺序业务键为空，跳过排程顺序赋值");
+            return;
+        }
+        if (CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return;
+        }
+        // 按实际排产结果列表顺序依次生成排程顺序，保证落库顺序与业务执行顺序一致。
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            result.setScheduleOrder(IncrSerialGenerator.generateSerial(businessKey));
+        }
+    }
+
+    /**
+     * 构建排程顺序自增序列业务键（工厂编码_目标日yyyyMMdd）。
+     *
+     * @param context 排程上下文
+     * @return 业务键
+     */
+    private String buildScheduleOrderBusinessKey(LhScheduleContext context) {
+        if (context == null || StringUtils.isEmpty(context.getFactoryCode()) || context.getScheduleTargetDate() == null) {
+            return null;
+        }
+        return context.getFactoryCode() + "_" + LhScheduleTimeUtil.getDateStr(context.getScheduleTargetDate());
+    }
+
+    /**
+     * 清理排程顺序业务计数器。
+     *
+     * @param businessKey 自增序列业务键
+     */
+    private void clearScheduleOrderCounter(String businessKey) {
+        if (StringUtils.isNotEmpty(businessKey)) {
+            IncrSerialGenerator.clearBusinessCounter(businessKey);
+        }
     }
 
     /**

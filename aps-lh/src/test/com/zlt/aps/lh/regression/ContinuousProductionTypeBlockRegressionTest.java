@@ -18,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -138,6 +139,8 @@ class ContinuousProductionTypeBlockRegressionTest {
         Date expectedStartTime = LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 3);
         assertEquals("MAT-T1", typeBlockResult.getMaterialCode());
         assertEquals(expectedStartTime, resolveFirstStartTime(typeBlockResult));
+        assertEquals(continuousResult.getSpecEndTime(),
+                ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"));
         assertEquals("1", typeBlockResult.getIsChangeMould());
         assertNotNull(typeBlockResult.getMouldCode());
         assertFalse(expectedStartTime.equals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 9)));

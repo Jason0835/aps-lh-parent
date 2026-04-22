@@ -19,6 +19,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
 import java.util.Calendar;
@@ -77,7 +78,8 @@ class NewSpecTimelineRegressionTest {
         when(machineMatchStrategy.matchMachines(any(), any())).thenReturn(Collections.singletonList(machine));
         when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any())).thenReturn(machine);
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any())).thenReturn(dateTime(2026, 4, 11, 8, 0));
-        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any())).thenReturn(dateTime(2026, 4, 11, 8, 0));
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), anyString(), any()))
+                .thenReturn(dateTime(2026, 4, 11, 8, 0));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 16, 0));
         when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
@@ -90,6 +92,8 @@ class NewSpecTimelineRegressionTest {
         assertEquals("LR", result.getLeftRightMould());
         assertNotNull(result.getClass2StartTime());
         assertEquals(dateTime(2026, 4, 11, 16, 0), result.getClass2StartTime());
+        assertEquals(dateTime(2026, 4, 11, 8, 0),
+                ReflectionTestUtils.getField(result, "mouldChangeStartTime"));
         assertNotNull(result.getSpecEndTime());
         assertTrue(result.getSpecEndTime().after(result.getClass2StartTime()));
         assertEquals(result.getSpecEndTime(), result.getTdaySpecEndTime());
@@ -124,7 +128,7 @@ class NewSpecTimelineRegressionTest {
         when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any())).thenReturn(machine);
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 10, 22, 0));
-        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any()))
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 10, 22, 0));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 6, 0));
@@ -166,7 +170,7 @@ class NewSpecTimelineRegressionTest {
         when(machineMatchStrategy.selectBestMachine(any(), any(), any(), any())).thenReturn(machine);
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 15, 0));
-        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any()))
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 15, 0));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenReturn(dateTime(2026, 4, 11, 23, 30));

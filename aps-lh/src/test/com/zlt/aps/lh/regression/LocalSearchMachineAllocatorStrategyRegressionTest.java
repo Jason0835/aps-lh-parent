@@ -77,7 +77,7 @@ class LocalSearchMachineAllocatorStrategyRegressionTest {
             }
 
             @Override
-            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+            public Date allocateMouldChange(LhScheduleContext ctx, String machineCode, Date endingTime) {
                 return dateTime(2026, 4, 11, 15, 0);
             }
 
@@ -171,7 +171,7 @@ class LocalSearchMachineAllocatorStrategyRegressionTest {
             }
 
             @Override
-            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+            public Date allocateMouldChange(LhScheduleContext ctx, String machineCode, Date endingTime) {
                 return dateTime(2026, 4, 11, 15, 0);
             }
 

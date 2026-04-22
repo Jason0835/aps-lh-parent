@@ -6,8 +6,11 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -26,6 +29,7 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
     private static final int IDX_MORNING = 0;
     private static final int IDX_AFTERNOON = 1;
     private static final String DATE_KEY_FORMAT = "yyyy-MM-dd";
+    private static final int MAX_ALLOCATION_ATTEMPTS = 16;
 
     @Override
     public boolean hasCapacity(LhScheduleContext context, Date targetDate) {
@@ -37,18 +41,26 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
     }
 
     @Override
-    public Date allocateMouldChange(LhScheduleContext context, Date endingTime) {
+    public Date allocateMouldChange(LhScheduleContext context, String machineCode, Date endingTime) {
         if (endingTime == null) {
             return null;
         }
 
         Date adjustedTime = endingTime;
 
-        // 最多向后探索5天，避免死循环
-        for (int dayOffset = 0; dayOffset < 5; dayOffset++) {
+        // 最多向后探索有限次数，避免极端数据导致死循环
+        for (int attempt = 0; attempt < MAX_ALLOCATION_ATTEMPTS; attempt++) {
+            // 先扣掉设备停机窗口，确保“停机后再换模”从停机结束时刻继续判断。
+            Date downtimeAdjustedTime = resolveDowntimeAdjustedStartTime(context, machineCode, adjustedTime);
+            if (downtimeAdjustedTime.after(adjustedTime)) {
+                adjustedTime = downtimeAdjustedTime;
+                continue;
+            }
+
             // 若在禁止换模时间段内（20:00-次日6:00），延后到次日早班开始时间
             if (LhScheduleTimeUtil.isNoMouldChangeTime(context, adjustedTime)) {
                 adjustedTime = getNextMorningShiftStart(context, adjustedTime);
+                continue;
             }
 
             String dateKey = formatDateKey(adjustedTime);
@@ -116,6 +128,39 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
         int totalUsed = counts[IDX_MORNING] + counts[IDX_AFTERNOON];
         int dailyLimit = getDailyLimit(context);
         return Math.max(0, dailyLimit - totalUsed);
+    }
+
+    /**
+     * 解析扣除设备停机后的最早换模开始时间。
+     * <p>若候选换模窗口命中设备停机，则顺延到该停机结束时间。</p>
+     */
+    private Date resolveDowntimeAdjustedStartTime(LhScheduleContext context, String machineCode, Date candidateStartTime) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || candidateStartTime == null
+                || CollectionUtils.isEmpty(context.getDevicePlanShutList())) {
+            return candidateStartTime;
+        }
+        Date candidateEndTime = LhScheduleTimeUtil.addHours(
+                candidateStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
+        Date latestOverlapEndTime = null;
+        for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
+            if (planShut == null
+                    || !StringUtils.equals(machineCode, planShut.getMachineCode())
+                    || planShut.getBeginDate() == null
+                    || planShut.getEndDate() == null
+                    || !planShut.getBeginDate().before(planShut.getEndDate())) {
+                continue;
+            }
+            if (!candidateStartTime.before(planShut.getEndDate())
+                    || !planShut.getBeginDate().before(candidateEndTime)) {
+                continue;
+            }
+            if (latestOverlapEndTime == null || planShut.getEndDate().after(latestOverlapEndTime)) {
+                latestOverlapEndTime = planShut.getEndDate();
+            }
+        }
+        return latestOverlapEndTime != null ? latestOverlapEndTime : candidateStartTime;
     }
 
     /**

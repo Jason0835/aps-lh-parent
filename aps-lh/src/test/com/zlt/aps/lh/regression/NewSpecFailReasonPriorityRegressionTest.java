@@ -79,7 +79,7 @@ class NewSpecFailReasonPriorityRegressionTest {
             }
 
             @Override
-            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+            public Date allocateMouldChange(LhScheduleContext ctx, String machineCode, Date endingTime) {
                 if (mouldFailReadyTime.equals(endingTime)) {
                     return null;
                 }

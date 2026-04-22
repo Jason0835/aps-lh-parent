@@ -80,7 +80,7 @@ class NewSpecProductionStrategyRegressionTest {
             }
 
             @Override
-            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+            public Date allocateMouldChange(LhScheduleContext ctx, String machineCode, Date endingTime) {
                 return endingTime;
             }
 
@@ -221,7 +221,7 @@ class NewSpecProductionStrategyRegressionTest {
             }
 
             @Override
-            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+            public Date allocateMouldChange(LhScheduleContext ctx, String machineCode, Date endingTime) {
                 return dateTime(2026, 4, 17, 6, 0);
             }
 
@@ -472,7 +472,7 @@ class NewSpecProductionStrategyRegressionTest {
             }
 
             @Override
-            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+            public Date allocateMouldChange(LhScheduleContext ctx, String machineCode, Date endingTime) {
                 return endingTime;
             }
 

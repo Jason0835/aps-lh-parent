@@ -265,7 +265,7 @@ public class LocalSearchMachineAllocatorStrategy {
         // 按“机台准备 -> 换模 -> 首检 -> 产能估算”的顺序串行预占资源
         Date machineEndTime = resolveMachineEndTime(context, machine, shifts, virtualMachineEndTimeMap);
         Date machineReadyTime = capacityCalculate.calculateStartTime(context, machineCode, machineEndTime);
-        Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineReadyTime);
+        Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, machineReadyTime);
         if (mouldChangeStartTime == null) {
             return null;
         }

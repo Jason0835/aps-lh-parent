@@ -91,8 +91,8 @@ class MachineOccupationRegressionTest {
                 });
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
-        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any()))
-                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), anyString(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(2));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
         when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);

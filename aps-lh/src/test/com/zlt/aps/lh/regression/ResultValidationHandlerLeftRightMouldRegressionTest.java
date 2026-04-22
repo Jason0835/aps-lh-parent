@@ -146,6 +146,27 @@ class ResultValidationHandlerLeftRightMouldRegressionTest {
         assertEquals("新上物料", secondPlan.getAfterMaterialDesc());
     }
 
+    @Test
+    void generateMouldChangePlan_shouldAlignPlanDateAndChangeTimeToRealMouldChangeStartTime() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.setInitialMachineScheduleMap(new LinkedHashMap<>());
+
+        LhScheduleResult result = buildChangeResult("K2024", "MAT-NEW", "新上物料",
+                dateTime(2026, 4, 22, 14, 0), dateTime(2026, 4, 22, 22, 0));
+        Date mouldChangeStartTime = dateTime(2026, 4, 22, 6, 0);
+        ReflectionTestUtils.setField(result, "mouldChangeStartTime", mouldChangeStartTime);
+        context.getScheduleResultList().add(result);
+
+        ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
+
+        assertEquals(1, context.getMouldChangePlanList().size());
+        LhMouldChangePlan plan = context.getMouldChangePlanList().get(0);
+        assertEquals(mouldChangeStartTime, plan.getPlanDate());
+        assertEquals(mouldChangeStartTime, plan.getChangeTime());
+    }
+
     private LhScheduleContext newContext() {
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode("116");

@@ -195,7 +195,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                         machineCode, endingTime);
 
                 // 4. 先分配换模窗口，失败则继续尝试下一台候选机台
-                Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineReadyTime);
+                Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, machineReadyTime);
                 if (mouldChangeStartTime == null) {
                     excludedMachineCodes.add(machineCode);
                     failReason = selectHigherPriorityFailReason(
@@ -218,6 +218,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
                 // 6. 基于首检分配时间生成新增规格排产结果，并校验当日是否有有效产能
                 // 业务口径：换模总时长已包含首检时长，不再额外叠加 FIRST_INSPECTION_HOURS
+                // 时间链路固定为：机台可开工 -> 换模开始 -> 换模/首检结束 -> 实际开产。
                 Date productionStartTime = inspectionTime;
                 int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(candidateMachine);
                 int refinedTargetQty = getTargetScheduleQtyResolver().refineTargetQtyByMachineCapacity(
@@ -413,6 +414,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setRealScheduleDate(context.getScheduleDate());
         result.setProductionStatus("0");
         result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode()));
+        // 保存真实换模开始时间，供下游换模计划表直接复用。
+        result.setMouldChangeStartTime(mouldChangeStartTime);
 
         // 按班次分配计划量
         int pendingQty = sku.resolveTargetScheduleQty();

@@ -101,8 +101,8 @@ class NewProductionHandlerZeroPlanRegressionTest {
                     Set<String> excluded = invocation.getArgument(3);
                     return excluded.contains(machine.getMachineCode()) ? null : machine;
                 });
-        when(mouldChangeBalanceStrategy.allocateMouldChange(any(LhScheduleContext.class), any(Date.class)))
-                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(LhScheduleContext.class), anyString(), any(Date.class)))
+                .thenAnswer(invocation -> invocation.getArgument(2));
         when(firstInspectionBalanceStrategy.allocateInspection(any(LhScheduleContext.class), anyString(), any(Date.class)))
                 .thenAnswer(invocation -> invocation.getArgument(2));
         when(capacityCalculateStrategy.calculateStartTime(any(LhScheduleContext.class), anyString(), any(Date.class)))

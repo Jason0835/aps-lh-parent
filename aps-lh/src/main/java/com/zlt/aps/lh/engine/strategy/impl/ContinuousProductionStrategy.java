@@ -341,6 +341,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
+     * 根据换活字块后的开产时间反推真实换活字块开始时间。
+     */
+    private Date resolveTypeBlockChangeStartTime(LhScheduleContext context, Date productionStartTime) {
+        if (productionStartTime == null) {
+            return null;
+        }
+        // 换活字块结果里记录“真实切换开始时间”，方便换模计划表与结果时间口径一致。
+        return LhScheduleTimeUtil.addHours(
+                productionStartTime, -LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+    }
+
+    /**
      * 解析允许发起切换（换模/换活字块）的开始时间。
      * <p>20:00:00（含）到次日早班前禁止发起切换，需顺延到下一个早班开始时间。</p>
      */
@@ -390,6 +402,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (typeBlock) {
             result.setIsChangeMould("1");
             result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode(), machine.getCurrentMaterialCode()));
+            // 换活字块虽然不是新增规格换模，但下游换模计划仍按真实切换开始时间生成。
+            result.setMouldChangeStartTime(resolveTypeBlockChangeStartTime(context, startTime));
         } else {
             result.setIsChangeMould("0");
         }

@@ -197,8 +197,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 12. 加载各班次完成量（T日，用于前日欠/超产差值修正）
         loadScheFinishQty(context, factoryCode, scheduleDate);
 
-        // 13. 加载月累计完成量（截至T-1，用于月余量回退口径）
-        loadMaterialMonthFinishedQty(context, factoryCode, scheduleDate);
+        // 13. 加载月累计完成量（截至目标排产日期，按目标日所在月份统计）
+        loadMaterialMonthFinishedQty(context, factoryCode, targetDate);
 
         // 14. 加载物料信息
         loadMaterialInfo(context, factoryCode);
@@ -602,16 +602,16 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     }
 
     /**
-     * 加载月累计完成量（截至排程窗口起点T日前），按物料编号建立Map。
+     * 加载月累计完成量（截至目标排产日期含当天），按物料编号建立Map。
      *
      * @param context      排程上下文
      * @param factoryCode  分厂编号
-     * @param scheduleDate 排程窗口起点 T 日
+     * @param targetDate   排程目标日
      */
-    private void loadMaterialMonthFinishedQty(LhScheduleContext context, String factoryCode, Date scheduleDate) {
-        Date tDay = LhScheduleTimeUtil.clearTime(scheduleDate);
+    private void loadMaterialMonthFinishedQty(LhScheduleContext context, String factoryCode, Date targetDate) {
+        Date targetDay = LhScheduleTimeUtil.clearTime(targetDate);
         Calendar calendar = Calendar.getInstance();
-        calendar.setTime(tDay);
+        calendar.setTime(targetDay);
         calendar.set(Calendar.DAY_OF_MONTH, 1);
         Date monthStart = LhScheduleTimeUtil.clearTime(calendar.getTime());
 
@@ -619,7 +619,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                 new LambdaQueryWrapper<LhScheFinishQty>()
                         .eq(LhScheFinishQty::getFactoryCode, factoryCode)
                         .ge(LhScheFinishQty::getScheduleDate, monthStart)
-                        .lt(LhScheFinishQty::getScheduleDate, tDay)
+                        .le(LhScheFinishQty::getScheduleDate, targetDay)
                         .eq(LhScheFinishQty::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
 
         Map<String, Integer> materialMonthFinishedQtyMap = new HashMap<>(64);
@@ -639,7 +639,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         log.debug("月累计完成量加载完成, 数量: {}, 起始日: {}, 截止: {}",
                 materialMonthFinishedQtyMap.size(),
                 LhScheduleTimeUtil.formatDate(monthStart),
-                LhScheduleTimeUtil.formatDate(LhScheduleTimeUtil.addDays(tDay, -1)));
+                LhScheduleTimeUtil.formatDate(targetDay));
     }
 
     /**

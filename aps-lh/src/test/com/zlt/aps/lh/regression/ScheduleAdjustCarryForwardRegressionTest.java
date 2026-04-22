@@ -108,7 +108,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         plan.setDay13(20);
         context.setMonthPlanList(Collections.singletonList(plan));
 
-        // 月累计完成量应优先于前日结果兜底值
+        // 月累计完成量（截至目标排产日）应优先于前日结果兜底值
         context.getMaterialMonthFinishedQtyMap().put("MAT-MONTH", 880);
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);

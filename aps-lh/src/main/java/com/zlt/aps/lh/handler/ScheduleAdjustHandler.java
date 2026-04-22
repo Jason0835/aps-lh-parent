@@ -174,7 +174,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @return 硫化余量
      */
     private SurplusCalculation calculateSurplusQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
-        // 统一按月计划总量减前日已完成量计算余量，不再使用月余量表兜底。
+        // 统一按月计划总量减已完成量计算余量，不再使用月余量表兜底。
         int totalPlanQty = plan.getTotalQty() != null ? plan.getTotalQty() : 0;
         int finishedQty = calculateFinishedQty(context, plan);
         return new SurplusCalculation(Math.max(0, totalPlanQty - finishedQty));
@@ -188,7 +188,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @return 已完成量
      */
     private int calculateFinishedQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
-        // 优先使用基础数据阶段按物料汇总好的月累计完成量（截至T-1）。
+        // 优先使用基础数据阶段按物料汇总好的月累计完成量（截至目标排产日期）。
         String materialCode = plan.getMaterialCode();
         if (StringUtils.isNotEmpty(materialCode)) {
             Integer monthFinishedQty = context.getMaterialMonthFinishedQtyMap().get(materialCode);

@@ -123,6 +123,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             }
         }
         finalizeZeroPlanNewSpecResults(context);
+        // 新增结果在库存裁剪后需按最终计划量复核收尾语义，避免“未收完却标收尾”。
+        refreshNewSpecEndingFlagByResult(context);
         syncMachineStateAfterNewAdjust(context);
     }
 
@@ -422,7 +424,41 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty);
         refreshResultSummary(context, result);
+        // 新增结果先按实际排产量复核收尾标记，后续若再被库存裁剪会在 adjustEmbryoStock 收口阶段二次复核。
+        refreshEndingFlagByResult(result);
         return result;
+    }
+
+    /**
+     * 基于最终计划量复核新增结果收尾标记。
+     * <p>口径：仅新增结果生效；当日计划量 >= 硫化余量时记为收尾，否则记为正常。</p>
+     *
+     * @param context 排程上下文
+     */
+    private void refreshNewSpecEndingFlagByResult(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return;
+        }
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            refreshEndingFlagByResult(result);
+        }
+    }
+
+    /**
+     * 基于结果行“最终计划量 vs 硫化余量”复核收尾标记。
+     *
+     * @param result 排程结果
+     */
+    private void refreshEndingFlagByResult(LhScheduleResult result) {
+        if (result == null || !NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType())) {
+            return;
+        }
+        Integer surplusQty = result.getMouldSurplusQty();
+        if (surplusQty == null || surplusQty <= 0) {
+            return;
+        }
+        int finalPlanQty = result.getDailyPlanQty() != null ? result.getDailyPlanQty() : 0;
+        result.setIsEnd(finalPlanQty >= surplusQty ? "1" : "0");
     }
 
     /**

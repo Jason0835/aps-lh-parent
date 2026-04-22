@@ -3,6 +3,7 @@ package com.zlt.aps.lh.regression;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -361,6 +362,46 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals("新增结果裁剪为0", context.getUnscheduledResultList().get(0).getUnscheduledReason());
         assertEquals("MAT-BASE", machine.getCurrentMaterialCode(), "移除零计划结果后应回滚机台当前物料");
         assertEquals(dateTime(2026, 4, 17, 6, 0), machine.getEstimatedEndTime(), "机台完工时刻应回滚到初始状态");
+    }
+
+    @Test
+    void adjustEmbryoStock_shouldResetIsEndWhenFinalPlanQtyLessThanSurplus() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, true);
+
+        LhScheduleContext context = buildContext();
+        LhScheduleResult result = new LhScheduleResult();
+        result.setScheduleType("02");
+        result.setMaterialCode("MAT-ENDING-CHECK");
+        result.setDailyPlanQty(88);
+        result.setMouldSurplusQty(140);
+        result.setIsEnd("1");
+        context.getScheduleResultList().add(result);
+
+        strategy.adjustEmbryoStock(context);
+
+        assertEquals("0", context.getScheduleResultList().get(0).getIsEnd(),
+                "新增结果最终计划量小于硫化余量时，应回写为正常");
+    }
+
+    @Test
+    void adjustEmbryoStock_shouldKeepIsEndWhenFinalPlanQtyReachSurplus() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        LhScheduleResult result = new LhScheduleResult();
+        result.setScheduleType("02");
+        result.setMaterialCode("MAT-ENDING-CHECK");
+        result.setDailyPlanQty(140);
+        result.setMouldSurplusQty(140);
+        result.setIsEnd("0");
+        context.getScheduleResultList().add(result);
+
+        strategy.adjustEmbryoStock(context);
+
+        assertEquals("1", context.getScheduleResultList().get(0).getIsEnd(),
+                "新增结果最终计划量达到硫化余量时，应回写为收尾");
     }
 
     @Test

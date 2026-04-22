@@ -437,8 +437,13 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         List<SkuScheduleDTO> newSpecSkuList = new ArrayList<>();
         Map<String, List<SkuScheduleDTO>> skuByMaterialMap = buildSkuByMaterialMap(context);
 
-        // 先按机台最近MES在机记录反找SKU，命中的SKU按机台顺序消费，避免同一SKU被重复占用。
+        // 保持MES最近快照顺序消费，同时过滤掉本轮不可排机台，避免停用机抢占续作资格。
+        Map<String, ?> schedulableMachineMap = context.getMachineScheduleMap();
         for (Map.Entry<String, LhMachineOnlineInfo> entry : context.getMachineOnlineInfoMap().entrySet()) {
+            if (CollectionUtils.isEmpty(schedulableMachineMap)
+                    || !schedulableMachineMap.containsKey(entry.getKey())) {
+                continue;
+            }
             assignContinuousSku(entry.getKey(), entry.getValue(), skuByMaterialMap, continuousSkuList);
         }
 
@@ -500,7 +505,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         if (CollectionUtils.isEmpty(matchedSkuList)) {
             return;
         }
-        // 同一物料存在多条SKU时，按归集顺序逐条消费，避免重复占用。
+        // 同一物料存在多条SKU时，按归集顺序逐条消费，且仅允许有效机台占用。
         SkuScheduleDTO matchedSku = matchedSkuList.remove(0);
         matchedSku.setScheduleType(ScheduleTypeEnum.CONTINUOUS.getCode());
         matchedSku.setContinuousMachineCode(machineCode);

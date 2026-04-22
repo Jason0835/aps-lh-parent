@@ -2,6 +2,7 @@ package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
@@ -297,6 +298,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         context.setMachineOnlineInfoMap(buildMachineOnlineInfoMap(
                 buildOnlineInfo("K1501", "MAT-A"),
                 buildOnlineInfo("K1502", "MAT-X")));
+        context.setMachineScheduleMap(buildMachineScheduleMap("K1501", "K1502"));
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 
@@ -329,6 +331,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
                 buildOnlineInfo("K1501", "MAT-DUP"),
                 buildOnlineInfo("K1502", "MAT-DUP"),
                 buildOnlineInfo("K1503", "MAT-DUP")));
+        context.setMachineScheduleMap(buildMachineScheduleMap("K1501", "K1502", "K1503"));
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 
@@ -358,6 +361,17 @@ class ScheduleAdjustCarryForwardRegressionTest {
             machineOnlineInfoMap.put(onlineInfo.getLhCode(), onlineInfo);
         }
         return machineOnlineInfoMap;
+    }
+
+    private Map<String, MachineScheduleDTO> buildMachineScheduleMap(String... machineCodes) {
+        Map<String, MachineScheduleDTO> machineScheduleMap = new LinkedHashMap<>();
+        for (String machineCode : machineCodes) {
+            MachineScheduleDTO machine = new MachineScheduleDTO();
+            machine.setMachineCode(machineCode);
+            machine.setStatus("1");
+            machineScheduleMap.put(machineCode, machine);
+        }
+        return machineScheduleMap;
     }
 
     private LhMachineOnlineInfo buildOnlineInfo(String machineCode, String materialCode) {

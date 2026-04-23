@@ -1,5 +1,8 @@
 package com.zlt.aps.lh.regression;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -28,8 +31,10 @@ import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.service.impl.LhBaseDataServiceImpl;
 import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -40,10 +45,15 @@ import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -247,6 +257,12 @@ class ScheduleDataWindowRegressionTest {
         assertEquals(20, context.getMaterialDayFinishedQtyMap().get("MAT-TODAY_2026-04-16").intValue());
         assertEquals(80, context.getMaterialMonthFinishedQtyMap().get("MAT-MONTH").intValue());
         assertEquals(9, context.getMaterialMonthFinishedQtyMap().get("MAT-OTHER").intValue());
+
+        List<LambdaQueryWrapper<LhDayFinishQty>> wrappers = captureDayFinishQtyWrappers();
+        assertQueryContainsDateRange(wrappers.get(0), stripTime(date(2026, 4, 16)), stripTime(date(2026, 4, 17)));
+        assertQueryContainsDateRange(wrappers.get(1), stripTime(date(2026, 4, 1)), stripTime(date(2026, 4, 18)));
+        assertQueryCompatibleWithNullDeleteFlag(wrappers.get(0));
+        assertQueryCompatibleWithNullDeleteFlag(wrappers.get(1));
     }
 
     @Test
@@ -283,6 +299,10 @@ class ScheduleDataWindowRegressionTest {
         lhBaseDataService.loadAllBaseData(context);
 
         assertEquals(22, context.getMaterialMonthFinishedQtyMap().get("MAT-CROSS").intValue());
+
+        List<LambdaQueryWrapper<LhDayFinishQty>> wrappers = captureDayFinishQtyWrappers();
+        assertQueryContainsDateRange(wrappers.get(1), stripTime(date(2026, 5, 1)), stripTime(date(2026, 5, 3)));
+        assertQueryCompatibleWithNullDeleteFlag(wrappers.get(1));
     }
 
     @Test
@@ -326,6 +346,63 @@ class ScheduleDataWindowRegressionTest {
         when(lhRepairCapsuleMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devMaintenancePlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhScheduleResultMapper.selectList(any())).thenReturn(Collections.emptyList());
+    }
+
+    /**
+     * 抓取日完成量查询使用的 wrapper，确保回归测试能直接校验查询条件。
+     *
+     * @return 按调用顺序捕获到的 wrapper 列表
+     */
+    @SuppressWarnings("unchecked")
+    private List<LambdaQueryWrapper<LhDayFinishQty>> captureDayFinishQtyWrappers() {
+        initializeDayFinishQtyTableInfo();
+        ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(lhDayFinishQtyMapper, times(2)).selectList(captor.capture());
+        return (List<LambdaQueryWrapper<LhDayFinishQty>>) (List<?>) captor.getAllValues();
+    }
+
+    /**
+     * 初始化实体表信息，避免测试环境下解析 wrapper SQL 时缺少 lambda cache。
+     */
+    private void initializeDayFinishQtyTableInfo() {
+        if (TableInfoHelper.getTableInfo(LhDayFinishQty.class) != null) {
+            return;
+        }
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(),
+                LhDayFinishQty.class.getName());
+        TableInfoHelper.initTableInfo(assistant, LhDayFinishQty.class);
+    }
+
+    /**
+     * 校验查询使用半开区间日期条件，防止回退为等值匹配。
+     *
+     * @param wrapper    查询条件
+     * @param rangeStart 区间起点（含）
+     * @param rangeEnd   区间终点（不含）
+     */
+    private void assertQueryContainsDateRange(LambdaQueryWrapper<LhDayFinishQty> wrapper, Date rangeStart, Date rangeEnd) {
+        String sqlSegment = wrapper.getSqlSegment().toLowerCase(Locale.ROOT);
+        Map<String, Object> paramMap = wrapper.getParamNameValuePairs();
+        assertTrue(sqlSegment.contains("finish_date"));
+        assertTrue(sqlSegment.contains(">="));
+        assertTrue(sqlSegment.contains("<"));
+        assertFalse(sqlSegment.contains("finish_date ="));
+        assertTrue(paramMap.containsValue(rangeStart));
+        assertTrue(paramMap.containsValue(rangeEnd));
+    }
+
+    /**
+     * 校验删除标记兼容 `0` 与 `NULL`，避免快照数据被遗漏。
+     *
+     * @param wrapper 查询条件
+     */
+    private void assertQueryCompatibleWithNullDeleteFlag(LambdaQueryWrapper<LhDayFinishQty> wrapper) {
+        String sqlSegment = wrapper.getSqlSegment().toLowerCase(Locale.ROOT);
+        Map<String, Object> paramMap = wrapper.getParamNameValuePairs();
+        assertTrue(sqlSegment.contains("is_delete"));
+        assertTrue(sqlSegment.contains("is null"));
+        assertTrue(sqlSegment.contains("or"));
+        assertTrue(paramMap.containsValue(DeleteFlagEnum.NORMAL.getCode()));
     }
 
     private static Date date(int y, int month, int day) {

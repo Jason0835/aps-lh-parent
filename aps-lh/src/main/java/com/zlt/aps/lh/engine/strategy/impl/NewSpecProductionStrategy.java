@@ -127,6 +127,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         // 新增结果在库存裁剪后需按最终计划量复核收尾语义，避免“未收完却标收尾”。
         refreshNewSpecEndingFlagByResult(context);
         syncMachineStateAfterNewAdjust(context);
+        // S4.5 后置步骤均完成后，再按当前待排列表收口结构视图，避免影响本阶段元数据回查。
+        context.rebuildStructureSkuMapFromPending(context.getNewSpecSkuList());
     }
 
     @Override

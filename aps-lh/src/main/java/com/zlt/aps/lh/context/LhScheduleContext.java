@@ -25,6 +25,7 @@ import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.util.CollectionUtils;
 
 import java.util.*;
 import java.util.Objects;
@@ -249,6 +250,78 @@ public class LhScheduleContext {
      */
     public boolean isPriorityTraceMuted() {
         return priorityTraceMuteDepth > 0;
+    }
+
+    /**
+     * 将已移出待排队列的SKU同步从结构分组中剔除。
+     * <p>structureSkuMap 在 S4.4 / S4.5 期间既用于顺序3结构收尾判断，也作为 SKU 兜底查询来源，
+     * 因此需要与当前待排视图保持一致，避免已消费SKU继续影响后续排序与查询。</p>
+     *
+     * @param sku 已移出待排队列的SKU
+     */
+    public void removePendingSkuFromStructureMap(SkuScheduleDTO sku) {
+        if (Objects.isNull(sku)
+                || CollectionUtils.isEmpty(structureSkuMap)
+                || StringUtils.isEmpty(sku.getStructureName())) {
+            return;
+        }
+        List<SkuScheduleDTO> structureSkuList = structureSkuMap.get(sku.getStructureName());
+        if (CollectionUtils.isEmpty(structureSkuList)) {
+            structureSkuMap.remove(sku.getStructureName());
+            return;
+        }
+        List<SkuScheduleDTO> mutableStructureSkuList = new ArrayList<>(structureSkuList);
+        Iterator<SkuScheduleDTO> iterator = mutableStructureSkuList.iterator();
+        while (iterator.hasNext()) {
+            SkuScheduleDTO currentSku = iterator.next();
+            if (isSameStructureSku(currentSku, sku)) {
+                iterator.remove();
+                break;
+            }
+        }
+        if (CollectionUtils.isEmpty(mutableStructureSkuList)) {
+            structureSkuMap.remove(sku.getStructureName());
+            return;
+        }
+        structureSkuMap.put(sku.getStructureName(), mutableStructureSkuList);
+    }
+
+    /**
+     * 判断结构分组中的SKU是否与目标SKU一致。
+     *
+     * @param currentSku 结构分组中的SKU
+     * @param targetSku  目标SKU
+     * @return true-同一SKU，false-不同SKU
+     */
+    private boolean isSameStructureSku(SkuScheduleDTO currentSku, SkuScheduleDTO targetSku) {
+        if (currentSku == targetSku) {
+            return true;
+        }
+        if (Objects.isNull(currentSku) || Objects.isNull(targetSku)) {
+            return false;
+        }
+        return StringUtils.equals(currentSku.getMaterialCode(), targetSku.getMaterialCode());
+    }
+
+    /**
+     * 基于当前待排SKU列表重建结构分组。
+     * <p>用于阶段性收口结构视图，避免已消费SKU继续影响后续优先级判断。</p>
+     *
+     * @param pendingSkuList 当前待排SKU列表
+     */
+    public void rebuildStructureSkuMapFromPending(List<SkuScheduleDTO> pendingSkuList) {
+        if (CollectionUtils.isEmpty(pendingSkuList)) {
+            structureSkuMap = new LinkedHashMap<>();
+            return;
+        }
+        Map<String, List<SkuScheduleDTO>> rebuiltStructureSkuMap = new LinkedHashMap<>(16);
+        for (SkuScheduleDTO sku : pendingSkuList) {
+            if (Objects.isNull(sku) || StringUtils.isEmpty(sku.getStructureName())) {
+                continue;
+            }
+            rebuiltStructureSkuMap.computeIfAbsent(sku.getStructureName(), key -> new ArrayList<>()).add(sku);
+        }
+        structureSkuMap = rebuiltStructureSkuMap;
     }
 
     /**

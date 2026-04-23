@@ -30,6 +30,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -203,6 +204,46 @@ class ContinuousFollowUpResultValidationRegressionTest {
                 .filter(unscheduled -> "MAT-C1".equals(unscheduled.getMaterialCode()))
                 .count();
         assertEquals(0, unscheduledCount, "有效计划量已覆盖待排量时，不应额外生成未排记录");
+    }
+
+    @Test
+    void handle_shouldReduceDuplicateTypeBlockResultsByTargetQty() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getMachineScheduleMap().put("M2", buildMachine("M2", "MAT-C2"));
+        SkuScheduleDTO continuousSku1 = buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1);
+        SkuScheduleDTO continuousSku2 = buildContinuousSku("MAT-C2", "M2", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-A", 1);
+        SkuScheduleDTO typeBlockSku1 = buildNewSku("MAT-T1", "EMB-1", "STRUCT-T", "SPEC-A", "PAT-B", 1);
+        SkuScheduleDTO typeBlockSku2 = buildNewSku("MAT-T1", "EMB-1", "STRUCT-T", "SPEC-A", "PAT-B", 1);
+        context.getContinuousSkuList().add(continuousSku1);
+        context.getContinuousSkuList().add(continuousSku2);
+        context.getNewSpecSkuList().add(typeBlockSku1);
+        context.getNewSpecSkuList().add(typeBlockSku2);
+        context.getStructureSkuMap().put("STRUCT-C", Arrays.asList(continuousSku1, continuousSku2));
+        context.getStructureSkuMap().put("STRUCT-T", Arrays.asList(typeBlockSku1, typeBlockSku2));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-C2", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2", "ORD-3", "ORD-4");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode()) || "MAT-C2".equals(sku.getMaterialCode());
+        });
+        when(strategyFactory.getSkuPriorityStrategy()).thenReturn(skuPriorityStrategy);
+        when(strategyFactory.getProductionStrategy("01")).thenReturn(continuousProductionStrategy);
+
+        continuousProductionHandler.handle(context);
+
+        long typeBlockResultCount = context.getScheduleResultList().stream()
+                .filter(result -> "MAT-T1".equals(result.getMaterialCode()))
+                .count();
+        assertEquals(1, typeBlockResultCount, "同物料换活字块结果应按目标量降模收口为1条有效结果");
+        long unscheduledCount = context.getUnscheduledResultList().stream()
+                .filter(unscheduled -> "MAT-T1".equals(unscheduled.getMaterialCode()))
+                .count();
+        assertEquals(0, unscheduledCount, "保留结果已覆盖目标量时不应补写未排");
+        assertTrue(context.getStructureSkuMap().isEmpty(), "S4.4 收口后结构视图应只保留剩余新增待排SKU");
     }
 
     private LhScheduleContext newContext() {

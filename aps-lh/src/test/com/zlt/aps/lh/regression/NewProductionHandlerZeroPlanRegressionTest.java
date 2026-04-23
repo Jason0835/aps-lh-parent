@@ -118,9 +118,61 @@ class NewProductionHandlerZeroPlanRegressionTest {
         assertEquals("MAT-ZERO", unscheduledResult.getMaterialCode());
         assertEquals(1, unscheduledResult.getUnscheduledQty());
         assertEquals("新增结果裁剪为0", unscheduledResult.getUnscheduledReason());
+        assertEquals("STRUCT-ZERO", unscheduledResult.getStructureName());
+        assertEquals("SPEC-Z", unscheduledResult.getSpecCode());
+        assertEquals("EMB-1", unscheduledResult.getEmbryoCode());
+        assertEquals(1, unscheduledResult.getMouldQty());
         assertEquals("MAT-BASE", machine.getCurrentMaterialCode(), "机台当前物料应回滚到初始状态");
         assertEquals(dateTime(2026, 4, 17, 6, 0), machine.getEstimatedEndTime(), "机台预计完工应回滚到初始值");
         assertTrue(context.getMachineAssignmentMap().isEmpty(), "零计划结果移除后不应残留机台分配记录");
+    }
+
+    @Test
+    void handle_shouldKeepSkuMetadataAvailableForPostAdjustAndCleanupStructureMapAfterwards() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = buildMachine();
+        SkuScheduleDTO sku = buildSku();
+        sku.setPendingQty(2);
+        sku.setWindowPlanQty(2);
+        sku.setMonthPlanQty(2);
+        sku.setEmbryoStock(1);
+        context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
+        context.getNewSpecSkuList().add(sku);
+        context.getStructureSkuMap().put("STRUCT-ZERO", Arrays.asList(sku));
+        putMouldRel(context, sku.getMaterialCode(), "MOULD-1");
+
+        when(strategyFactory.getProductionStrategy("02")).thenReturn(newSpecProductionStrategy);
+        when(strategyFactory.getSkuPriorityStrategy()).thenReturn(skuPriorityStrategy);
+        when(strategyFactory.getMachineMatchStrategy()).thenReturn(machineMatchStrategy);
+        when(strategyFactory.getMouldChangeBalanceStrategy()).thenReturn(mouldChangeBalanceStrategy);
+        when(strategyFactory.getFirstInspectionBalanceStrategy()).thenReturn(firstInspectionBalanceStrategy);
+        when(strategyFactory.getCapacityCalculateStrategy()).thenReturn(capacityCalculateStrategy);
+
+        when(machineMatchStrategy.matchMachines(any(LhScheduleContext.class), any(SkuScheduleDTO.class)))
+                .thenReturn(Collections.singletonList(machine));
+        when(machineMatchStrategy.selectBestMachine(any(LhScheduleContext.class), any(SkuScheduleDTO.class),
+                any(List.class), any(Set.class)))
+                .thenAnswer(invocation -> {
+                    Set<String> excluded = invocation.getArgument(3);
+                    return excluded.contains(machine.getMachineCode()) ? null : machine;
+                });
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(LhScheduleContext.class), anyString(), any(Date.class)))
+                .thenAnswer(invocation -> invocation.getArgument(2));
+        when(firstInspectionBalanceStrategy.allocateInspection(any(LhScheduleContext.class), anyString(), any(Date.class)))
+                .thenAnswer(invocation -> invocation.getArgument(2));
+        when(capacityCalculateStrategy.calculateStartTime(any(LhScheduleContext.class), anyString(), any(Date.class)))
+                .thenAnswer(invocation -> invocation.getArgument(2));
+        when(orderNoGenerator.generateOrderNo(any(Date.class))).thenReturn("ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), any(SkuScheduleDTO.class))).thenReturn(false);
+
+        newProductionHandler.handle(context);
+
+        assertEquals(1, context.getScheduleResultList().size(), "库存裁剪后应保留有效新增结果");
+        assertEquals(1, context.getScheduleResultList().get(0).getDailyPlanQty(), "应按胎胚库存裁减到1");
+        assertEquals("MAT-ZERO", machine.getCurrentMaterialCode(), "机台当前物料应回写为新增结果物料");
+        assertEquals("22.5", machine.getPreviousProSize(), "后置机台状态回写仍应能拿到SKU规格信息");
+        assertTrue(context.getUnscheduledResultList().isEmpty(), "存在有效保留结果时不应额外生成未排");
+        assertTrue(context.getStructureSkuMap().isEmpty(), "S4.5 收口后结构视图应只保留当前待排SKU");
     }
 
     private LhScheduleContext newContext() {

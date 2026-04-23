@@ -65,7 +65,7 @@ class DefaultSkuPriorityStrategyTest {
     }
 
     @Test
-    void sortByPriority_shouldPreferStructureEndingSkuWithLaterEndingDay() {
+    void sortByPriority_shouldPreferLatestEndingSkuWhenStructureAllEndingPriorityHits() {
         SkuScheduleDTO normal = sku("MAT-N");
         normal.setStructureName("S2");
         SkuScheduleDTO endingLate = sku("MAT-L");
@@ -95,6 +95,69 @@ class DefaultSkuPriorityStrategyTest {
     }
 
     @Test
+    void sortByPriority_shouldFallbackToSupplyChainWhenStructureContainsNonEndingSku() {
+        SkuScheduleDTO sku2022 = sku("3302002022");
+        sku2022.setStructureName("S1");
+        sku2022.setEndingDaysRemaining(2);
+        sku2022.setHighPriorityPendingQty(50);
+        SkuScheduleDTO sku1585 = sku("3302001585");
+        sku1585.setStructureName("S1");
+        sku1585.setEndingDaysRemaining(0);
+        sku1585.setHighPriorityPendingQty(6480);
+
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(sku2022))).thenReturn(true);
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(sku1585))).thenReturn(false);
+
+        LhScheduleContext context = contextWithNewSpec(sku2022, sku1585);
+        Map<String, List<SkuScheduleDTO>> structureSkuMap = new LinkedHashMap<>();
+        structureSkuMap.put("S1", Arrays.asList(sku2022, sku1585));
+        context.setStructureSkuMap(structureSkuMap);
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.STRUCTURE_ENDING_DAYS, "5")));
+
+        strategy.sortByPriority(context);
+
+        assertEquals("3302001585", context.getNewSpecSkuList().get(0).getMaterialCode());
+        assertEquals("3302002022", context.getNewSpecSkuList().get(1).getMaterialCode());
+    }
+
+    @Test
+    void sortByPriority_shouldUseCurrentPendingStructureAfterConsumedSkuRemoved() {
+        SkuScheduleDTO consumedNonEnding = sku("MAT-C");
+        consumedNonEnding.setStructureName("S1");
+        consumedNonEnding.setHighPriorityPendingQty(999);
+
+        SkuScheduleDTO endingSku = sku("MAT-E");
+        endingSku.setStructureName("S1");
+        endingSku.setEndingDaysRemaining(4);
+        endingSku.setHighPriorityPendingQty(1);
+
+        SkuScheduleDTO supplyChainFirst = sku("MAT-H");
+        supplyChainFirst.setStructureName("S2");
+        supplyChainFirst.setHighPriorityPendingQty(500);
+
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(consumedNonEnding))).thenReturn(false);
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(endingSku))).thenReturn(true);
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(supplyChainFirst))).thenReturn(false);
+
+        LhScheduleContext context = contextWithNewSpec(endingSku, supplyChainFirst);
+        Map<String, List<SkuScheduleDTO>> structureSkuMap = new LinkedHashMap<>();
+        structureSkuMap.put("S1", Arrays.asList(consumedNonEnding, endingSku));
+        structureSkuMap.put("S2", Collections.singletonList(supplyChainFirst));
+        context.setStructureSkuMap(structureSkuMap);
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.STRUCTURE_ENDING_DAYS, "5")));
+
+        // 模拟 S4.4 已消费同结构非收尾SKU，structureSkuMap 需同步为当前待排视图。
+        context.removePendingSkuFromStructureMap(consumedNonEnding);
+
+        strategy.sortByPriority(context);
+
+        assertEquals("MAT-E", context.getNewSpecSkuList().get(0).getMaterialCode());
+        assertEquals("MAT-H", context.getNewSpecSkuList().get(1).getMaterialCode());
+    }
+
+    @Test
     void sortByPriority_shouldFallbackToDefaultStructureEndingDaysWhenConfigMissing() {
         SkuScheduleDTO normal = sku("MAT-N");
         normal.setStructureName("S2");
@@ -119,6 +182,33 @@ class DefaultSkuPriorityStrategyTest {
     }
 
     @Test
+    void sortByPriority_shouldFallbackToSupplyChainWhenLatestEndingDaysTied() {
+        SkuScheduleDTO highLarge = sku("MAT-H1");
+        highLarge.setStructureName("S1");
+        highLarge.setEndingDaysRemaining(2);
+        highLarge.setHighPriorityPendingQty(100);
+        SkuScheduleDTO highSmall = sku("MAT-H2");
+        highSmall.setStructureName("S1");
+        highSmall.setEndingDaysRemaining(2);
+        highSmall.setHighPriorityPendingQty(50);
+
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(highLarge))).thenReturn(true);
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(highSmall))).thenReturn(true);
+
+        LhScheduleContext context = contextWithNewSpec(highSmall, highLarge);
+        Map<String, List<SkuScheduleDTO>> structureSkuMap = new LinkedHashMap<>();
+        structureSkuMap.put("S1", Arrays.asList(highLarge, highSmall));
+        context.setStructureSkuMap(structureSkuMap);
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.STRUCTURE_ENDING_DAYS, "5")));
+
+        strategy.sortByPriority(context);
+
+        assertEquals("MAT-H1", context.getNewSpecSkuList().get(0).getMaterialCode());
+        assertEquals("MAT-H2", context.getNewSpecSkuList().get(1).getMaterialCode());
+    }
+
+    @Test
     void sortByPriority_shouldCompareSupplyChainPendingQtyStepByStep() {
         SkuScheduleDTO cycleHigh = sku("MAT-C");
         cycleHigh.setCycleProductionPendingQty(10);
@@ -135,6 +225,44 @@ class DefaultSkuPriorityStrategyTest {
         assertEquals("MAT-H2", context.getNewSpecSkuList().get(0).getMaterialCode());
         assertEquals("MAT-H1", context.getNewSpecSkuList().get(1).getMaterialCode());
         assertEquals("MAT-C", context.getNewSpecSkuList().get(2).getMaterialCode());
+    }
+
+    @Test
+    void sortByPriority_shouldKeepDeliveryLockAndDelayPriorityBeforeStructureAllEndingRule() {
+        SkuScheduleDTO locked = sku("MAT-L");
+        locked.setStructureName("S2");
+        locked.setDeliveryLocked(true);
+        locked.setDelayDays(0);
+        locked.setHighPriorityPendingQty(1);
+
+        SkuScheduleDTO delayHigh = sku("MAT-D");
+        delayHigh.setStructureName("S2");
+        delayHigh.setDelayDays(5);
+        delayHigh.setHighPriorityPendingQty(1);
+
+        SkuScheduleDTO structurePriority = sku("MAT-P");
+        structurePriority.setStructureName("S1");
+        structurePriority.setDelayDays(0);
+        structurePriority.setEndingDaysRemaining(4);
+        structurePriority.setHighPriorityPendingQty(9999);
+
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(locked))).thenReturn(false);
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(delayHigh))).thenReturn(false);
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(structurePriority))).thenReturn(true);
+
+        LhScheduleContext context = contextWithNewSpec(structurePriority, delayHigh, locked);
+        Map<String, List<SkuScheduleDTO>> structureSkuMap = new LinkedHashMap<>();
+        structureSkuMap.put("S1", Collections.singletonList(structurePriority));
+        structureSkuMap.put("S2", Arrays.asList(locked, delayHigh));
+        context.setStructureSkuMap(structureSkuMap);
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.STRUCTURE_ENDING_DAYS, "5")));
+
+        strategy.sortByPriority(context);
+
+        assertEquals("MAT-L", context.getNewSpecSkuList().get(0).getMaterialCode());
+        assertEquals("MAT-D", context.getNewSpecSkuList().get(1).getMaterialCode());
+        assertEquals("MAT-P", context.getNewSpecSkuList().get(2).getMaterialCode());
     }
 
     @Test
@@ -161,6 +289,7 @@ class DefaultSkuPriorityStrategyTest {
         assertTrue(processLog.getLogDetail().contains("MAT-L"));
         assertTrue(processLog.getLogDetail().contains("MAT-N"));
         assertTrue(processLog.getLogDetail().contains("锁交期"));
+        assertTrue(processLog.getLogDetail().contains("命中结构全收尾优先"));
         assertTrue(processLog.getLogDetail().indexOf("MAT-L") < processLog.getLogDetail().indexOf("MAT-N"));
     }
 

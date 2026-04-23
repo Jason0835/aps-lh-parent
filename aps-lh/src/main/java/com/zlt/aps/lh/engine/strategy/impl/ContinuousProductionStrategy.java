@@ -171,6 +171,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 result.setIsEnd(isEnding ? "1" : "0");
                 context.getScheduleResultList().add(result);
                 registerMachineAssignment(context, machineCode, result);
+                // 续作已完成当日排产，不应继续参与后续结构优先级判断。
+                context.removePendingSkuFromStructureMap(sku);
 
                 // 如果是收尾，更新机台收尾信息
                 if (isEnding && result.getSpecEndTime() != null) {
@@ -271,6 +273,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         // S4.4 收口：零计划续作结果语义统一，并按最终结果同步机台状态。
         finalizeZeroPlanContinuousResults(context);
         syncMachineStateAfterContinuousAdjust(context);
+        // 续作阶段全部处理完成后，再按剩余新增待排SKU统一收口结构视图，供S4.5排序使用。
+        context.rebuildStructureSkuMapFromPending(context.getNewSpecSkuList());
     }
 
     @Override

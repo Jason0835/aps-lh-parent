@@ -62,6 +62,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     private static final String AUTO_DATA_SOURCE = "0";
     private static final String ZERO_PLAN_UNSCHEDULED_REASON = "续作结果裁剪为0";
     private static final String TYPE_BLOCK_CLEANING_ANALYSIS = "模具清洗+换活字块";
+    private static final String TYPE_BLOCK_TRIGGER_ENDING = "收尾触发";
+    private static final String TYPE_BLOCK_TRIGGER_FALLBACK = "在机前规格兜底触发";
+    private static final String TYPE_BLOCK_SKIP_REASON_T1_NOT_END =
+            "T-1 最新记录未收尾，跳过兜底反查";
 
     @Resource
     private OrderNoGenerator orderNoGenerator;
@@ -90,11 +94,26 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         // 基于续作收尾阶段回写后的真实收尾时间，按机台收尾先后衔接同产品结构/换活字块
         List<MachineScheduleDTO> endingMachines = context.getMachineScheduleMap().values().stream()
                 .filter(m -> m.isEnding() && m.getEstimatedEndTime() != null)
-                .sorted(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime))
                 .collect(Collectors.toList());
-        traceEndingMachineOrder(context, endingMachines);
+        endingMachines.sort(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime));
+        Map<String, String> machineTriggerSourceMap = new HashMap<>(Math.max(16, endingMachines.size() * 2));
+        List<MachineScheduleDTO> candidateMachines = new ArrayList<>(endingMachines);
+        for (MachineScheduleDTO endingMachine : endingMachines) {
+            machineTriggerSourceMap.put(endingMachine.getMachineCode(), TYPE_BLOCK_TRIGGER_ENDING);
+        }
+        List<MachineScheduleDTO> fallbackMachines = resolveTypeBlockFallbackMachines(context);
+        fallbackMachines.sort(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime));
+        for (MachineScheduleDTO fallbackMachine : fallbackMachines) {
+            String machineCode = fallbackMachine.getMachineCode();
+            if (StringUtils.isEmpty(machineCode) || machineTriggerSourceMap.containsKey(machineCode)) {
+                continue;
+            }
+            candidateMachines.add(fallbackMachine);
+            machineTriggerSourceMap.put(machineCode, TYPE_BLOCK_TRIGGER_FALLBACK);
+        }
+        traceEndingMachineOrder(context, candidateMachines);
 
-        for (MachineScheduleDTO machine : endingMachines) {
+        for (MachineScheduleDTO machine : candidateMachines) {
             // 按当前业务要求，先停用同产品结构直续逻辑，保留代码便于后续恢复。
             // SkuScheduleDTO sameStructureSku = findSameStructureContinuousSku(context, machine);
             // if (sameStructureSku != null
@@ -115,13 +134,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             if (typeBlockSku == null) {
                 // 两级都未命中时，本轮不再给该收尾机台补衔接SKU。
                 traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
-                        null, matchedLayer, false, null);
+                        null, matchedLayer, false, null, machineTriggerSourceMap.get(machine.getMachineCode()));
                 continue;
             }
             Date typeBlockStartTime = calcTypeBlockStartTime(context, machine);
             boolean success = appendFollowUpResult(context, machine, typeBlockSku, typeBlockStartTime, shifts, true);
             traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
-                    typeBlockSku, matchedLayer, success, typeBlockStartTime);
+                    typeBlockSku, matchedLayer, success, typeBlockStartTime,
+                    machineTriggerSourceMap.get(machine.getMachineCode()));
         }
     }
 
@@ -572,19 +592,19 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 输出收尾机台排序总览日志。
+     * 输出衔接机台排序总览日志。
      *
      * @param context 排程上下文
-     * @param endingMachines 收尾机台列表
+     * @param endingMachines 衔接机台列表（包含收尾机台与兜底机台）
      */
     private void traceEndingMachineOrder(LhScheduleContext context, List<MachineScheduleDTO> endingMachines) {
         if (!PriorityTraceLogHelper.isEnabled(context)) {
             return;
         }
-        String title = "收尾机台排序总览";
+        String title = "衔接机台排序总览";
         StringBuilder detailBuilder = new StringBuilder(512);
         PriorityTraceLogHelper.appendLine(detailBuilder,
-                "收尾机台数=" + PriorityTraceLogHelper.sizeOf(endingMachines));
+                "候选机台数=" + PriorityTraceLogHelper.sizeOf(endingMachines));
         int index = 1;
         for (MachineScheduleDTO machine : endingMachines) {
             Date estimatedEndTime = machine.getEstimatedEndTime();
@@ -592,7 +612,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                     index++
                             + ". 机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
                             + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
-                            + ", 真实收尾时间=" + PriorityTraceLogHelper.formatDateTime(estimatedEndTime)
+                            + ", 基准时间=" + PriorityTraceLogHelper.formatDateTime(estimatedEndTime)
                             + ", 实际切换起点=" + PriorityTraceLogHelper.formatDateTime(
                             resolveAllowedSwitchStartTime(context, estimatedEndTime)));
         }
@@ -619,7 +639,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                         SkuScheduleDTO selectedSku,
                                         String matchedLayer,
                                         boolean success,
-                                        Date startTime) {
+                                        Date startTime,
+                                        String triggerSource) {
         if (!PriorityTraceLogHelper.isEnabled(context)) {
             return;
         }
@@ -637,7 +658,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 "命中层级=" + PriorityTraceLogHelper.safeText(matchedLayer)
                         + ", 选中SKU=" + PriorityTraceLogHelper.safeText(
                         selectedSku == null ? null : selectedSku.getMaterialCode())
-                        + ", 是否换活字块=" + PriorityTraceLogHelper.yesNo(selectedSku != null));
+                        + ", 是否换活字块=" + PriorityTraceLogHelper.yesNo(selectedSku != null)
+                        + ", 触发来源=" + PriorityTraceLogHelper.safeText(triggerSource));
         PriorityTraceLogHelper.appendLine(detailBuilder,
                 "衔接结果=" + (success ? "成功" : "未衔接")
                         + ", 换活字块开始时间=" + PriorityTraceLogHelper.formatDateTime(
@@ -663,6 +685,181 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             materialCodes.add(PriorityTraceLogHelper.safeText(sku.getMaterialCode()));
         }
         return String.join(",", materialCodes);
+    }
+
+    /**
+     * 识别可参与换活字块兜底反查的机台。
+     *
+     * @param context 排程上下文
+     * @return 兜底机台列表
+     */
+    private List<MachineScheduleDTO> resolveTypeBlockFallbackMachines(LhScheduleContext context) {
+        List<MachineScheduleDTO> fallbackMachineList = new ArrayList<>();
+        if (context == null
+                || CollectionUtils.isEmpty(context.getMachineScheduleMap())
+                || CollectionUtils.isEmpty(context.getMachineOnlineInfoMap())) {
+            return fallbackMachineList;
+        }
+        for (MachineScheduleDTO machine : context.getMachineScheduleMap().values()) {
+            if (machine == null || machine.isEnding() || machine.getEstimatedEndTime() == null) {
+                continue;
+            }
+            String machineCode = machine.getMachineCode();
+            if (StringUtils.isEmpty(machineCode)
+                    || !context.getMachineOnlineInfoMap().containsKey(machineCode)
+                    || StringUtils.isEmpty(machine.getCurrentMaterialCode())) {
+                continue;
+            }
+            if (isMachineAssignedContinuousResult(context, machineCode)) {
+                continue;
+            }
+            if (!isTypeBlockFallbackEligibleByPreviousDay(context, machine)) {
+                continue;
+            }
+            fallbackMachineList.add(machine);
+        }
+        return fallbackMachineList;
+    }
+
+    /**
+     * 判定机台是否已命中续作分配。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @return true-已命中续作分配
+     */
+    private boolean isMachineAssignedContinuousResult(LhScheduleContext context, String machineCode) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || CollectionUtils.isEmpty(context.getMachineAssignmentMap())) {
+            return false;
+        }
+        List<LhScheduleResult> assignedResults = context.getMachineAssignmentMap().get(machineCode);
+        if (CollectionUtils.isEmpty(assignedResults)) {
+            return false;
+        }
+        for (LhScheduleResult assignedResult : assignedResults) {
+            if (assignedResult != null
+                    && StringUtils.equals(CONTINUOUS_SCHEDULE_TYPE, assignedResult.getScheduleType())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 判定兜底机台是否通过 T-1 收尾校验。
+     * <p>规则：T-1 无该机台该SKU记录，或最新一条记录 isEnd=1。</p>
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @return true-通过校验
+     */
+    private boolean isTypeBlockFallbackEligibleByPreviousDay(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (context == null || machine == null) {
+            return false;
+        }
+        String machineCode = machine.getMachineCode();
+        String currentMaterialCode = machine.getCurrentMaterialCode();
+        if (StringUtils.isEmpty(machineCode) || StringUtils.isEmpty(currentMaterialCode)) {
+            return false;
+        }
+        LhScheduleResult latestPreviousResult = resolveLatestPreviousResult(context, machineCode, currentMaterialCode);
+        if (latestPreviousResult == null || StringUtils.equals("1", latestPreviousResult.getIsEnd())) {
+            return true;
+        }
+        traceTypeBlockFallbackSkip(context, machine, latestPreviousResult, TYPE_BLOCK_SKIP_REASON_T1_NOT_END);
+        return false;
+    }
+
+    /**
+     * 解析 T-1 同机台同SKU的最新一条排程结果。
+     * <p>排序字段优先 specEndTime，缺失时回退 createTime。</p>
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @param materialCode 物料编码
+     * @return 最新结果，未命中返回 null
+     */
+    private LhScheduleResult resolveLatestPreviousResult(LhScheduleContext context, String machineCode, String materialCode) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || StringUtils.isEmpty(materialCode)
+                || CollectionUtils.isEmpty(context.getPreviousScheduleResultList())) {
+            return null;
+        }
+        LhScheduleResult latestResult = null;
+        Date latestTime = null;
+        for (LhScheduleResult previousResult : context.getPreviousScheduleResultList()) {
+            if (previousResult == null
+                    || !StringUtils.equals(machineCode, previousResult.getLhMachineCode())
+                    || !StringUtils.equals(materialCode, previousResult.getMaterialCode())) {
+                continue;
+            }
+            Date currentTime = resolvePreviousResultOrderTime(previousResult);
+            if (latestResult == null) {
+                latestResult = previousResult;
+                latestTime = currentTime;
+                continue;
+            }
+            if (latestTime == null || (currentTime != null && currentTime.after(latestTime))) {
+                latestResult = previousResult;
+                latestTime = currentTime;
+            }
+        }
+        return latestResult;
+    }
+
+    /**
+     * 解析 T-1 记录排序时间。
+     *
+     * @param previousResult T-1排程结果
+     * @return 排序时间
+     */
+    private Date resolvePreviousResultOrderTime(LhScheduleResult previousResult) {
+        if (previousResult == null) {
+            return null;
+        }
+        if (previousResult.getSpecEndTime() != null) {
+            return previousResult.getSpecEndTime();
+        }
+        return previousResult.getCreateTime();
+    }
+
+    /**
+     * 输出兜底机台被跳过的决策日志。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param latestPreviousResult T-1最新结果
+     * @param reason 跳过原因
+     */
+    private void traceTypeBlockFallbackSkip(LhScheduleContext context,
+                                            MachineScheduleDTO machine,
+                                            LhScheduleResult latestPreviousResult,
+                                            String reason) {
+        if (machine == null) {
+            return;
+        }
+        log.info("换活字块兜底机台跳过, 机台: {}, 当前物料: {}, 原因: {}",
+                machine.getMachineCode(), machine.getCurrentMaterialCode(), reason);
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "收尾机台衔接决策";
+        StringBuilder detailBuilder = new StringBuilder(384);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                        + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
+                        + ", 触发来源=" + TYPE_BLOCK_TRIGGER_FALLBACK);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "衔接结果=未衔接, 原因=" + PriorityTraceLogHelper.safeText(reason)
+                        + ", T-1最新isEnd=" + PriorityTraceLogHelper.safeText(
+                        latestPreviousResult == null ? null : latestPreviousResult.getIsEnd())
+                        + ", T-1最新排序时间=" + PriorityTraceLogHelper.formatDateTime(
+                        resolvePreviousResultOrderTime(latestPreviousResult)));
+        String detail = detailBuilder.toString().trim();
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
     }
 
     /**

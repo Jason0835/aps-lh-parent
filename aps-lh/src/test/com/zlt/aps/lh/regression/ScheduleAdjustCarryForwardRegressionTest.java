@@ -5,7 +5,6 @@ import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
-import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -18,7 +17,6 @@ import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
@@ -71,11 +69,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         previous.setClass1PlanQty(80);
         context.setPreviousScheduleResultList(Collections.singletonList(previous));
 
-        LhScheFinishQty finishQty = new LhScheFinishQty();
-        finishQty.setLhMachineCode("M1");
-        finishQty.setMaterialCode("MAT-1");
-        finishQty.setClass1FinishQty(BigDecimal.valueOf(60));
-        context.getScheFinishQtyMap().put("M1_MAT-1", finishQty);
+        context.getMaterialDayFinishedQtyMap().put("MAT-1_2026-04-12", 60);
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 
@@ -85,6 +79,48 @@ class ScheduleAdjustCarryForwardRegressionTest {
         assertEquals(120, sku.getPendingQty());
         assertEquals(940, sku.getSurplusQty());
         assertEquals(120, sku.getTargetScheduleQty().intValue());
+    }
+
+    @Test
+    void doHandle_shouldNotDoubleDeductWhenSameMaterialHasMultipleMachines() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-MULTI");
+        plan.setMaterialDesc("MAT-MULTI-DESC");
+        plan.setStructureName("SM2");
+        plan.setSpecifications("SPEC-M2");
+        plan.setTotalQty(200);
+        plan.setDay11(10);
+        plan.setDay12(10);
+        plan.setDay13(10);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        LhScheduleResult previousA = new LhScheduleResult();
+        previousA.setLhMachineCode("M-A");
+        previousA.setMaterialCode("MAT-MULTI");
+        previousA.setClass1PlanQty(50);
+        LhScheduleResult previousB = new LhScheduleResult();
+        previousB.setLhMachineCode("M-B");
+        previousB.setMaterialCode("MAT-MULTI");
+        previousB.setClass1PlanQty(30);
+        context.setPreviousScheduleResultList(Arrays.asList(previousA, previousB));
+
+        // 前日同物料日完成量只记一次，不按机台重复扣减。
+        context.getMaterialDayFinishedQtyMap().put("MAT-MULTI_2026-04-12", 60);
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("SM2").get(0);
+        assertEquals(20, context.getCarryForwardQtyMap().get("MAT-MULTI").intValue());
+        assertEquals(30, sku.getWindowPlanQty());
+        assertEquals(50, sku.getPendingQty());
     }
 
     @Test
@@ -169,11 +205,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         previous.setClass1PlanQty(50);
         context.setPreviousScheduleResultList(Collections.singletonList(previous));
 
-        LhScheFinishQty finishQty = new LhScheFinishQty();
-        finishQty.setLhMachineCode("M3");
-        finishQty.setMaterialCode("MAT-3");
-        finishQty.setClass1FinishQty(BigDecimal.valueOf(20));
-        context.getScheFinishQtyMap().put("M3_MAT-3", finishQty);
+        context.getMaterialDayFinishedQtyMap().put("MAT-3_2026-04-12", 20);
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 

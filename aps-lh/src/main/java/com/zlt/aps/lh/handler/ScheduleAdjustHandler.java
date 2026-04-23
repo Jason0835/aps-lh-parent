@@ -15,7 +15,6 @@ import com.zlt.aps.lh.util.MonthPlanDayQtyUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
-import com.zlt.aps.lh.api.domain.entity.LhScheFinishQty;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
@@ -25,9 +24,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
-import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -94,15 +93,25 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         if (previousScheduleList == null || previousScheduleList.isEmpty()) {
             return;
         }
-        Map<String, Integer> carryForwardQtyMap = new LinkedHashMap<>();
+        Date previousScheduleDate = resolvePreviousScheduleDate(context);
+        Map<String, Integer> materialPlannedQtyMap = new LinkedHashMap<>();
         for (LhScheduleResult result : previousScheduleList) {
+            if (StringUtils.isEmpty(result.getMaterialCode())) {
+                continue;
+            }
             int plannedQty = ShiftFieldUtil.sumPlanQty(result, LhScheduleConstant.MAX_SHIFT_SLOT_COUNT);
-            int finishedQty = resolveActualFinishedQty(context, result);
+            materialPlannedQtyMap.merge(result.getMaterialCode(), plannedQty, Integer::sum);
+        }
+        Map<String, Integer> carryForwardQtyMap = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : materialPlannedQtyMap.entrySet()) {
+            String materialCode = entry.getKey();
+            int plannedQty = entry.getValue();
+            int finishedQty = resolveMaterialDayFinishedQty(context, materialCode, previousScheduleDate);
             int diffQty = plannedQty - finishedQty;
             if (diffQty != 0) {
-                carryForwardQtyMap.merge(result.getMaterialCode(), diffQty, Integer::sum);
-                log.debug("欠产/超产传导: 机台[{}] SKU[{}] 计划[{}] 完成[{}] 净值[{}]",
-                        result.getLhMachineCode(), result.getMaterialCode(), plannedQty, finishedQty, diffQty);
+                carryForwardQtyMap.put(materialCode, diffQty);
+                log.debug("欠产/超产传导: 日期[{}] SKU[{}] 前日计划总量[{}] 日完成量[{}] 净值[{}]",
+                        LhScheduleTimeUtil.formatDate(previousScheduleDate), materialCode, plannedQty, finishedQty, diffQty);
             }
         }
         context.setCarryForwardQtyMap(carryForwardQtyMap);
@@ -195,13 +204,18 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             if (monthFinishedQty != null) {
                 return Math.max(monthFinishedQty, 0);
             }
+            Integer dayFinishedQty = context.getMaterialDayFinishedQtyMap().get(
+                    buildMaterialDayKey(materialCode, resolvePreviousScheduleDate(context)));
+            if (Objects.nonNull(dayFinishedQty)) {
+                return Math.max(dayFinishedQty, 0);
+            }
         }
 
-        // 兜底：从前日排程结果汇总完成量，且优先复用实际完成量表。
+        // 兜底：从前日排程结果按班次完成量字段汇总。
         int finishedQty = 0;
         for (LhScheduleResult result : context.getPreviousScheduleResultList()) {
             if (StringUtils.isNotEmpty(materialCode) && materialCode.equals(result.getMaterialCode())) {
-                finishedQty += resolveActualFinishedQty(context, result);
+                finishedQty += resolveShiftFinishedQty(result, context);
             }
         }
         return finishedQty;
@@ -314,14 +328,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         context.getUnscheduledResultList().add(unscheduled);
     }
 
-    private int resolveActualFinishedQty(LhScheduleContext context, LhScheduleResult result) {
-        String key = result.getLhMachineCode() + "_" + result.getMaterialCode();
-        LhScheFinishQty finishQty = context.getScheFinishQtyMap().get(key);
-        if (Objects.nonNull(finishQty)) {
-            return safeFinishQty(finishQty.getClass1FinishQty())
-                    + safeFinishQty(finishQty.getClass2FinishQty())
-                    + safeFinishQty(finishQty.getClass3FinishQty());
-        }
+    private int resolveShiftFinishedQty(LhScheduleResult result, LhScheduleContext context) {
         List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
         if (CollectionUtils.isEmpty(shifts)) {
             shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
@@ -331,6 +338,47 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             finishedQty += safeInt(ShiftFieldUtil.getShiftFinishQty(result, shift.getShiftIndex()));
         }
         return finishedQty;
+    }
+
+    /**
+     * 获取指定日期的物料日完成量（按“物料+日期”聚合）。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @param finishDate 完成日期
+     * @return 日完成量
+     */
+    private int resolveMaterialDayFinishedQty(LhScheduleContext context, String materialCode, Date finishDate) {
+        if (StringUtils.isEmpty(materialCode) || Objects.isNull(finishDate)) {
+            return 0;
+        }
+        String key = buildMaterialDayKey(materialCode, finishDate);
+        Integer dayFinishedQty = context.getMaterialDayFinishedQtyMap().get(key);
+        return Objects.nonNull(dayFinishedQty) ? Math.max(dayFinishedQty, 0) : 0;
+    }
+
+    /**
+     * 构建“物料+日期”聚合Key。
+     *
+     * @param materialCode 物料编码
+     * @param date 日期
+     * @return 聚合Key
+     */
+    private String buildMaterialDayKey(String materialCode, Date date) {
+        return materialCode + "_" + LhScheduleTimeUtil.formatDate(LhScheduleTimeUtil.clearTime(date));
+    }
+
+    /**
+     * 解析前日排程日期（目标排程日-1）。
+     *
+     * @param context 排程上下文
+     * @return 前日日期
+     */
+    private Date resolvePreviousScheduleDate(LhScheduleContext context) {
+        if (Objects.nonNull(context.getScheduleTargetDate())) {
+            return LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(context.getScheduleTargetDate(), -1));
+        }
+        return LhScheduleTimeUtil.clearTime(context.getScheduleDate());
     }
 
     /**
@@ -524,16 +572,6 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      */
     private int safeInt(Integer value) {
         return Objects.nonNull(value) ? value : 0;
-    }
-
-    /**
-     * 安全获取完成量值，null时返回0。
-     *
-     * @param value 完成量
-     * @return 整数件数
-     */
-    private int safeFinishQty(BigDecimal value) {
-        return Objects.nonNull(value) ? value.intValue() : 0;
     }
 
     /**

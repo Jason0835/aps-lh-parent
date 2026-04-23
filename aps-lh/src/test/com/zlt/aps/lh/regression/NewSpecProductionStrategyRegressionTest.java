@@ -202,6 +202,7 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals(0, context.getUnscheduledResultList().size(), "进入新增排产后命中机台时不应生成未排记录");
         assertEquals("02", context.getScheduleResultList().get(0).getScheduleType());
         assertEquals("1", context.getScheduleResultList().get(0).getIsChangeMould());
+        assertEquals("0", context.getScheduleResultList().get(0).getIsTypeBlock());
     }
 
     @Test

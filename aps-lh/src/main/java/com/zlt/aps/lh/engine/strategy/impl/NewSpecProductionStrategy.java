@@ -478,6 +478,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setIsDelete(0);
         result.setScheduleType(NEW_SPEC_SCHEDULE_TYPE);
         result.setIsChangeMould("1");
+        result.setIsTypeBlock("0");
         result.setConstructionStage(sku.getConstructionStage());
         result.setEmbryoNo(sku.getEmbryoNo());
         result.setTextNo(sku.getTextNo());

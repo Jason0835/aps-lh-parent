@@ -724,6 +724,16 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
     @TableField(value = "TOTAL_DAILY_PLAN_QTY")
     private Integer totalDailyPlanQty;
 
+
+    /**
+     * 是否换活字块
+     */
+    @Excel(name = "ui.data.column.lhScheduleResult.isTypeBlock")
+    @ApiModelProperty(value = "是否换活字块", name = "isTypeBlock")
+    @TableField(value = "IS_TYPE_BLOCK")
+    private String isTypeBlock;
+
+
     /**
      * 删除标识（0未删除；1已删除）
      */

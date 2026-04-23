@@ -83,8 +83,10 @@ class ContinuousProductionTypeBlockRegressionTest {
         LhScheduleResult followUpResult = context.getScheduleResultList().get(1);
         assertEquals("MAT-P1", followUpResult.getMaterialCode());
         assertEquals("01", followUpResult.getScheduleType());
+        assertEquals("0", continuousResult.getIsTypeBlock());
         assertEquals("1", followUpResult.getIsEnd());
         assertEquals("1", followUpResult.getIsChangeMould());
+        assertEquals("1", followUpResult.getIsTypeBlock());
         assertNotNull(followUpResult.getSpecEndTime());
         assertNotNull(followUpResult.getTdaySpecEndTime());
         assertEquals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(),

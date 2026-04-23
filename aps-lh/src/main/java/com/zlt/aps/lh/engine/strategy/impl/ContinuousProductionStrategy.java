@@ -535,11 +535,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setIsEnd(isEnding ? "1" : "0");
         if (typeBlock) {
             result.setIsChangeMould("1");
+            result.setIsTypeBlock("1");
             result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode(), machine.getCurrentMaterialCode()));
             // 换活字块虽然不是新增规格换模，但下游换模计划仍按真实切换开始时间生成。
             result.setMouldChangeStartTime(resolveTypeBlockChangeStartTime(context, startTime));
         } else {
             result.setIsChangeMould("0");
+            result.setIsTypeBlock("0");
         }
         // 续作衔接结果即便非收尾，也必须补齐可计算完工时刻，避免结果校验失败。
         Date actualCompletionTime = resolveActualCompletionTime(context, result);
@@ -898,6 +900,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setDataSource("0");
         result.setIsDelete(0);
         result.setScheduleType(sku.getScheduleType() != null ? sku.getScheduleType() : "01");
+        result.setIsTypeBlock("0");
         result.setConstructionStage(sku.getConstructionStage());
         result.setEmbryoNo(sku.getEmbryoNo());
         result.setTextNo(sku.getTextNo());

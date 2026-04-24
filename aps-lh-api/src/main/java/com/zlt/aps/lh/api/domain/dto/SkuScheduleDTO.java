@@ -50,6 +50,8 @@ public class SkuScheduleDTO {
     private int dailyPlanQty;
     /** 待排产量(排程过程中动态递减) */
     private int pendingQty;
+    /** 排产目标量（由调度侧按模式计算后写入：按需求或按产能满排） */
+    private Integer targetScheduleQty;
 
     // ========== 产能信息 ==========
     /** 硫化时间(秒) */
@@ -82,6 +84,14 @@ public class SkuScheduleDTO {
     private int delayDays = -1;
     /** 供应链优先级 */
     private String supplyChainPriority;
+    /** 高优先级待排量 */
+    private int highPriorityPendingQty;
+    /** 周期排产待排量 */
+    private int cycleProductionPendingQty;
+    /** 中优先级待排量 */
+    private int midPriorityPendingQty;
+    /** 常规储备待排量 */
+    private int conventionProductionPendingQty;
 
     // ========== 机台信息(续作时使用) ==========
     /** 续作机台编号 */
@@ -110,4 +120,20 @@ public class SkuScheduleDTO {
     private String textNo;
     /** 硫化示方书号 */
     private String lhNo;
+
+    /**
+     * 解析本轮排产目标量。
+     * <p>主流程优先使用显式写入的新口径，旧测试/旧构造场景未赋值时回退到待排量口径。</p>
+     *
+     * @return 排产目标量
+     */
+    public int resolveTargetScheduleQty() {
+        if (targetScheduleQty != null) {
+            return Math.max(targetScheduleQty, 0);
+        }
+        if (pendingQty > 0) {
+            return pendingQty;
+        }
+        return Math.max(windowPlanQty, 0);
+    }
 }

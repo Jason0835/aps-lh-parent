@@ -242,6 +242,19 @@ public final class LhScheduleTimeUtil {
     }
 
     /**
+     * 获取换活字块总耗时（小时）
+     *
+     * @param context 排程上下文
+     * @return 换活字块总耗时（小时）
+     */
+    public static int getTypeBlockChangeTotalHours(LhScheduleContext context) {
+        if (Objects.isNull(context) || Objects.isNull(context.getScheduleConfig())) {
+            return LhScheduleConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS;
+        }
+        return context.getScheduleConfig().getTypeBlockChangeTotalHours();
+    }
+
+    /**
      * 获取首检时间（小时）
      *
      * @param context 排程上下文
@@ -459,6 +472,29 @@ public final class LhScheduleTimeUtil {
     }
 
     /**
+     * 禁止换模时段结束后，第一个可发起换模/切换的早班开始时刻。
+     * <p>与跨日夜班口径一致：晚间段（≥禁止换模起始小时，默认 20:00）顺延到<strong>次日</strong>早班；
+     * 凌晨段（&lt;早班起始小时，默认 6:00）属于同一跨日夜班的后半段，顺延到<strong>当日</strong>早班。</p>
+     *
+     * @param context  排程上下文
+     * @param baseTime 当前处于禁止换模时段内的时间点
+     * @return 下一个早班开始时间；context 或 baseTime 为 null 时返回 null
+     */
+    public static Date resolveNextMorningAfterNoMouldChangeWindow(LhScheduleContext context, Date baseTime) {
+        if (context == null || baseTime == null) {
+            return null;
+        }
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(baseTime);
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        Date morningBaseDate = clearTime(baseTime);
+        if (hour >= getNoMouldChangeStartHour(context)) {
+            morningBaseDate = addDays(morningBaseDate, 1);
+        }
+        return buildTime(morningBaseDate, getMorningStartHour(context), 0, 0);
+    }
+
+    /**
      * 判断指定时间是否在早班时段
      *
      * @param context 排程上下文
@@ -488,6 +524,22 @@ public final class LhScheduleTimeUtil {
         cal.setTime(time);
         int hour = cal.get(Calendar.HOUR_OF_DAY);
         return hour >= afternoonHour && hour < nightHour;
+    }
+
+    /**
+     * 判断指定时间是否在夜班时段
+     *
+     * @param context 排程上下文
+     * @param time    时间点
+     * @return true-夜班时段
+     */
+    public static boolean isNightShift(LhScheduleContext context, Date time) {
+        int nightHour = getNightStartHour(context);
+        int morningHour = getMorningStartHour(context);
+        Calendar cal = Calendar.getInstance();
+        cal.setTime(time);
+        int hour = cal.get(Calendar.HOUR_OF_DAY);
+        return hour >= nightHour || hour < morningHour;
     }
 
     /**

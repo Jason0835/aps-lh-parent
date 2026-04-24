@@ -1,0 +1,206 @@
+package com.zlt.aps.lh.component;
+
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
+import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
+import com.zlt.aps.lh.api.enums.ScheduleTargetModeEnum;
+import com.zlt.aps.lh.context.LhScheduleConfig;
+import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
+import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
+
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * 排产目标量解析器
+ * <p>统一承载“按需求排产 / 按产能满排”的目标量口径，避免分散判断。</p>
+ *
+ * @author APS
+ */
+@Component
+public class TargetScheduleQtyResolver {
+
+    /**
+     * 解析 SKU 的初始目标排产量。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @return 初始目标排产量
+     */
+    public int resolveInitialTargetQty(LhScheduleContext context, SkuScheduleDTO sku) {
+        if (Objects.isNull(sku)) {
+            return 0;
+        }
+        int surplusQty = Math.max(0, sku.getSurplusQty());
+        if (surplusQty <= 0) {
+            return 0;
+        }
+        int upperLimitQty;
+        if (isFullCapacityMode(context)) {
+            upperLimitQty = resolveTheoreticalWindowCapacity(context, sku);
+        } else {
+            upperLimitQty = Math.max(0, sku.getPendingQty());
+        }
+        return Math.max(0, Math.min(surplusQty, upperLimitQty));
+    }
+
+    /**
+     * 按机台实际开产时间收敛目标排产量。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @param machine 机台
+     * @param productionStartTime 实际开产时间
+     * @param shifts 排程窗口班次
+     * @return 收敛后的目标排产量
+     */
+    public int refineTargetQtyByMachineCapacity(LhScheduleContext context,
+                                                SkuScheduleDTO sku,
+                                                MachineScheduleDTO machine,
+                                                Date productionStartTime,
+                                                List<LhShiftConfigVO> shifts) {
+        if (Objects.isNull(sku)) {
+            return 0;
+        }
+        int currentTargetQty = sku.resolveTargetScheduleQty();
+        if (currentTargetQty <= 0 || !isFullCapacityMode(context)) {
+            return Math.max(currentTargetQty, 0);
+        }
+        int actualCapacityQty = resolveActualWindowCapacity(context, sku, machine, productionStartTime, shifts);
+        if (actualCapacityQty <= 0) {
+            return 0;
+        }
+        return Math.min(currentTargetQty, actualCapacityQty);
+    }
+
+    /**
+     * 判断当前是否为按产能满排模式。
+     *
+     * @param context 排程上下文
+     * @return true-按产能满排，false-按需求排产
+     */
+    public boolean isFullCapacityMode(LhScheduleContext context) {
+        LhScheduleConfig scheduleConfig = context != null ? context.getScheduleConfig() : null;
+        if (Objects.isNull(scheduleConfig)) {
+            return LhScheduleConstant.ENABLE_FULL_CAPACITY_SCHEDULING == 1;
+        }
+        return scheduleConfig.getScheduleTargetMode() == ScheduleTargetModeEnum.CAPACITY_FULL;
+    }
+
+    /**
+     * 解析理论窗口产能上限。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @return 理论窗口产能上限
+     */
+    private int resolveTheoreticalWindowCapacity(LhScheduleContext context, SkuScheduleDTO sku) {
+        if (Objects.isNull(sku) || sku.getShiftCapacity() <= 0) {
+            return Math.max(0, sku != null ? sku.getPendingQty() : 0);
+        }
+        List<LhShiftConfigVO> shifts = resolveScheduleShifts(context);
+        if (CollectionUtils.isEmpty(shifts)) {
+            return Math.max(0, sku.getPendingQty());
+        }
+        return Math.max(0, sku.getShiftCapacity() * shifts.size());
+    }
+
+    /**
+     * 解析机台在剩余窗口内的实际可排产量。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @param machine 机台
+     * @param productionStartTime 实际开产时间
+     * @param shifts 排程窗口班次
+     * @return 实际可排产量
+     */
+    private int resolveActualWindowCapacity(LhScheduleContext context,
+                                            SkuScheduleDTO sku,
+                                            MachineScheduleDTO machine,
+                                            Date productionStartTime,
+                                            List<LhShiftConfigVO> shifts) {
+        if (Objects.isNull(context)
+                || Objects.isNull(sku)
+                || Objects.isNull(machine)
+                || Objects.isNull(productionStartTime)
+                || CollectionUtils.isEmpty(shifts)) {
+            return 0;
+        }
+        int shiftCapacity = sku.getShiftCapacity();
+        int lhTimeSeconds = sku.getLhTimeSeconds();
+        if (shiftCapacity <= 0 && lhTimeSeconds <= 0) {
+            return 0;
+        }
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
+        List<MachineCleaningWindowDTO> cleaningWindowList = CollectionUtils.isEmpty(machine.getCleaningWindowList())
+                ? new ArrayList<>() : machine.getCleaningWindowList();
+        int dryIceLossQty = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
+        int dryIceDurationHours = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
+
+        Date cursorStartTime = productionStartTime;
+        int totalQty = 0;
+        boolean started = false;
+        for (LhShiftConfigVO shift : shifts) {
+            if (!started) {
+                if (cursorStartTime.before(shift.getShiftEndDateTime())) {
+                    started = true;
+                } else {
+                    continue;
+                }
+            }
+            Date effectiveStartTime = cursorStartTime.after(shift.getShiftStartDateTime())
+                    ? cursorStartTime : shift.getShiftStartDateTime();
+            if (!effectiveStartTime.before(shift.getShiftEndDateTime())) {
+                continue;
+            }
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    machine.getMachineCode(),
+                    effectiveStartTime,
+                    shift.getShiftEndDateTime(),
+                    shiftCapacity,
+                    lhTimeSeconds,
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    dryIceLossQty,
+                    dryIceDurationHours);
+            if (shiftMaxQty <= 0) {
+                continue;
+            }
+            totalQty += shiftMaxQty;
+            cursorStartTime = shift.getShiftEndDateTime();
+        }
+        return Math.max(totalQty, 0);
+    }
+
+    /**
+     * 获取排程窗口班次。
+     *
+     * @param context 排程上下文
+     * @return 班次列表
+     */
+    private List<LhShiftConfigVO> resolveScheduleShifts(LhScheduleContext context) {
+        if (Objects.isNull(context)) {
+            return new ArrayList<>(0);
+        }
+        if (!CollectionUtils.isEmpty(context.getScheduleWindowShifts())) {
+            return context.getScheduleWindowShifts();
+        }
+        if (Objects.isNull(context.getScheduleDate())) {
+            return new ArrayList<>(0);
+        }
+        return LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate());
+    }
+}

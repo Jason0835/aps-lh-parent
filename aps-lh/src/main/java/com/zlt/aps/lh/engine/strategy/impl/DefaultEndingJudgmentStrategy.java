@@ -27,24 +27,31 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
             return true;
         }
 
-        // 规则2：硫化余量 <= 排程期内可生产总产能
+        int targetScheduleQty = sku.resolveTargetScheduleQty();
+        boolean fullCapacityMode = isFullCapacityMode(context);
+        boolean endingBySurplusInFullModeEnabled = isEndingBySurplusInFullModeEnabled(context);
+
+        // 规则2：排产目标量 <= 排程期内可生产总产能。
+        // 满排模式下可选“按余量判定”开关，避免目标量封顶导致误判。
         int totalScheduleShifts = getTotalScheduleShifts(context);
         int shiftCapacity = sku.getShiftCapacity();
-        if (shiftCapacity > 0) {
+        int rule2CandidateQty = resolveRule2CandidateQty(sku, targetScheduleQty, fullCapacityMode,
+                endingBySurplusInFullModeEnabled);
+        if (rule2CandidateQty > 0 && shiftCapacity > 0) {
             int totalCapacity = shiftCapacity * totalScheduleShifts;
-            if (sku.getSurplusQty() <= totalCapacity && sku.getSurplusQty() > 0) {
-                log.debug("SKU[{}]判定为收尾(规则2): 余量{} <= 总产能{}", 
-                        sku.getMaterialCode(), sku.getSurplusQty(), totalCapacity);
+            if (rule2CandidateQty <= totalCapacity) {
+                log.debug("SKU[{}]判定为收尾(规则2): 比较量{} <= 总产能{} (满排模式:{}, 满排余量开关:{})",
+                        sku.getMaterialCode(), rule2CandidateQty, totalCapacity, fullCapacityMode,
+                        endingBySurplusInFullModeEnabled);
                 return true;
             }
         }
 
         // 规则3：待排量 < 日产能（非满产运行）
         int dailyCapacity = sku.getDailyCapacity();
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getSurplusQty();
-        if (dailyCapacity > 0 && pendingQty < dailyCapacity && pendingQty > 0) {
-            log.debug("SKU[{}]判定为收尾(规则3): 待排量{} < 日产能{}", 
-                    sku.getMaterialCode(), pendingQty, dailyCapacity);
+        if (dailyCapacity > 0 && targetScheduleQty < dailyCapacity && targetScheduleQty > 0) {
+            log.debug("SKU[{}]判定为收尾(规则3): 目标量{} < 日产能{}",
+                    sku.getMaterialCode(), targetScheduleQty, dailyCapacity);
             return true;
         }
 
@@ -58,13 +65,13 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
             return -1;
         }
 
-        int pendingQty = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getSurplusQty();
-        if (pendingQty <= 0) {
+        int targetScheduleQty = sku.resolveTargetScheduleQty();
+        if (targetScheduleQty <= 0) {
             return 0;
         }
 
         // 向上取整计算所需班次
-        return (int) Math.ceil((double) pendingQty / shiftCapacity);
+        return (int) Math.ceil((double) targetScheduleQty / shiftCapacity);
     }
 
     @Override
@@ -91,5 +98,52 @@ public class DefaultEndingJudgmentStrategy implements IEndingJudgmentStrategy {
             return context.getScheduleWindowShifts().size();
         }
         return LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate()).size();
+    }
+
+    /**
+     * 判断当前是否为按产能满排模式。
+     *
+     * @param context 排程上下文
+     * @return true-按产能满排，false-按需求排产
+     */
+    private boolean isFullCapacityMode(LhScheduleContext context) {
+        return context != null
+                && context.getScheduleConfig() != null
+                && context.getScheduleConfig().isFullCapacitySchedulingEnabled();
+    }
+
+    /**
+     * 满排模式下是否启用“按余量判定规则2”。
+     *
+     * @param context 排程上下文
+     * @return true-启用，false-关闭
+     */
+    private boolean isEndingBySurplusInFullModeEnabled(LhScheduleContext context) {
+        if (context != null && context.getScheduleConfig() != null) {
+            return context.getScheduleConfig().isEndingBySurplusInFullModeEnabled();
+        }
+        return LhScheduleConstant.ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE == 1;
+    }
+
+    /**
+     * 解析规则2的比较量。
+     *
+     * @param sku SKU
+     * @param targetScheduleQty 目标排产量
+     * @param fullCapacityMode 是否满排模式
+     * @param endingBySurplusInFullModeEnabled 满排按余量判收尾开关
+     * @return 规则2比较量，<=0 表示本轮不执行规则2
+     */
+    private int resolveRule2CandidateQty(SkuScheduleDTO sku,
+                                         int targetScheduleQty,
+                                         boolean fullCapacityMode,
+                                         boolean endingBySurplusInFullModeEnabled) {
+        if (!fullCapacityMode) {
+            return targetScheduleQty;
+        }
+        if (!endingBySurplusInFullModeEnabled) {
+            return 0;
+        }
+        return Math.max(sku.getSurplusQty(), 0);
     }
 }

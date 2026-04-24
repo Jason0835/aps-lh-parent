@@ -120,6 +120,8 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
         LhScheduleContext context = new LhScheduleContext();
         String factoryCode = request.getFactoryCode();
         context.setFactoryCode(factoryCode);
+        context.setMonthPlanVersion(StringUtils.isNotEmpty(request.getMonthPlanVersion())
+                ? request.getMonthPlanVersion().trim() : request.getMonthPlanVersion());
         context.setOperator(StringUtils.isNotEmpty(request.getOperator()) ? request.getOperator().trim() : request.getOperator());
         // 工厂名称来源于工厂枚举：116=越南，117=泰国
         context.setFactoryName(FactoryCodeEnum.getFactoryNameByCode(factoryCode));

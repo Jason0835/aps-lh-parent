@@ -129,4 +129,22 @@ public final class MonthPlanDayQtyUtil {
         Integer qty = DAY_QTY_GETTERS.get(dayOfMonth - 1).apply(plan);
         return qty != null ? qty : 0;
     }
+
+    /**
+     * 获取月计划中最早存在计划量的自然日。
+     *
+     * @param plan 月计划记录
+     * @return 最早有量日；不存在时返回 -1
+     */
+    public static int resolveFirstPlannedDay(FactoryMonthPlanProductionFinalResult plan) {
+        if (Objects.isNull(plan)) {
+            return -1;
+        }
+        for (int dayOfMonth = MIN_DAY_OF_MONTH; dayOfMonth <= MAX_DAY_OF_MONTH; dayOfMonth++) {
+            if (resolveDayQty(plan, dayOfMonth) > 0) {
+                return dayOfMonth;
+            }
+        }
+        return -1;
+    }
 }

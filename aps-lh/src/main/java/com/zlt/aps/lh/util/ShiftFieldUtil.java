@@ -97,6 +97,36 @@ public final class ShiftFieldUtil {
         return toInteger(BeanUtil.getProperty(result, propertyPrefix(shiftIndex) + "FinishQty"));
     }
 
+    /**
+     * 设置班次原因分析。
+     *
+     * @param result 排程结果
+     * @param shiftIndex 班次索引
+     * @param analysis 原因分析
+     */
+    public static void setShiftAnalysis(LhScheduleResult result, int shiftIndex, String analysis) {
+        if (!isValidIndex(shiftIndex)) {
+            log.warn("未知班次索引: {}", shiftIndex);
+            return;
+        }
+        BeanUtil.setProperty(result, propertyPrefix(shiftIndex) + "Analysis", analysis);
+    }
+
+    /**
+     * 获取班次原因分析。
+     *
+     * @param result 排程结果
+     * @param shiftIndex 班次索引
+     * @return 班次原因分析
+     */
+    public static String getShiftAnalysis(LhScheduleResult result, int shiftIndex) {
+        if (!isValidIndex(shiftIndex)) {
+            return null;
+        }
+        Object value = BeanUtil.getProperty(result, propertyPrefix(shiftIndex) + "Analysis");
+        return value == null ? null : String.valueOf(value);
+    }
+
     private static Integer toInteger(Object v) {
         if (v == null) {
             return null;

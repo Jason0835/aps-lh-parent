@@ -11,14 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class MachineStatusUtilTest {
 
     @Test
-    void isEnabled_returnsTrueWhenStatusIsZero() {
-        assertTrue(MachineStatusUtil.isEnabled("0"));
-        assertTrue(MachineStatusUtil.isEnabled(" 0 "));
+    void isEnabled_returnsTrueWhenStatusIsOne() {
+        assertTrue(MachineStatusUtil.isEnabled("1"));
+        assertTrue(MachineStatusUtil.isEnabled(" 1 "));
     }
 
     @Test
-    void isEnabled_returnsFalseWhenStatusIsOneOrBlank() {
-        assertFalse(MachineStatusUtil.isEnabled("1"));
+    void isEnabled_returnsFalseWhenStatusIsZeroOrBlank() {
+        assertFalse(MachineStatusUtil.isEnabled("0"));
+        assertFalse(MachineStatusUtil.isEnabled(" 0 "));
         assertFalse(MachineStatusUtil.isEnabled(""));
         assertFalse(MachineStatusUtil.isEnabled(null));
     }

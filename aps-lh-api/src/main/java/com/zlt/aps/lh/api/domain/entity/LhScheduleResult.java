@@ -724,6 +724,16 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
     @TableField(value = "TOTAL_DAILY_PLAN_QTY")
     private Integer totalDailyPlanQty;
 
+
+    /**
+     * 是否换活字块
+     */
+    @Excel(name = "ui.data.column.lhScheduleResult.isTypeBlock")
+    @ApiModelProperty(value = "是否换活字块", name = "isTypeBlock")
+    @TableField(value = "IS_TYPE_BLOCK")
+    private String isTypeBlock;
+
+
     /**
      * 删除标识（0未删除；1已删除）
      */
@@ -731,4 +741,10 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
     @ApiModelProperty(value = "删除标识（0未删除；1已删除）", name = "isDelete")
     @TableField(value = "IS_DELETE")
     private Integer isDelete;
+
+    /**
+     * 真实换模开始时间，仅用于本次排程运行期生成换模计划，不落库。
+     */
+    @TableField(exist = false)
+    private Date mouldChangeStartTime;
 }

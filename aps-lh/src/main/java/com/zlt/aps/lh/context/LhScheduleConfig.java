@@ -2,6 +2,7 @@ package com.zlt.aps.lh.context;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.enums.ScheduleTargetModeEnum;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.Collections;
@@ -94,6 +95,22 @@ public class LhScheduleConfig {
         return Math.max(1, getParamIntValue(LhScheduleParamConstant.SCHEDULE_DAYS, LhScheduleConstant.SCHEDULE_DAYS));
     }
 
+    public boolean isFullCapacitySchedulingEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.ENABLE_FULL_CAPACITY_SCHEDULING,
+                LhScheduleConstant.ENABLE_FULL_CAPACITY_SCHEDULING) == 1;
+    }
+
+    public boolean isEndingBySurplusInFullModeEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE,
+                LhScheduleConstant.ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE) == 1;
+    }
+
+    public ScheduleTargetModeEnum getScheduleTargetMode() {
+        return isFullCapacitySchedulingEnabled()
+                ? ScheduleTargetModeEnum.CAPACITY_FULL
+                : ScheduleTargetModeEnum.DEMAND_DRIVEN;
+    }
+
     public int getNightStartHour() {
         return getParamIntValue(LhScheduleParamConstant.NIGHT_START_HOUR, LhScheduleConstant.NIGHT_SHIFT_START_HOUR);
     }
@@ -140,6 +157,10 @@ public class LhScheduleConfig {
 
     public int getMouldChangeTotalHours() {
         return getParamIntValue(LhScheduleParamConstant.MOULD_CHANGE_TOTAL_HOURS, LhScheduleConstant.MOULD_CHANGE_TOTAL_HOURS);
+    }
+
+    public int getTypeBlockChangeTotalHours() {
+        return getParamIntValue(LhScheduleParamConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS, LhScheduleConstant.TYPE_BLOCK_CHANGE_TOTAL_HOURS);
     }
 
     public int getFirstInspectionHours() {
@@ -226,5 +247,10 @@ public class LhScheduleConfig {
     public int getLocalSearchTimeBudgetMs() {
         return Math.max(1, getParamIntValue(LhScheduleParamConstant.LOCAL_SEARCH_TIME_BUDGET_MS,
                 LhScheduleConstant.LOCAL_SEARCH_TIME_BUDGET_MS));
+    }
+
+    public boolean isPriorityTraceLogEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG,
+                LhScheduleConstant.ENABLE_PRIORITY_TRACE_LOG) == 1;
     }
 }

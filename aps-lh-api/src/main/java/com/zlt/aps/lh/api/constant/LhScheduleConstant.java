@@ -194,8 +194,12 @@ public final class LhScheduleConstant {
 
     /** 排程天数（默认值；运行期以硫化参数 SCHEDULE_DAYS 为准） */
     public static final int SCHEDULE_DAYS = 3;
+    /** 是否按产能满排默认值（0-按需求排产，1-按产能满排） */
+    public static final int ENABLE_FULL_CAPACITY_SCHEDULING = 1;
+    /** 满排模式是否按余量命中收尾规则2默认值（0-关闭，1-开启） */
+    public static final int ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE = 1;
     /** MES在机信息往前追溯天数默认值（运行期以硫化参数 MACHINE_ONLINE_LOOKBACK_DAYS 为准） */
-    public static final int MACHINE_ONLINE_LOOKBACK_DAYS = 1;
+    public static final int MACHINE_ONLINE_LOOKBACK_DAYS = 90;
 
     // ======================== 局部搜索选机 ========================
 
@@ -210,6 +214,9 @@ public final class LhScheduleConstant {
 
     /** 局部搜索单次耗时预算默认值（毫秒） */
     public static final int LOCAL_SEARCH_TIME_BUDGET_MS = 50;
+
+    /** 优先级跟踪日志开关默认值（0-关闭，1-开启） */
+    public static final int ENABLE_PRIORITY_TRACE_LOG = 0;
 
     /** 排程结果实体班次槽位上限（class1～class8） */
     public static final int MAX_SHIFT_SLOT_COUNT = 8;

@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
@@ -52,6 +53,9 @@ class MachineOccupationRegressionTest {
     @Mock
     private ICapacityCalculateStrategy capacityCalculateStrategy;
 
+    @Mock
+    private IEndingJudgmentStrategy endingJudgmentStrategy;
+
     @Test
     void scheduleNewSpecs_pushesMachineOccupationForward() {
         LhScheduleContext context = newContext();
@@ -87,10 +91,11 @@ class MachineOccupationRegressionTest {
                 });
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
-        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), any()))
-                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), anyString(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(2));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
         strategy.scheduleNewSpecs(context, machineMatchStrategy, mouldChangeBalanceStrategy,
                 inspectionBalanceStrategy, capacityCalculateStrategy);
 

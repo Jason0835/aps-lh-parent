@@ -3,12 +3,17 @@
  */
 package com.zlt.aps.lh.engine.strategy.impl;
 
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
@@ -19,11 +24,15 @@ import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.PriorityTraceLogHelper;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
+import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
+import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -33,8 +42,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -47,11 +59,23 @@ import java.util.stream.Collectors;
 @Component("continuousProductionStrategy")
 public class ContinuousProductionStrategy implements IProductionStrategy {
 
+    private static final String CONTINUOUS_SCHEDULE_TYPE = "01";
+    private static final String AUTO_DATA_SOURCE = "0";
+    private static final String ZERO_PLAN_UNSCHEDULED_REASON = "续作结果裁剪为0";
+    private static final String TYPE_BLOCK_CLEANING_ANALYSIS = "模具清洗+换活字块";
+    private static final String TYPE_BLOCK_TRIGGER_ENDING = "收尾触发";
+    private static final String TYPE_BLOCK_TRIGGER_FALLBACK = "在机前规格兜底触发";
+    private static final String TYPE_BLOCK_SKIP_REASON_T1_NOT_END =
+            "T-1 最新记录未收尾，跳过兜底反查";
+    private static final int TYPE_BLOCK_SWITCH_MAX_ATTEMPTS = 16;
+
     @Resource
     private OrderNoGenerator orderNoGenerator;
 
     @Resource
     private IEndingJudgmentStrategy endingJudgmentStrategy;
+    @Resource
+    private TargetScheduleQtyResolver targetScheduleQtyResolver;
 
     @Override
     public String getStrategyType() {
@@ -65,39 +89,61 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
     @Override
     public void scheduleTypeBlockChange(LhScheduleContext context) {
-        log.info("续作排产 - 换活字块排产, 机台数: {}", context.getMachineScheduleMap().size());
+        log.info("续作排产 - 收尾后衔接排产, 机台数: {}", context.getMachineScheduleMap().size());
 
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
-        // 按收尾时间升序处理每个在产机台
+        // 基于续作收尾阶段回写后的真实收尾时间，按机台收尾先后衔接同产品结构/换活字块
         List<MachineScheduleDTO> endingMachines = context.getMachineScheduleMap().values().stream()
                 .filter(m -> m.isEnding() && m.getEstimatedEndTime() != null)
-                .sorted(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime))
                 .collect(Collectors.toList());
+        endingMachines.sort(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime));
+        Map<String, String> machineTriggerSourceMap = new HashMap<>(Math.max(16, endingMachines.size() * 2));
+        List<MachineScheduleDTO> candidateMachines = new ArrayList<>(endingMachines);
+        for (MachineScheduleDTO endingMachine : endingMachines) {
+            machineTriggerSourceMap.put(endingMachine.getMachineCode(), TYPE_BLOCK_TRIGGER_ENDING);
+        }
+        List<MachineScheduleDTO> fallbackMachines = resolveTypeBlockFallbackMachines(context);
+        fallbackMachines.sort(Comparator.comparing(MachineScheduleDTO::getEstimatedEndTime));
+        for (MachineScheduleDTO fallbackMachine : fallbackMachines) {
+            String machineCode = fallbackMachine.getMachineCode();
+            if (StringUtils.isEmpty(machineCode) || machineTriggerSourceMap.containsKey(machineCode)) {
+                continue;
+            }
+            candidateMachines.add(fallbackMachine);
+            machineTriggerSourceMap.put(machineCode, TYPE_BLOCK_TRIGGER_FALLBACK);
+        }
+        traceEndingMachineOrder(context, candidateMachines);
 
-        for (MachineScheduleDTO machine : endingMachines) {
-            // 在newSpecSkuList中查找同胎胚同模具（换活字块）的SKU
-            SkuScheduleDTO typeBlockSku = findTypeBlockChangeSku(context, machine);
+        for (MachineScheduleDTO machine : candidateMachines) {
+            // 按当前业务要求，先停用同产品结构直续逻辑，保留代码便于后续恢复。
+            // SkuScheduleDTO sameStructureSku = findSameStructureContinuousSku(context, machine);
+            // if (sameStructureSku != null
+            //         && appendFollowUpResult(context, machine, sameStructureSku,
+            //         machine.getEstimatedEndTime(), shifts, false)) {
+            //     continue;
+            // }
+
+            // 续作收尾机台候选SKU按“同胎胚描述+同主花纹 -> 同规格”分层筛选。
+            List<SkuScheduleDTO> priorityOneCandidates = filterSameEmbryoDescAndMainPatternCandidates(context, machine);
+            List<SkuScheduleDTO> priorityTwoCandidates = CollectionUtils.isEmpty(priorityOneCandidates)
+                    ? filterSameSpecCandidates(context, machine) : new ArrayList<SkuScheduleDTO>(0);
+            SkuScheduleDTO typeBlockSku = !CollectionUtils.isEmpty(priorityOneCandidates)
+                    ? selectPreferredSkuFromCandidates(context, priorityOneCandidates)
+                    : selectPreferredSkuFromCandidates(context, priorityTwoCandidates);
+            String matchedLayer = !CollectionUtils.isEmpty(priorityOneCandidates) ? "第一层"
+                    : (!CollectionUtils.isEmpty(priorityTwoCandidates) ? "第二层" : "未命中");
             if (typeBlockSku == null) {
+                // 两级都未命中时，本轮不再给该收尾机台补衔接SKU。
+                traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                        null, matchedLayer, false, null, machineTriggerSourceMap.get(machine.getMachineCode()));
                 continue;
             }
-            // 计算开产时间（同模具换活字块，无需换模，但需首检）
-            Date startTime = calcTypeBlockStartTime(context, machine);
-            if (startTime == null) {
-                continue;
-            }
-            // 创建排程结果并分配到各班次
-            int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
-            typeBlockSku.setMouldQty(machineMouldQty);
-            LhScheduleResult result = buildScheduleResult(
-                    context, machine, typeBlockSku, startTime, shifts, machineMouldQty, false);
-            if (result != null) {
-                context.getScheduleResultList().add(result);
-                registerMachineAssignment(context, machine.getMachineCode(), result);
-                // 从新增SKU列表中移除已排产的SKU
-                context.getNewSpecSkuList().remove(typeBlockSku);
-                log.debug("换活字块排产完成, 机台: {}, SKU: {}", machine.getMachineCode(), typeBlockSku.getMaterialCode());
-            }
+            Date typeBlockStartTime = calcTypeBlockStartTime(context, machine);
+            boolean success = appendFollowUpResult(context, machine, typeBlockSku, typeBlockStartTime, shifts, true);
+            traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                    typeBlockSku, matchedLayer, success, typeBlockStartTime,
+                    machineTriggerSourceMap.get(machine.getMachineCode()));
         }
     }
 
@@ -127,11 +173,15 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 result.setIsEnd(isEnding ? "1" : "0");
                 context.getScheduleResultList().add(result);
                 registerMachineAssignment(context, machineCode, result);
+                // 续作已完成当日排产，不应继续参与后续结构优先级判断。
+                context.removePendingSkuFromStructureMap(sku);
 
                 // 如果是收尾，更新机台收尾信息
                 if (isEnding && result.getSpecEndTime() != null) {
+                    Date actualCompletionTime = resolveActualCompletionTime(context, result);
                     machine.setEnding(true);
-                    machine.setEstimatedEndTime(result.getSpecEndTime());
+                    machine.setEstimatedEndTime(actualCompletionTime);
+                    traceContinuousEndingUpdate(context, machine, sku, result, actualCompletionTime);
                 }
             }
         }
@@ -144,11 +194,12 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if (!"01".equals(result.getScheduleType())) {
+            if (!CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())
+                    && !"1".equals(result.getIsTypeBlock())) {
                 continue;
             }
             // 重新按班次分配（夜->早->中顺序按可用量分配）
-            redistributeShiftQty(result, shifts);
+            redistributeShiftQty(context, result, shifts);
         }
     }
 
@@ -163,13 +214,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         // 先处理收尾SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if ("1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(result, embryoStockMap, shifts);
+                adjustResultByEmbryoStock(context, result, embryoStockMap, shifts);
             }
         }
         // 再处理普通SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if (!"1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(result, embryoStockMap, shifts);
+                adjustResultByEmbryoStock(context, result, embryoStockMap, shifts);
             }
         }
     }
@@ -179,10 +230,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         log.info("续作排产 - 降模排产");
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
-        // 按materialCode分组找出同SKU多机台情况
+        // 按materialCode分组找出同SKU多机台情况（续作+换活字块统一收口）
         Map<String, List<LhScheduleResult>> skuResultMap = new HashMap<>();
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if ("01".equals(result.getScheduleType())) {
+            if (isContinuousPhaseResult(result)) {
                 skuResultMap.computeIfAbsent(result.getMaterialCode(), k -> new ArrayList<>()).add(result);
             }
         }
@@ -196,10 +247,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             int targetQty = 0;
             SkuScheduleDTO skuDto = findSkuDto(context, entry.getKey());
             if (skuDto != null) {
-                targetQty = skuDto.getPendingQty() > 0 ? skuDto.getPendingQty() : skuDto.getWindowPlanQty();
+                targetQty = skuDto.resolveTargetScheduleQty();
             }
 
-            // 总计划量超过当前窗口待排量时才降模
+            // 总计划量超过当前排产目标量时才降模
             int totalPlanQty = skuResults.stream().mapToInt(ShiftFieldUtil::resolveScheduledQty).sum();
             if (targetQty <= 0 || totalPlanQty <= targetQty) {
                 continue;
@@ -214,7 +265,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             int remaining = targetQty;
             for (LhScheduleResult result : skuResults) {
                 int allocation = Math.min(remaining, ShiftFieldUtil.resolveScheduledQty(result));
-                redistributeShiftQty(result, shifts, allocation);
+                redistributeShiftQty(context, result, shifts, allocation);
                 remaining -= allocation;
                 if (allocation <= 0) {
                     // 当前结果已被完全降为0，保留收尾标记，避免后续继续参与续作产量判断。
@@ -222,6 +273,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 }
             }
         }
+        // S4.4 收口：零计划续作结果语义统一，并按最终结果同步机台状态。
+        finalizeZeroPlanContinuousResults(context);
+        syncMachineStateAfterContinuousAdjust(context);
+        // 续作阶段全部处理完成后，再按剩余新增待排SKU统一收口结构视图，供S4.5排序使用。
+        context.rebuildStructureSkuMapFromPending(context.getNewSpecSkuList());
     }
 
     @Override
@@ -236,58 +292,641 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     // ==================== 私有辅助方法 ====================
 
     /**
-     * 在新增SKU列表中查找可以换活字块的SKU（同胎胚同模具）
+     * 在新增SKU列表中查找可直接续作的同产品结构SKU。
      */
-    private SkuScheduleDTO findTypeBlockChangeSku(LhScheduleContext context, MachineScheduleDTO machine) {
-        String machineEmbryoCode = machine.getCurrentMaterialCode();
-        if (machineEmbryoCode == null) {
+    private SkuScheduleDTO findSameStructureContinuousSku(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
             return null;
         }
         for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
-            // 同胎胚代码判定（活字块通过胎胚代码识别）
-            if (machineEmbryoCode.equals(sku.getEmbryoCode())) {
-                // 验证模具兼容：SKU的模具在机台现有模具集合内
-                if (isMouldCompatible(context, sku, machine)) {
-                    return sku;
-                }
+            if (isSameStructureContinuousCandidate(context, machine, sku)) {
+                return sku;
             }
         }
         return null;
     }
 
     /**
-     * 验证SKU模具与机台当前模具是否兼容（同模具换活字块）
+     * 在新增SKU列表中查找可以换活字块的SKU。
      */
-    private boolean isMouldCompatible(LhScheduleContext context, SkuScheduleDTO sku, MachineScheduleDTO machine) {
-        List<MdmSkuMouldRel> mouldRels = context.getSkuMouldRelMap().get(sku.getMaterialCode());
-        if (mouldRels == null || mouldRels.isEmpty()) {
+    private SkuScheduleDTO findTypeBlockChangeSku(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
+            return null;
+        }
+
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (endingJudgmentStrategy.isEnding(context, sku)
+                    && isTypeBlockCandidate(context, machine, sku)) {
+                return sku;
+            }
+        }
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (isTypeBlockCandidate(context, machine, sku)) {
+                return sku;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 续作收尾机台候选SKU分层筛选：同胎胚描述+同主花纹，其次同规格。
+     */
+    private SkuScheduleDTO findPriorityTypeBlockSku(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
+            return null;
+        }
+
+        // 命中更高优先级后直接返回，不再继续降级筛选。
+        List<SkuScheduleDTO> priorityOneCandidates = filterSameEmbryoDescAndMainPatternCandidates(context, machine);
+        if (!CollectionUtils.isEmpty(priorityOneCandidates)) {
+            return selectPreferredSkuFromCandidates(context, priorityOneCandidates);
+        }
+
+        List<SkuScheduleDTO> priorityTwoCandidates = filterSameSpecCandidates(context, machine);
+        if (!CollectionUtils.isEmpty(priorityTwoCandidates)) {
+            return selectPreferredSkuFromCandidates(context, priorityTwoCandidates);
+        }
+        return null;
+    }
+
+    /**
+     * 过滤同胎胚描述且同主花纹的候选SKU。
+     */
+    private List<SkuScheduleDTO> filterSameEmbryoDescAndMainPatternCandidates(LhScheduleContext context,
+                                                                              MachineScheduleDTO machine) {
+        List<SkuScheduleDTO> candidateList = new ArrayList<>(context.getNewSpecSkuList().size());
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            // 优先级1：同时命中胎胚描述和主花纹，才进入本层候选集。
+            if (isSameEmbryoDesc(context, machine, sku)
+                    && isSameMainPatternStrict(context, machine, sku)) {
+                candidateList.add(sku);
+            }
+        }
+        return candidateList;
+    }
+
+    /**
+     * 过滤同规格的候选SKU。
+     */
+    private List<SkuScheduleDTO> filterSameSpecCandidates(LhScheduleContext context, MachineScheduleDTO machine) {
+        List<SkuScheduleDTO> candidateList = new ArrayList<>(context.getNewSpecSkuList().size());
+        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (isSameSpec(context, machine, sku)) {
+                candidateList.add(sku);
+            }
+        }
+        return candidateList;
+    }
+
+    /**
+     * 按月度计划SKU排序结果选择候选首位。
+     */
+    private SkuScheduleDTO selectPreferredSkuFromCandidates(LhScheduleContext context, List<SkuScheduleDTO> candidates) {
+        if (CollectionUtils.isEmpty(candidates)) {
+            return null;
+        }
+        return candidates.get(0);
+    }
+
+    /**
+     * 判断SKU是否满足同产品结构直接续作。
+     */
+    private boolean isSameStructureContinuousCandidate(LhScheduleContext context,
+                                                       MachineScheduleDTO machine,
+                                                       SkuScheduleDTO sku) {
+        return isSameEmbryo(context, machine, sku)
+                && StringUtils.isNotEmpty(resolveMachineStructureKey(context, machine))
+                && StringUtils.isNotEmpty(resolveStructureKey(sku))
+                && StringUtils.equals(resolveMachineStructureKey(context, machine), resolveStructureKey(sku));
+    }
+
+    /**
+     * 判断SKU是否满足换活字块条件：同胎胚、同规格、不同花纹。
+     */
+    private boolean isTypeBlockCandidate(LhScheduleContext context,
+                                         MachineScheduleDTO machine,
+                                         SkuScheduleDTO sku) {
+        if (!isSameEmbryo(context, machine, sku)) {
             return false;
         }
-        List<MdmSkuMouldRel> machineMoulds = context.getSkuMouldRelMap().get(machine.getCurrentMaterialCode());
-        if (machineMoulds == null || machineMoulds.isEmpty()) {
+        String machineSpecCode = resolveMachineSpecCode(context, machine);
+        String machinePatternKey = resolveMachinePatternKey(context, machine);
+        String skuPatternKey = resolvePatternKey(sku.getMainPattern(), sku.getPattern());
+        if (StringUtils.isEmpty(machineSpecCode)
+                || StringUtils.isEmpty(machinePatternKey)
+                || StringUtils.isEmpty(sku.getSpecCode())
+                || StringUtils.isEmpty(skuPatternKey)) {
             return false;
         }
-        // 检查是否有相同的模具号
-        for (MdmSkuMouldRel rel : mouldRels) {
-            for (MdmSkuMouldRel machineRel : machineMoulds) {
-                if (rel.getMouldCode() != null && rel.getMouldCode().equals(machineRel.getMouldCode())) {
-                    return true;
+        return StringUtils.equals(machineSpecCode, sku.getSpecCode())
+                && !StringUtils.equals(machinePatternKey, skuPatternKey);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同胎胚。
+     */
+    private boolean isSameEmbryo(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineEmbryoCode = resolveMachineEmbryoCode(context, machine);
+        return StringUtils.isNotEmpty(machineEmbryoCode)
+                && StringUtils.isNotEmpty(sku.getEmbryoCode())
+                && StringUtils.equals(machineEmbryoCode, sku.getEmbryoCode());
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同胎胚描述。
+     */
+    private boolean isSameEmbryoDesc(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineEmbryoDesc = resolveMachineEmbryoDesc(context, machine);
+        String skuEmbryoDesc = resolveSkuEmbryoDesc(context, sku);
+        return StringUtils.isNotEmpty(machineEmbryoDesc)
+                && StringUtils.equals(machineEmbryoDesc, skuEmbryoDesc);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同主花纹（严格只看mainPattern）。
+     */
+    private boolean isSameMainPatternStrict(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineMainPattern = resolveMachineMainPatternStrict(context, machine);
+        String skuMainPattern = resolveSkuMainPatternStrict(context, sku);
+        // 主花纹按严格口径比较，不回退到普通花纹字段。
+        return StringUtils.isNotEmpty(machineMainPattern)
+                && StringUtils.equals(machineMainPattern, skuMainPattern);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否为相同规格。
+     */
+    private boolean isSameSpec(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineSpecCode = normalizeCompareToken(resolveMachineSpecCode(context, machine));
+        String skuSpecCode = normalizeCompareToken(sku.getSpecCode());
+        return StringUtils.isNotEmpty(machineSpecCode)
+                && StringUtils.equals(machineSpecCode, skuSpecCode);
+    }
+
+    /**
+     * 计算换活字块开产时间（无需换模、无需首检，仅消耗换活字块时间）
+     */
+    private Date calcTypeBlockStartTime(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (machine.getEstimatedEndTime() == null) {
+            return null;
+        }
+        Date switchStartTime = resolveAllowedSwitchStartTime(
+                context, machine.getMachineCode(), machine.getEstimatedEndTime());
+        // 换活字块：允许切换时间 + 换活字块总耗时
+        return LhScheduleTimeUtil.addHours(switchStartTime,
+                LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+    }
+
+    /**
+     * 根据换活字块后的开产时间反推真实换活字块开始时间。
+     */
+    private Date resolveTypeBlockChangeStartTime(LhScheduleContext context, Date productionStartTime) {
+        if (productionStartTime == null) {
+            return null;
+        }
+        // 换活字块结果里记录“真实切换开始时间”，方便换模计划表与结果时间口径一致。
+        return LhScheduleTimeUtil.addHours(
+                productionStartTime, -LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+    }
+
+    /**
+     * 解析允许发起切换（换模/换活字块）的开始时间。
+     * <p>20:00:00（含）到次日早班前禁止发起切换，需顺延到下一个早班开始时间。</p>
+     */
+    private Date resolveAllowedSwitchStartTime(LhScheduleContext context, String machineCode, Date endingTime) {
+        if (endingTime == null) {
+            return null;
+        }
+        Date adjustedTime = endingTime;
+        for (int attempt = 0; attempt < TYPE_BLOCK_SWITCH_MAX_ATTEMPTS; attempt++) {
+            Date downtimeAdjustedTime = resolveDowntimeAdjustedSwitchStartTime(
+                    context, machineCode, adjustedTime);
+            if (downtimeAdjustedTime.after(adjustedTime)) {
+                adjustedTime = downtimeAdjustedTime;
+                continue;
+            }
+            if (!LhScheduleTimeUtil.isNoMouldChangeTime(context, adjustedTime)) {
+                return adjustedTime;
+            }
+            adjustedTime = LhScheduleTimeUtil.resolveNextMorningAfterNoMouldChangeWindow(context, adjustedTime);
+        }
+        log.warn("换活字块切换起点达到最大尝试次数, 机台: {}, 原始时间: {}",
+                machineCode, LhScheduleTimeUtil.formatDateTime(endingTime));
+        return adjustedTime;
+    }
+
+    /**
+     * 根据停机窗口顺延换活字块切换起点。
+     * <p>当候选切换窗口与机台停机窗口重叠时，顺延到重叠停机结束时刻。</p>
+     */
+    private Date resolveDowntimeAdjustedSwitchStartTime(LhScheduleContext context,
+                                                        String machineCode,
+                                                        Date candidateStartTime) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || candidateStartTime == null) {
+            return candidateStartTime;
+        }
+        Date candidateEndTime = LhScheduleTimeUtil.addHours(
+                candidateStartTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+        Date latestOverlapEndTime = null;
+        if (!CollectionUtils.isEmpty(context.getDevicePlanShutList())) {
+            for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
+                if (planShut == null
+                        || !StringUtils.equals(machineCode, planShut.getMachineCode())
+                        || planShut.getBeginDate() == null
+                        || planShut.getEndDate() == null
+                        || !planShut.getBeginDate().before(planShut.getEndDate())) {
+                    continue;
                 }
+                if (!candidateStartTime.before(planShut.getEndDate())
+                        || !planShut.getBeginDate().before(candidateEndTime)) {
+                    continue;
+                }
+                if (latestOverlapEndTime == null || planShut.getEndDate().after(latestOverlapEndTime)) {
+                    latestOverlapEndTime = planShut.getEndDate();
+                }
+            }
+        }
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(context, machineCode);
+        if (!CollectionUtils.isEmpty(cleaningWindowList)) {
+            for (MachineCleaningWindowDTO cleaningWindow : cleaningWindowList) {
+                if (Objects.isNull(cleaningWindow)
+                        || Objects.isNull(cleaningWindow.getCleanStartTime())) {
+                    continue;
+                }
+                Date cleaningReadyTime = cleaningWindow.getReadyTime() != null
+                        ? cleaningWindow.getReadyTime() : cleaningWindow.getCleanEndTime();
+                if (Objects.isNull(cleaningReadyTime)
+                        || !cleaningWindow.getCleanStartTime().before(cleaningReadyTime)) {
+                    continue;
+                }
+                if (!candidateStartTime.before(cleaningReadyTime)
+                        || !cleaningWindow.getCleanStartTime().before(candidateEndTime)) {
+                    continue;
+                }
+                if (latestOverlapEndTime == null || cleaningReadyTime.after(latestOverlapEndTime)) {
+                    latestOverlapEndTime = cleaningReadyTime;
+                }
+            }
+        }
+        return latestOverlapEndTime != null ? latestOverlapEndTime : candidateStartTime;
+    }
+
+    /**
+     * 追加续作衔接结果（同产品结构直续或换活字块）。
+     */
+    private boolean appendFollowUpResult(LhScheduleContext context,
+                                         MachineScheduleDTO machine,
+                                         SkuScheduleDTO sku,
+                                         Date startTime,
+                                         List<LhShiftConfigVO> shifts,
+                                         boolean typeBlock) {
+        if (startTime == null) {
+            return false;
+        }
+        Integer originalTargetScheduleQty = sku.getTargetScheduleQty();
+        boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
+        int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
+        sku.setMouldQty(machineMouldQty);
+        LhScheduleResult result = buildScheduleResult(
+                context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
+        if (result == null || result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
+            sku.setTargetScheduleQty(originalTargetScheduleQty);
+            return false;
+        }
+        if (typeBlock) {
+            result.setScheduleType("02");  // 换活字块显示为新增类型（用于前端展示）
+            result.setIsChangeMould("1");
+            result.setIsTypeBlock("1");
+            result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode(), machine.getCurrentMaterialCode()));
+            // 换活字块虽然不是新增规格换模，但下游换模计划仍按真实切换开始时间生成。
+            result.setMouldChangeStartTime(resolveTypeBlockChangeStartTime(context, startTime));
+        } else {
+            result.setScheduleType("01");  // 续作保持不变
+            result.setIsChangeMould("0");
+            result.setIsTypeBlock("0");
+        }
+        result.setIsEnd(isEnding ? "1" : "0");
+        // 续作衔接结果即便非收尾，也必须补齐可计算完工时刻，避免结果校验失败。
+        Date actualCompletionTime = resolveActualCompletionTime(context, result);
+        if (actualCompletionTime == null) {
+            return false;
+        }
+        result.setSpecEndTime(actualCompletionTime);
+        result.setTdaySpecEndTime(actualCompletionTime);
+        if (typeBlock) {
+            applyTypeBlockCleaningAnalysis(context, result, shifts);
+        }
+
+        context.getScheduleResultList().add(result);
+        registerMachineAssignment(context, machine.getMachineCode(), result);
+        updateMachineState(context, machine, sku, result);
+        context.getNewSpecSkuList().remove(sku);
+        log.debug("{}排产完成, 机台: {}, SKU: {}",
+                typeBlock ? "换活字块" : "同产品结构续作",
+                machine.getMachineCode(), sku.getMaterialCode());
+        return true;
+    }
+
+    /**
+     * 输出续作收尾时间回写日志。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param sku 续作SKU
+     * @param result 排产结果
+     * @param actualCompletionTime 实际完工时间
+     */
+    private void traceContinuousEndingUpdate(LhScheduleContext context, MachineScheduleDTO machine,
+                                             SkuScheduleDTO sku, LhScheduleResult result,
+                                             Date actualCompletionTime) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "续作收尾真实时间回写";
+        StringBuilder detailBuilder = new StringBuilder(256);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                        + ", SKU=" + PriorityTraceLogHelper.safeText(sku.getMaterialCode())
+                        + ", 是否收尾=" + PriorityTraceLogHelper.yesNo(machine.isEnding()));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "结果specEndTime=" + PriorityTraceLogHelper.formatDateTime(result.getSpecEndTime())
+                        + ", 回写estimatedEndTime=" + PriorityTraceLogHelper.formatDateTime(actualCompletionTime));
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
+    }
+
+    /**
+     * 输出衔接机台排序总览日志。
+     *
+     * @param context 排程上下文
+     * @param endingMachines 衔接机台列表（包含收尾机台与兜底机台）
+     */
+    private void traceEndingMachineOrder(LhScheduleContext context, List<MachineScheduleDTO> endingMachines) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "衔接机台排序总览";
+        StringBuilder detailBuilder = new StringBuilder(512);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "候选机台数=" + PriorityTraceLogHelper.sizeOf(endingMachines));
+        int index = 1;
+        for (MachineScheduleDTO machine : endingMachines) {
+            Date estimatedEndTime = machine.getEstimatedEndTime();
+            PriorityTraceLogHelper.appendLine(detailBuilder,
+                    index++
+                            + ". 机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                            + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
+                            + ", 基准时间=" + PriorityTraceLogHelper.formatDateTime(estimatedEndTime)
+                            + ", 实际切换起点=" + PriorityTraceLogHelper.formatDateTime(
+                            resolveAllowedSwitchStartTime(context, machine.getMachineCode(), estimatedEndTime)));
+        }
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
+    }
+
+    /**
+     * 输出单机台续作衔接决策日志。
+     *
+     * @param context 排程上下文
+     * @param machine 收尾机台
+     * @param priorityOneCandidates 第一层候选
+     * @param priorityTwoCandidates 第二层候选
+     * @param selectedSku 选中SKU
+     * @param matchedLayer 命中层级
+     * @param success 是否成功
+     * @param startTime 开产时间
+     */
+    private void traceTypeBlockDecision(LhScheduleContext context, MachineScheduleDTO machine,
+                                        List<SkuScheduleDTO> priorityOneCandidates,
+                                        List<SkuScheduleDTO> priorityTwoCandidates,
+                                        SkuScheduleDTO selectedSku,
+                                        String matchedLayer,
+                                        boolean success,
+                                        Date startTime,
+                                        String triggerSource) {
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "收尾机台衔接决策";
+        StringBuilder detailBuilder = new StringBuilder(512);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                        + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
+                        + ", 真实收尾时间=" + PriorityTraceLogHelper.formatDateTime(machine.getEstimatedEndTime()));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "第一层候选(同胎胚描述+同主花纹)=" + buildSkuCodeSummary(priorityOneCandidates));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "第二层候选(同规格)=" + buildSkuCodeSummary(priorityTwoCandidates));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "命中层级=" + PriorityTraceLogHelper.safeText(matchedLayer)
+                        + ", 选中SKU=" + PriorityTraceLogHelper.safeText(
+                        selectedSku == null ? null : selectedSku.getMaterialCode())
+                        + ", 是否换活字块=" + PriorityTraceLogHelper.yesNo(selectedSku != null)
+                        + ", 触发来源=" + PriorityTraceLogHelper.safeText(triggerSource));
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "衔接结果=" + (success ? "成功" : "未衔接")
+                        + ", 换活字块开始时间=" + PriorityTraceLogHelper.formatDateTime(
+                        startTime == null ? null : resolveTypeBlockChangeStartTime(context, startTime))
+                        + ", 开产时间=" + PriorityTraceLogHelper.formatDateTime(startTime));
+        String detail = detailBuilder.toString().trim();
+        log.info("{}\n{}", title, detail);
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
+    }
+
+    /**
+     * 组装候选SKU编码摘要。
+     *
+     * @param skuList SKU列表
+     * @return 摘要文本
+     */
+    private String buildSkuCodeSummary(List<SkuScheduleDTO> skuList) {
+        if (CollectionUtils.isEmpty(skuList)) {
+            return "-";
+        }
+        List<String> materialCodes = new ArrayList<>(skuList.size());
+        for (SkuScheduleDTO sku : skuList) {
+            materialCodes.add(PriorityTraceLogHelper.safeText(sku.getMaterialCode()));
+        }
+        return String.join(",", materialCodes);
+    }
+
+    /**
+     * 识别可参与换活字块兜底反查的机台。
+     *
+     * @param context 排程上下文
+     * @return 兜底机台列表
+     */
+    private List<MachineScheduleDTO> resolveTypeBlockFallbackMachines(LhScheduleContext context) {
+        List<MachineScheduleDTO> fallbackMachineList = new ArrayList<>();
+        if (context == null
+                || CollectionUtils.isEmpty(context.getMachineScheduleMap())
+                || CollectionUtils.isEmpty(context.getMachineOnlineInfoMap())) {
+            return fallbackMachineList;
+        }
+        for (MachineScheduleDTO machine : context.getMachineScheduleMap().values()) {
+            if (machine == null || machine.isEnding() || machine.getEstimatedEndTime() == null) {
+                continue;
+            }
+            String machineCode = machine.getMachineCode();
+            if (StringUtils.isEmpty(machineCode)
+                    || !context.getMachineOnlineInfoMap().containsKey(machineCode)
+                    || StringUtils.isEmpty(machine.getCurrentMaterialCode())) {
+                continue;
+            }
+            if (isMachineAssignedContinuousResult(context, machineCode)) {
+                continue;
+            }
+            if (!isTypeBlockFallbackEligibleByPreviousDay(context, machine)) {
+                continue;
+            }
+            fallbackMachineList.add(machine);
+        }
+        return fallbackMachineList;
+    }
+
+    /**
+     * 判定机台是否已命中续作分配。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @return true-已命中续作分配
+     */
+    private boolean isMachineAssignedContinuousResult(LhScheduleContext context, String machineCode) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || CollectionUtils.isEmpty(context.getMachineAssignmentMap())) {
+            return false;
+        }
+        List<LhScheduleResult> assignedResults = context.getMachineAssignmentMap().get(machineCode);
+        if (CollectionUtils.isEmpty(assignedResults)) {
+            return false;
+        }
+        for (LhScheduleResult assignedResult : assignedResults) {
+            if (assignedResult != null
+                    && StringUtils.equals(CONTINUOUS_SCHEDULE_TYPE, assignedResult.getScheduleType())) {
+                return true;
             }
         }
         return false;
     }
 
     /**
-     * 计算换活字块开产时间（无需换模，但需首检时间）
+     * 判定兜底机台是否通过 T-1 收尾校验。
+     * <p>规则：T-1 无该机台该SKU记录，或最新一条记录 isEnd=1。</p>
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @return true-通过校验
      */
-    private Date calcTypeBlockStartTime(LhScheduleContext context, MachineScheduleDTO machine) {
-        if (machine.getEstimatedEndTime() == null) {
+    private boolean isTypeBlockFallbackEligibleByPreviousDay(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (context == null || machine == null) {
+            return false;
+        }
+        String machineCode = machine.getMachineCode();
+        String currentMaterialCode = machine.getCurrentMaterialCode();
+        if (StringUtils.isEmpty(machineCode) || StringUtils.isEmpty(currentMaterialCode)) {
+            return false;
+        }
+        LhScheduleResult latestPreviousResult = resolveLatestPreviousResult(context, machineCode, currentMaterialCode);
+        if (latestPreviousResult == null || StringUtils.equals("1", latestPreviousResult.getIsEnd())) {
+            return true;
+        }
+        traceTypeBlockFallbackSkip(context, machine, latestPreviousResult, TYPE_BLOCK_SKIP_REASON_T1_NOT_END);
+        return false;
+    }
+
+    /**
+     * 解析 T-1 同机台同SKU的最新一条排程结果。
+     * <p>排序字段优先 specEndTime，缺失时回退 createTime。</p>
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @param materialCode 物料编码
+     * @return 最新结果，未命中返回 null
+     */
+    private LhScheduleResult resolveLatestPreviousResult(LhScheduleContext context, String machineCode, String materialCode) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || StringUtils.isEmpty(materialCode)
+                || CollectionUtils.isEmpty(context.getPreviousScheduleResultList())) {
             return null;
         }
-        // 换活字块：收尾时间 + 首检时间（1小时）
-        return LhScheduleTimeUtil.addHours(machine.getEstimatedEndTime(),
-                LhScheduleTimeUtil.getFirstInspectionHours(context));
+        LhScheduleResult latestResult = null;
+        Date latestTime = null;
+        for (LhScheduleResult previousResult : context.getPreviousScheduleResultList()) {
+            if (previousResult == null
+                    || !StringUtils.equals(machineCode, previousResult.getLhMachineCode())
+                    || !StringUtils.equals(materialCode, previousResult.getMaterialCode())) {
+                continue;
+            }
+            Date currentTime = resolvePreviousResultOrderTime(previousResult);
+            if (latestResult == null) {
+                latestResult = previousResult;
+                latestTime = currentTime;
+                continue;
+            }
+            if (latestTime == null || (currentTime != null && currentTime.after(latestTime))) {
+                latestResult = previousResult;
+                latestTime = currentTime;
+            }
+        }
+        return latestResult;
+    }
+
+    /**
+     * 解析 T-1 记录排序时间。
+     *
+     * @param previousResult T-1排程结果
+     * @return 排序时间
+     */
+    private Date resolvePreviousResultOrderTime(LhScheduleResult previousResult) {
+        if (previousResult == null) {
+            return null;
+        }
+        if (previousResult.getSpecEndTime() != null) {
+            return previousResult.getSpecEndTime();
+        }
+        return previousResult.getCreateTime();
+    }
+
+    /**
+     * 输出兜底机台被跳过的决策日志。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param latestPreviousResult T-1最新结果
+     * @param reason 跳过原因
+     */
+    private void traceTypeBlockFallbackSkip(LhScheduleContext context,
+                                            MachineScheduleDTO machine,
+                                            LhScheduleResult latestPreviousResult,
+                                            String reason) {
+        if (machine == null) {
+            return;
+        }
+        log.info("换活字块兜底机台跳过, 机台: {}, 当前物料: {}, 原因: {}",
+                machine.getMachineCode(), machine.getCurrentMaterialCode(), reason);
+        if (!PriorityTraceLogHelper.isEnabled(context)) {
+            return;
+        }
+        String title = "收尾机台衔接决策";
+        StringBuilder detailBuilder = new StringBuilder(384);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "机台=" + PriorityTraceLogHelper.safeText(machine.getMachineCode())
+                        + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
+                        + ", 触发来源=" + TYPE_BLOCK_TRIGGER_FALLBACK);
+        PriorityTraceLogHelper.appendLine(detailBuilder,
+                "衔接结果=未衔接, 原因=" + PriorityTraceLogHelper.safeText(reason)
+                        + ", T-1最新isEnd=" + PriorityTraceLogHelper.safeText(
+                        latestPreviousResult == null ? null : latestPreviousResult.getIsEnd())
+                        + ", T-1最新排序时间=" + PriorityTraceLogHelper.formatDateTime(
+                        resolvePreviousResultOrderTime(latestPreviousResult)));
+        String detail = detailBuilder.toString().trim();
+        PriorityTraceLogHelper.appendProcessLog(context, title, detail);
     }
 
     /**
@@ -326,6 +965,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setDataSource("0");
         result.setIsDelete(0);
         result.setScheduleType(sku.getScheduleType() != null ? sku.getScheduleType() : "01");
+        result.setIsTypeBlock("0");
         result.setConstructionStage(sku.getConstructionStage());
         result.setEmbryoNo(sku.getEmbryoNo());
         result.setTextNo(sku.getTextNo());
@@ -339,12 +979,15 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         String orderNo = generateOrderNo(context);
         result.setOrderNo(orderNo);
 
+        int refinedTargetQty = getTargetScheduleQtyResolver().refineTargetQtyByMachineCapacity(
+                context, sku, machine, startTime, shifts);
+
         // 按班次分配计划量
-        int remaining = sku.getPendingQty() > 0 ? sku.getPendingQty() : sku.getWindowPlanQty();
+        int remaining = refinedTargetQty;
         distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining);
 
-        refreshResultSummary(result, shifts);
+        refreshResultSummary(context, result, shifts);
         result.setRealScheduleDate(context.getScheduleDate());
         result.setProductionStatus("0");
 
@@ -387,13 +1030,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            long availableSeconds = (shift.getShiftEndDateTime().getTime() - effectiveStart.getTime()) / 1000L;
-            if (availableSeconds <= 0) {
+            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
+                    context.getDevicePlanShutList(), result.getLhMachineCode(), effectiveStart, shift.getShiftEndDateTime());
+            if (netAvailableSeconds <= 0) {
                 continue;
             }
 
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
-                    shift, effectiveStart, shiftCapacity, lhTimeSeconds, mouldQty);
+                    shiftCapacity,
+                    lhTimeSeconds,
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    netAvailableSeconds);
             if (shiftMaxQty <= 0) {
                 continue;
             }
@@ -423,7 +1071,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 计算规格收尾时间（最后一个有计划量班次中，完成剩余量所需的时间点）
      */
-    private Date calcSpecEndTime(LhScheduleResult result,
+    private Date calcSpecEndTime(LhScheduleContext context,
+                                 LhScheduleResult result,
                                  List<LhShiftConfigVO> shifts,
                                  int lhTimeSeconds,
                                  int mouldQty,
@@ -431,19 +1080,32 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (!isEnding) {
             return null;
         }
-        // 找到最后一个有计划量的班次
+        // 找到最后一个有计划量的班次，按真实产量推导完工时刻，避免被班次结束时刻放大。
         for (int i = shifts.size() - 1; i >= 0; i--) {
             LhShiftConfigVO shift = shifts.get(i);
-            Integer planQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
-            if (planQty != null && planQty > 0 && lhTimeSeconds > 0 && mouldQty > 0) {
-                // 收尾时间 = 该班次开始时间 + (计划量/模数) * 硫化时间
-                long secondsNeeded = (long) Math.ceil((double) planQty / mouldQty) * lhTimeSeconds;
-                Date shiftStart = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
-                if (shiftStart != null) {
-                    return new Date(shiftStart.getTime() + secondsNeeded * 1000L);
-                }
-                return shift.getShiftEndDateTime();
+            Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
+            Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shift.getShiftIndex());
+            Date shiftEndTime = ShiftFieldUtil.getShiftEndTime(result, shift.getShiftIndex());
+            if (shiftEndTime == null) {
+                shiftEndTime = shift.getShiftEndDateTime();
             }
+            if (shiftPlanQty == null || shiftPlanQty <= 0 || shiftStartTime == null) {
+                continue;
+            }
+            if (lhTimeSeconds <= 0 || mouldQty <= 0) {
+                return shiftEndTime;
+            }
+            long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
+            Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
+                    context.getDevicePlanShutList(),
+                    resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
+                    result.getLhMachineCode(),
+                    shiftStartTime,
+                    secondsNeeded);
+            if (shiftCompletionTime != null) {
+                return constrainCompletionWithinShift(shiftCompletionTime, shiftEndTime);
+            }
+            return shiftEndTime;
         }
         return null;
     }
@@ -460,8 +1122,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 重新在班次间均衡分配计划量（用于allocateShiftPlanQty后续调整）
      */
-    private void redistributeShiftQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
-        redistributeShiftQty(result, shifts, ShiftFieldUtil.resolveScheduledQty(result));
+    private void redistributeShiftQty(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+        redistributeShiftQty(context, result, shifts, ShiftFieldUtil.resolveScheduledQty(result));
     }
 
     /**
@@ -471,7 +1133,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * @param shifts 班次列表
      * @param targetQty 目标计划量
      */
-    private void redistributeShiftQty(LhScheduleResult result, List<LhShiftConfigVO> shifts, int targetQty) {
+    private void redistributeShiftQty(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts, int targetQty) {
         if (CollectionUtils.isEmpty(shifts)
                 || result.getLhTime() == null
                 || result.getLhTime() <= 0) {
@@ -480,7 +1142,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
         if (targetQty <= 0) {
             clearShiftPlanQty(result, shifts);
-            refreshResultSummary(result, shifts);
+            refreshResultSummary(context, result, shifts);
             return;
         }
 
@@ -489,6 +1151,12 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         int shiftCapacity = result.getSingleMouldShiftQty() != null ? result.getSingleMouldShiftQty() : 0;
         int remaining = targetQty;
         Date cursorStartTime = resolveRedistributeStartTime(result, shifts);
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(
+                context, result.getLhMachineCode());
+        int dryIceLossQty = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
+        int dryIceDurationHours = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
 
         for (LhShiftConfigVO shift : shifts) {
             if (remaining <= 0) {
@@ -504,18 +1172,36 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             Date shiftStartTime = shift.getShiftStartDateTime();
             Date effectiveStartTime = cursorStartTime != null && cursorStartTime.after(shiftStartTime)
                     ? cursorStartTime : shiftStartTime;
-            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
-                    shift, effectiveStartTime, shiftCapacity, result.getLhTime(), mouldQty);
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    result.getLhMachineCode(),
+                    effectiveStartTime,
+                    shift.getShiftEndDateTime(),
+                    shiftCapacity,
+                    result.getLhTime(),
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    dryIceLossQty,
+                    dryIceDurationHours);
             if (shiftMaxQty <= 0) {
                 setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
                 continue;
             }
             int shiftQty = Math.min(remaining, shiftMaxQty);
-            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStartTime, shift.getShiftEndDateTime());
+            Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    result.getLhMachineCode(),
+                    effectiveStartTime,
+                    shift.getShiftEndDateTime(),
+                    shiftQty,
+                    shiftMaxQty);
+            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStartTime, shiftPlanEndTime);
             remaining -= shiftQty;
             cursorStartTime = shift.getShiftEndDateTime();
         }
-        refreshResultSummary(result, shifts);
+        refreshResultSummary(context, result, shifts);
     }
 
     /**
@@ -558,7 +1244,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 根据胎胚库存调整排程结果的计划量
      */
-    private void adjustResultByEmbryoStock(LhScheduleResult result,
+    private void adjustResultByEmbryoStock(LhScheduleContext context,
+                                           LhScheduleResult result,
                                            Map<String, Integer> embryoStockMap,
                                            List<LhShiftConfigVO> shifts) {
         String embryoCode = result.getEmbryoCode();
@@ -574,7 +1261,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             embryoStockMap.put(embryoCode, stock - totalPlan);
         } else {
             // 库存不足，削减计划量
-            redistributeShiftQty(result, shifts, stock);
+            redistributeShiftQty(context, result, shifts, stock);
             embryoStockMap.put(embryoCode, 0);
         }
     }
@@ -597,17 +1284,750 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * @param result 排程结果
      * @param shifts 班次列表
      */
-    private void refreshResultSummary(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+    private void refreshResultSummary(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts) {
         if (result == null) {
             return;
         }
         ShiftFieldUtil.syncDailyPlanQty(result);
+        if (result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
+            // 零计划结果不参与完工时刻语义。
+            result.setSpecEndTime(null);
+            result.setTdaySpecEndTime(null);
+            return;
+        }
         int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
                 result.getMouldQty() != null ? result.getMouldQty() : 0);
-        Date specEndTime = calcSpecEndTime(result, shifts, lhTimeSeconds, mouldQty, "1".equals(result.getIsEnd()));
+        Date specEndTime = calcSpecEndTime(context, result, shifts, lhTimeSeconds, mouldQty, "1".equals(result.getIsEnd()));
+        if (specEndTime == null) {
+            // 非收尾结果也要保留可推导完工时刻，避免后续校验出现 specEndTime 缺失。
+            specEndTime = resolveActualCompletionTime(context, result);
+        }
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
+    }
+
+    /**
+     * 统一处理续作阶段零计划结果：
+     * 1) 清空完工时刻并从排程结果列表移除；
+     * 2) 按物料去重写入/合并未排结果。
+     *
+     * @param context 排程上下文
+     */
+    private void finalizeZeroPlanContinuousResults(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return;
+        }
+        Map<String, Integer> zeroPlanQtyMap = new LinkedHashMap<>(8);
+        List<LhScheduleResult> zeroPlanResults = new ArrayList<>(8);
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (!isContinuousPhaseResult(result)) {
+                continue;
+            }
+            if (result.getDailyPlanQty() != null && result.getDailyPlanQty() > 0) {
+                continue;
+            }
+            result.setSpecEndTime(null);
+            result.setTdaySpecEndTime(null);
+            zeroPlanResults.add(result);
+            if (StringUtils.isEmpty(result.getMaterialCode())) {
+                continue;
+            }
+            int unscheduledQty = resolveRemainingUnscheduledQty(context, result.getMaterialCode());
+            if (unscheduledQty > 0) {
+                zeroPlanQtyMap.putIfAbsent(result.getMaterialCode(), unscheduledQty);
+            }
+        }
+        for (Map.Entry<String, Integer> entry : zeroPlanQtyMap.entrySet()) {
+            mergeUnscheduledResultByMaterial(context, entry.getKey(), entry.getValue());
+        }
+        if (!CollectionUtils.isEmpty(zeroPlanResults)) {
+            context.getScheduleResultList().removeAll(zeroPlanResults);
+            removeResultsFromMachineAssignments(context, zeroPlanResults);
+        }
+        normalizeUnscheduledResultsByMaterial(context);
+    }
+
+    /**
+     * S4.4 结束后按最终有效续作结果二次回写机台状态。
+     *
+     * @param context 排程上下文
+     */
+    private void syncMachineStateAfterContinuousAdjust(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getMachineScheduleMap())) {
+            return;
+        }
+        Map<String, List<LhScheduleResult>> machineResultMap = context.getScheduleResultList().stream()
+                .filter(this::isEffectiveContinuousResult)
+                .collect(Collectors.groupingBy(LhScheduleResult::getLhMachineCode));
+        for (Map.Entry<String, MachineScheduleDTO> entry : context.getMachineScheduleMap().entrySet()) {
+            String machineCode = entry.getKey();
+            MachineScheduleDTO machine = entry.getValue();
+            List<LhScheduleResult> machineResults = machineResultMap.get(machineCode);
+            if (!CollectionUtils.isEmpty(machineResults)) {
+                LhScheduleResult latestResult = machineResults.stream()
+                        .max(Comparator.comparing(LhScheduleResult::getSpecEndTime))
+                        .orElse(null);
+                if (latestResult != null) {
+                    LhScheduleResult previousResult = resolvePreviousMachineResult(machineResults, latestResult);
+                    applyMachineStateFromResult(context, machine, latestResult, previousResult);
+                    continue;
+                }
+            }
+            restoreMachineStateFromInitial(context, machineCode, machine);
+        }
+    }
+
+    /**
+     * 在最终保留结果集中推导上一条有效结果。
+     *
+     * @param machineResults 机台有效结果列表
+     * @param latestResult 最新结果
+     * @return 上一条有效结果
+     */
+    private LhScheduleResult resolvePreviousMachineResult(List<LhScheduleResult> machineResults, LhScheduleResult latestResult) {
+        if (CollectionUtils.isEmpty(machineResults) || latestResult == null) {
+            return null;
+        }
+        return machineResults.stream()
+                .filter(result -> result != null
+                        && result != latestResult
+                        && result.getSpecEndTime() != null)
+                .max(Comparator.comparing(LhScheduleResult::getSpecEndTime))
+                .orElse(null);
+    }
+
+    /**
+     * 判断结果是否属于可驱动机台终态的有效结果。
+     * <p>除续作结果外，S4.4 产生的换活字块结果也需要参与机台终态回写，
+     * 否则会在 S4.5 选机时丢失真实收尾时间。</p>
+     *
+     * @param result 排程结果
+     * @return true-有效结果；false-非有效结果
+     */
+    private boolean isEffectiveContinuousResult(LhScheduleResult result) {
+        return isContinuousPhaseResult(result)
+                && result.getDailyPlanQty() != null
+                && result.getDailyPlanQty() > 0
+                && result.getSpecEndTime() != null
+                && StringUtils.isNotEmpty(result.getLhMachineCode());
+    }
+
+    /**
+     * 判断结果是否属于续作阶段结果（含换活字块）。
+     *
+     * @param result 排程结果
+     * @return true-续作阶段结果；false-非续作阶段结果
+     */
+    private boolean isContinuousPhaseResult(LhScheduleResult result) {
+        if (result == null) {
+            return false;
+        }
+        return CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())
+                || "1".equals(result.getIsTypeBlock());
+    }
+
+    /**
+     * 根据最终有效结果回写机台状态。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param result 最终有效续作结果
+     */
+    private void applyMachineStateFromResult(LhScheduleContext context,
+                                             MachineScheduleDTO machine,
+                                             LhScheduleResult result,
+                                             LhScheduleResult previousResult) {
+        String previousMaterialCode = null;
+        String previousMaterialDesc = null;
+        if (previousResult != null) {
+            previousMaterialCode = previousResult.getMaterialCode();
+            previousMaterialDesc = previousResult.getMaterialDesc();
+        } else if (machine != null && StringUtils.isNotEmpty(machine.getMachineCode())) {
+            MachineScheduleDTO initialMachine = context.getInitialMachineScheduleMap().get(machine.getMachineCode());
+            if (initialMachine != null) {
+                previousMaterialCode = initialMachine.getCurrentMaterialCode();
+                previousMaterialDesc = initialMachine.getCurrentMaterialDesc();
+            }
+        }
+        machine.setCurrentMaterialCode(result.getMaterialCode());
+        machine.setCurrentMaterialDesc(result.getMaterialDesc());
+        machine.setPreviousMaterialCode(previousMaterialCode);
+        machine.setPreviousMaterialDesc(previousMaterialDesc);
+        machine.setPreviousSpecCode(result.getSpecCode());
+        machine.setPreviousProSize(resolveMaterialProSize(context, result.getMaterialCode()));
+        machine.setEstimatedEndTime(result.getSpecEndTime());
+        machine.setEnding("1".equals(result.getIsEnd()) && result.getSpecEndTime() != null);
+    }
+
+    /**
+     * 回退机台状态到初始化快照，避免沿用失效衔接状态。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @param machine 当前机台对象
+     */
+    private void restoreMachineStateFromInitial(LhScheduleContext context, String machineCode, MachineScheduleDTO machine) {
+        if (context == null || machine == null || StringUtils.isEmpty(machineCode)) {
+            return;
+        }
+        MachineScheduleDTO initialMachine = context.getInitialMachineScheduleMap().get(machineCode);
+        if (initialMachine == null) {
+            return;
+        }
+        machine.setCurrentMaterialCode(initialMachine.getCurrentMaterialCode());
+        machine.setCurrentMaterialDesc(initialMachine.getCurrentMaterialDesc());
+        machine.setPreviousMaterialCode(initialMachine.getPreviousMaterialCode());
+        machine.setPreviousMaterialDesc(initialMachine.getPreviousMaterialDesc());
+        machine.setPreviousSpecCode(initialMachine.getPreviousSpecCode());
+        machine.setPreviousProSize(initialMachine.getPreviousProSize());
+        machine.setEstimatedEndTime(initialMachine.getEstimatedEndTime());
+        machine.setEnding(initialMachine.isEnding());
+    }
+
+    /**
+     * 解析物料规格英寸，用于机台前规格回写。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 规格英寸
+     */
+    private String resolveMaterialProSize(LhScheduleContext context, String materialCode) {
+        if (context == null || StringUtils.isEmpty(materialCode)) {
+            return null;
+        }
+        MdmMaterialInfo materialInfo = context.getMaterialInfoMap().get(materialCode);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getProSize())) {
+            return materialInfo.getProSize();
+        }
+        SkuScheduleDTO sku = findSkuDto(context, materialCode);
+        return sku != null ? sku.getProSize() : null;
+    }
+
+    /**
+     * 计算物料剩余待排数量（续作零计划未排口径）。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 剩余待排数量
+     */
+    private int resolveRemainingUnscheduledQty(LhScheduleContext context, String materialCode) {
+        SkuScheduleDTO sku = findSkuDto(context, materialCode);
+        if (sku == null) {
+            return 0;
+        }
+        int targetScheduleQty = sku.resolveTargetScheduleQty();
+        int retainedQty = resolveEffectiveContinuousPhaseScheduledQty(context, materialCode);
+        return Math.max(targetScheduleQty - retainedQty, 0);
+    }
+
+    /**
+     * 统计同物料在续作阶段最终保留的有效计划量（含换活字块）。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 有效计划量
+     */
+    private int resolveEffectiveContinuousPhaseScheduledQty(LhScheduleContext context, String materialCode) {
+        if (context == null || StringUtils.isEmpty(materialCode) || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return 0;
+        }
+        int totalQty = 0;
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (result == null
+                    || !StringUtils.equals(materialCode, result.getMaterialCode())
+                    || !isContinuousPhaseResult(result)
+                    || result.getDailyPlanQty() == null
+                    || result.getDailyPlanQty() <= 0) {
+                continue;
+            }
+            totalQty += result.getDailyPlanQty();
+        }
+        return totalQty;
+    }
+
+    /**
+     * 统计同物料最终仍保留在结果列表中的有效计划量。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @param scheduleType 排产类型
+     * @return 有效计划量
+     */
+    private int resolveEffectiveScheduledQty(LhScheduleContext context, String materialCode, String scheduleType) {
+        if (context == null || StringUtils.isEmpty(materialCode) || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return 0;
+        }
+        int totalQty = 0;
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (result == null
+                    || !StringUtils.equals(materialCode, result.getMaterialCode())
+                    || !StringUtils.equals(scheduleType, result.getScheduleType())
+                    || result.getDailyPlanQty() == null
+                    || result.getDailyPlanQty() <= 0) {
+                continue;
+            }
+            totalQty += result.getDailyPlanQty();
+        }
+        return totalQty;
+    }
+
+    /**
+     * 按物料维度写入/合并未排结果，保证同物料仅一条记录。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @param unscheduledQty 未排数量
+     */
+    private void mergeUnscheduledResultByMaterial(LhScheduleContext context, String materialCode, int unscheduledQty) {
+        if (context == null || StringUtils.isEmpty(materialCode)) {
+            return;
+        }
+        LhUnscheduledResult existing = findUnscheduledResultByMaterial(context, materialCode);
+        if (existing != null) {
+            int existingQty = existing.getUnscheduledQty() != null ? existing.getUnscheduledQty() : 0;
+            existing.setUnscheduledQty(existingQty + Math.max(unscheduledQty, 0));
+            if (StringUtils.isEmpty(existing.getUnscheduledReason())) {
+                existing.setUnscheduledReason(ZERO_PLAN_UNSCHEDULED_REASON);
+            }
+            return;
+        }
+        SkuScheduleDTO sku = findSkuDto(context, materialCode);
+        LhUnscheduledResult unscheduled = new LhUnscheduledResult();
+        unscheduled.setFactoryCode(context.getFactoryCode());
+        unscheduled.setBatchNo(context.getBatchNo());
+        unscheduled.setScheduleDate(context.getScheduleTargetDate());
+        unscheduled.setMaterialCode(materialCode);
+        unscheduled.setUnscheduledQty(Math.max(unscheduledQty, 0));
+        unscheduled.setUnscheduledReason(ZERO_PLAN_UNSCHEDULED_REASON);
+        unscheduled.setDataSource(AUTO_DATA_SOURCE);
+        unscheduled.setIsDelete(0);
+        if (sku != null) {
+            unscheduled.setMaterialDesc(sku.getMaterialDesc());
+            unscheduled.setStructureName(sku.getStructureName());
+            unscheduled.setSpecCode(sku.getSpecCode());
+            unscheduled.setEmbryoCode(sku.getEmbryoCode());
+            unscheduled.setMouldQty(sku.getMouldQty());
+        }
+        context.getUnscheduledResultList().add(unscheduled);
+    }
+
+    /**
+     * 根据物料编码查找已存在未排结果。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 未排结果
+     */
+    private LhUnscheduledResult findUnscheduledResultByMaterial(LhScheduleContext context, String materialCode) {
+        if (context == null || CollectionUtils.isEmpty(context.getUnscheduledResultList())) {
+            return null;
+        }
+        for (LhUnscheduledResult unscheduledResult : context.getUnscheduledResultList()) {
+            if (StringUtils.equals(materialCode, unscheduledResult.getMaterialCode())) {
+                return unscheduledResult;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 按物料编码归并未排结果，确保同物料只保留一条记录。
+     *
+     * @param context 排程上下文
+     */
+    private void normalizeUnscheduledResultsByMaterial(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getUnscheduledResultList())) {
+            return;
+        }
+        Map<String, LhUnscheduledResult> mergedMap = new LinkedHashMap<>(context.getUnscheduledResultList().size());
+        for (LhUnscheduledResult unscheduledResult : context.getUnscheduledResultList()) {
+            if (unscheduledResult == null || StringUtils.isEmpty(unscheduledResult.getMaterialCode())) {
+                continue;
+            }
+            String materialCode = unscheduledResult.getMaterialCode();
+            if (!mergedMap.containsKey(materialCode)) {
+                mergedMap.put(materialCode, unscheduledResult);
+                continue;
+            }
+            LhUnscheduledResult existing = mergedMap.get(materialCode);
+            int existingQty = existing.getUnscheduledQty() != null ? existing.getUnscheduledQty() : 0;
+            int currentQty = unscheduledResult.getUnscheduledQty() != null ? unscheduledResult.getUnscheduledQty() : 0;
+            existing.setUnscheduledQty(existingQty + currentQty);
+            if (StringUtils.isEmpty(existing.getUnscheduledReason())) {
+                existing.setUnscheduledReason(unscheduledResult.getUnscheduledReason());
+            }
+        }
+        context.getUnscheduledResultList().clear();
+        context.getUnscheduledResultList().addAll(mergedMap.values());
+    }
+
+    /**
+     * 从机台已分配结果中移除零计划续作结果，避免占用后续选机上下文。
+     *
+     * @param context 排程上下文
+     * @param resultsToRemove 待移除结果列表
+     */
+    private void removeResultsFromMachineAssignments(LhScheduleContext context, List<LhScheduleResult> resultsToRemove) {
+        if (context == null
+                || CollectionUtils.isEmpty(resultsToRemove)
+                || CollectionUtils.isEmpty(context.getMachineAssignmentMap())) {
+            return;
+        }
+        Iterator<Map.Entry<String, List<LhScheduleResult>>> iterator =
+                context.getMachineAssignmentMap().entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<String, List<LhScheduleResult>> entry = iterator.next();
+            List<LhScheduleResult> assignedResults = entry.getValue();
+            if (CollectionUtils.isEmpty(assignedResults)) {
+                iterator.remove();
+                continue;
+            }
+            assignedResults.removeAll(resultsToRemove);
+            if (assignedResults.isEmpty()) {
+                iterator.remove();
+            }
+        }
+    }
+
+    private void updateMachineState(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {
+        machine.setPreviousMaterialCode(machine.getCurrentMaterialCode());
+        machine.setPreviousMaterialDesc(machine.getCurrentMaterialDesc());
+        machine.setCurrentMaterialCode(sku.getMaterialCode());
+        machine.setCurrentMaterialDesc(sku.getMaterialDesc());
+        machine.setPreviousSpecCode(sku.getSpecCode());
+        machine.setPreviousProSize(sku.getProSize());
+        // 机台预计结束时间严格回写为实际完工时间，避免被整班结束时间放大。
+        machine.setEstimatedEndTime(resolveActualCompletionTime(context, result));
+        machine.setEnding("1".equals(result.getIsEnd()) && result.getSpecEndTime() != null);
+    }
+
+    private Date resolveActualCompletionTime(LhScheduleContext context, LhScheduleResult result) {
+        if (result == null) {
+            return null;
+        }
+        int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
+                result.getMouldQty() != null ? result.getMouldQty() : 0);
+        if (lhTimeSeconds > 0 && mouldQty > 0) {
+            Date actualCompletionTime = null;
+            for (int shiftIndex = 1; shiftIndex <= 8; shiftIndex++) {
+                Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
+                Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shiftIndex);
+                if (shiftPlanQty == null || shiftPlanQty <= 0 || shiftStartTime == null) {
+                    continue;
+                }
+                Date shiftEndTime = ShiftFieldUtil.getShiftEndTime(result, shiftIndex);
+                long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
+                Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
+                        context.getDevicePlanShutList(),
+                        resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
+                        result.getLhMachineCode(),
+                        shiftStartTime,
+                        secondsNeeded);
+                if (shiftCompletionTime == null) {
+                    shiftCompletionTime = shiftEndTime;
+                } else {
+                    shiftCompletionTime = constrainCompletionWithinShift(shiftCompletionTime, shiftEndTime);
+                }
+                if (actualCompletionTime == null || shiftCompletionTime.after(actualCompletionTime)) {
+                    actualCompletionTime = shiftCompletionTime;
+                }
+            }
+            if (actualCompletionTime != null) {
+                return actualCompletionTime;
+            }
+        }
+        return result.getSpecEndTime();
+    }
+
+    /**
+     * 命中“模具清洗+换活字块”组合场景时，写入班次原因分析。
+     *
+     * @param context 排程上下文
+     * @param result 排程结果
+     * @param shifts 班次列表
+     */
+    private void applyTypeBlockCleaningAnalysis(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+        if (context == null || result == null || CollectionUtils.isEmpty(shifts)) {
+            return;
+        }
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(context, result.getLhMachineCode());
+        if (CollectionUtils.isEmpty(cleaningWindowList)) {
+            return;
+        }
+        for (LhShiftConfigVO shift : shifts) {
+            int shiftIndex = shift.getShiftIndex();
+            Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
+            if (shiftPlanQty == null || shiftPlanQty <= 0) {
+                continue;
+            }
+            Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shiftIndex);
+            if (shiftStartTime == null) {
+                continue;
+            }
+            Date shiftEndTime = ShiftFieldUtil.getShiftEndTime(result, shiftIndex);
+            if (shiftEndTime == null) {
+                shiftEndTime = shift.getShiftEndDateTime();
+            }
+            Date shiftActualEndTime = resolveShiftActualCompletionTime(context, result, shiftIndex, shiftStartTime, shiftEndTime);
+            if (shiftActualEndTime == null || !isShiftHitByCleaningWindow(shiftStartTime, shiftActualEndTime, cleaningWindowList)) {
+                continue;
+            }
+            ShiftFieldUtil.setShiftAnalysis(result, shiftIndex, TYPE_BLOCK_CLEANING_ANALYSIS);
+        }
+    }
+
+    /**
+     * 推导班次内该条结果的真实生产结束时间。
+     *
+     * @param context 排程上下文
+     * @param result 排程结果
+     * @param shiftIndex 班次索引
+     * @param shiftStartTime 班次生产开始时间
+     * @param defaultEndTime 默认结束时间
+     * @return 班次真实结束时间
+     */
+    private Date resolveShiftActualCompletionTime(LhScheduleContext context,
+                                                  LhScheduleResult result,
+                                                  int shiftIndex,
+                                                  Date shiftStartTime,
+                                                  Date defaultEndTime) {
+        if (context == null || result == null || shiftStartTime == null) {
+            return defaultEndTime;
+        }
+        Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
+        int lhTimeSeconds = result.getLhTime() != null ? result.getLhTime() : 0;
+        int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(
+                result.getMouldQty() != null ? result.getMouldQty() : 0);
+        if (shiftPlanQty == null || shiftPlanQty <= 0 || lhTimeSeconds <= 0 || mouldQty <= 0) {
+            return defaultEndTime;
+        }
+        long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
+        Date completionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
+                context.getDevicePlanShutList(),
+                resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
+                result.getLhMachineCode(),
+                shiftStartTime,
+                secondsNeeded);
+        return completionTime != null
+                ? constrainCompletionWithinShift(completionTime, defaultEndTime) : defaultEndTime;
+    }
+
+    /**
+     * 约束班次真实完工时刻不晚于该班次结束时刻，避免跨班时刻反向污染收尾判断。
+     *
+     * @param completionTime 计算出的完工时刻
+     * @param shiftEndTime 班次结束时刻
+     * @return 约束后的完工时刻
+     */
+    private Date constrainCompletionWithinShift(Date completionTime, Date shiftEndTime) {
+        if (completionTime == null) {
+            return shiftEndTime;
+        }
+        if (shiftEndTime == null) {
+            return completionTime;
+        }
+        return completionTime.after(shiftEndTime) ? shiftEndTime : completionTime;
+    }
+
+    /**
+     * 判断班次区间是否命中任一清洗窗口。
+     *
+     * @param shiftStartTime 班次开始时间
+     * @param shiftEndTime 班次结束时间
+     * @param cleaningWindowList 清洗窗口列表
+     * @return true-命中；false-未命中
+     */
+    private boolean isShiftHitByCleaningWindow(Date shiftStartTime, Date shiftEndTime,
+                                               List<MachineCleaningWindowDTO> cleaningWindowList) {
+        if (shiftStartTime == null || shiftEndTime == null || CollectionUtils.isEmpty(cleaningWindowList)) {
+            return false;
+        }
+        for (MachineCleaningWindowDTO cleaningWindow : cleaningWindowList) {
+            if (cleaningWindow == null || cleaningWindow.getCleanStartTime() == null) {
+                continue;
+            }
+            Date cleanStartTime = cleaningWindow.getCleanStartTime();
+            Date cleanEndTime = cleaningWindow.getReadyTime() != null
+                    ? cleaningWindow.getReadyTime() : cleaningWindow.getCleanEndTime();
+            if (cleanEndTime == null) {
+                continue;
+            }
+            // 严格相交才算命中：仅端点相接不视为清洗影响该班次生产。
+            if (shiftStartTime.before(cleanEndTime) && shiftEndTime.after(cleanStartTime)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<MachineCleaningWindowDTO> resolveMachineCleaningWindowList(LhScheduleContext context, String machineCode) {
+        MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
+        if (machine == null || CollectionUtils.isEmpty(machine.getCleaningWindowList())) {
+            return new ArrayList<>();
+        }
+        return machine.getCleaningWindowList();
+    }
+
+    private String resolveMachineEmbryoCode(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getEmbryoCode())) {
+            return materialInfo.getEmbryoCode();
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? currentSku.getEmbryoCode() : null;
+    }
+
+    private String resolveMachineEmbryoDesc(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getEmbryoDesc())) {
+            return normalizeCompareToken(materialInfo.getEmbryoDesc());
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? normalizeCompareToken(currentSku.getMainMaterialDesc()) : null;
+    }
+
+    private String resolveSkuEmbryoDesc(LhScheduleContext context, SkuScheduleDTO sku) {
+        if (context == null || sku == null) {
+            return null;
+        }
+        MdmMaterialInfo materialInfo = context.getMaterialInfoMap().get(sku.getMaterialCode());
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getEmbryoDesc())) {
+            return normalizeCompareToken(materialInfo.getEmbryoDesc());
+        }
+        return normalizeCompareToken(sku.getMainMaterialDesc());
+    }
+
+    private String resolveMachineSpecCode(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (StringUtils.isNotEmpty(machine.getPreviousSpecCode())) {
+            return machine.getPreviousSpecCode();
+        }
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getSpecifications())) {
+            return materialInfo.getSpecifications();
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? currentSku.getSpecCode() : null;
+    }
+
+    private String resolveMachinePatternKey(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null) {
+            return resolvePatternKey(materialInfo.getMainPattern(), materialInfo.getPattern());
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        if (currentSku == null) {
+            return null;
+        }
+        return resolvePatternKey(currentSku.getMainPattern(), currentSku.getPattern());
+    }
+
+    private String resolveMachineMainPatternStrict(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getMainPattern())) {
+            return normalizeCompareToken(materialInfo.getMainPattern());
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? normalizeCompareToken(currentSku.getMainPattern()) : null;
+    }
+
+    private String resolveSkuMainPatternStrict(LhScheduleContext context, SkuScheduleDTO sku) {
+        if (context == null || sku == null) {
+            return null;
+        }
+        MdmMaterialInfo materialInfo = context.getMaterialInfoMap().get(sku.getMaterialCode());
+        if (materialInfo != null && StringUtils.isNotEmpty(materialInfo.getMainPattern())) {
+            return normalizeCompareToken(materialInfo.getMainPattern());
+        }
+        return normalizeCompareToken(sku.getMainPattern());
+    }
+
+    private String resolveMachineStructureKey(LhScheduleContext context, MachineScheduleDTO machine) {
+        MdmMaterialInfo materialInfo = resolveMachineMaterialInfo(context, machine);
+        if (materialInfo != null) {
+            String structureKey = resolveStructureKey(materialInfo.getStructureName(),
+                    materialInfo.getSpecifications(),
+                    materialInfo.getMainPattern(),
+                    materialInfo.getPattern());
+            if (StringUtils.isNotEmpty(structureKey)) {
+                return structureKey;
+            }
+        }
+        SkuScheduleDTO currentSku = findSkuByMaterialCode(context.getContinuousSkuList(), machine.getCurrentMaterialCode());
+        return currentSku != null ? resolveStructureKey(currentSku) : null;
+    }
+
+    private MdmMaterialInfo resolveMachineMaterialInfo(LhScheduleContext context, MachineScheduleDTO machine) {
+        if (context == null || machine == null || StringUtils.isEmpty(machine.getCurrentMaterialCode())) {
+            return null;
+        }
+        return context.getMaterialInfoMap().get(machine.getCurrentMaterialCode());
+    }
+
+    private SkuScheduleDTO findSkuByMaterialCode(List<SkuScheduleDTO> skuList, String materialCode) {
+        if (CollectionUtils.isEmpty(skuList) || StringUtils.isEmpty(materialCode)) {
+            return null;
+        }
+        for (SkuScheduleDTO sku : skuList) {
+            if (StringUtils.equals(materialCode, sku.getMaterialCode())) {
+                return sku;
+            }
+        }
+        return null;
+    }
+
+    private String resolveStructureKey(SkuScheduleDTO sku) {
+        if (sku == null) {
+            return null;
+        }
+        return resolveStructureKey(sku.getStructureName(), sku.getSpecCode(), sku.getMainPattern(), sku.getPattern());
+    }
+
+    private String resolveStructureKey(String structureName, String specCode, String mainPattern, String pattern) {
+        if (StringUtils.isNotEmpty(structureName)) {
+            return structureName;
+        }
+        String patternKey = resolvePatternKey(mainPattern, pattern);
+        if (StringUtils.isEmpty(specCode) || StringUtils.isEmpty(patternKey)) {
+            return null;
+        }
+        return specCode + "#" + patternKey;
+    }
+
+    private String resolvePatternKey(String mainPattern, String pattern) {
+        if (StringUtils.isNotEmpty(mainPattern)) {
+            return mainPattern;
+        }
+        return StringUtils.isNotEmpty(pattern) ? pattern : null;
+    }
+
+    private String normalizeCompareToken(String value) {
+        if (StringUtils.isEmpty(value)) {
+            return null;
+        }
+        String normalizedValue = value.trim();
+        return StringUtils.isEmpty(normalizedValue) ? null : normalizedValue;
+    }
+
+    private String resolveMouldCode(LhScheduleContext context, String... materialCodes) {
+        if (context == null || materialCodes == null) {
+            return null;
+        }
+        for (String materialCode : materialCodes) {
+            if (StringUtils.isEmpty(materialCode) || !context.getSkuMouldRelMap().containsKey(materialCode)) {
+                continue;
+            }
+            String mouldCode = context.getSkuMouldRelMap().get(materialCode).stream()
+                    .map(MdmSkuMouldRel::getMouldCode)
+                    .filter(StringUtils::isNotEmpty)
+                    .distinct()
+                    .collect(Collectors.joining(","));
+            if (StringUtils.isNotEmpty(mouldCode)) {
+                return mouldCode;
+            }
+        }
+        return null;
     }
 
     /**
@@ -623,6 +2043,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * 在所有SKU列表中查找指定materialCode的SKU
      */
     private SkuScheduleDTO findSkuDto(LhScheduleContext context, String materialCode) {
+        if (context == null || StringUtils.isEmpty(materialCode)) {
+            return null;
+        }
         for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
             if (materialCode.equals(sku.getMaterialCode())) {
                 return sku;
@@ -633,6 +2056,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 return sku;
             }
         }
+        if (!CollectionUtils.isEmpty(context.getStructureSkuMap())) {
+            for (List<SkuScheduleDTO> skuList : context.getStructureSkuMap().values()) {
+                if (CollectionUtils.isEmpty(skuList)) {
+                    continue;
+                }
+                for (SkuScheduleDTO sku : skuList) {
+                    if (materialCode.equals(sku.getMaterialCode())) {
+                        return sku;
+                    }
+                }
+            }
+        }
         return null;
     }
 
@@ -641,5 +2076,16 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      */
     private String generateOrderNo(LhScheduleContext context) {
         return orderNoGenerator.generateOrderNo(context.getScheduleTargetDate());
+    }
+
+    /**
+     * 获取目标排产量解析器。
+     *
+     * @return 目标排产量解析器
+     */
+    private TargetScheduleQtyResolver getTargetScheduleQtyResolver() {
+        return targetScheduleQtyResolver != null
+                ? targetScheduleQtyResolver
+                : new TargetScheduleQtyResolver();
     }
 }

@@ -29,10 +29,22 @@ public interface IMouldChangeBalanceStrategy {
      * 分配换模到均衡的班次
      *
      * @param context    排程上下文
+     * @param machineCode 机台编号
      * @param endingTime 前SKU收尾时间
      * @return 换模分配的班次和时间, null表示无可用换模能力
      */
-    Date allocateMouldChange(LhScheduleContext context, Date endingTime);
+    Date allocateMouldChange(LhScheduleContext context, String machineCode, Date endingTime);
+
+    /**
+     * 兼容旧调用方的默认入口。
+     *
+     * @param context 排程上下文
+     * @param endingTime 前SKU收尾时间
+     * @return 换模分配的班次和时间
+     */
+    default Date allocateMouldChange(LhScheduleContext context, Date endingTime) {
+        return allocateMouldChange(context, null, endingTime);
+    }
 
     /**
      * 回滚已占用的换模班次配额。

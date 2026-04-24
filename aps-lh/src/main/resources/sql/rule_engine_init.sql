@@ -36,7 +36,9 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 
 -- ======================== 排程参数 ========================
 ('116', 'SCHEDULE_DAYS', '3', '排程天数', '排程计划覆盖天数'),
-('116', 'MACHINE_ONLINE_LOOKBACK_DAYS', '1', '往前追溯天数', 'MES在机信息从T-1开始向前回溯的最大天数'),
+('116', 'ENABLE_FULL_CAPACITY_SCHEDULING', '1', '是否按产能满排', '0-按需求排产，1-按产能满排'),
+('116', 'ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE', '1', '满排按余量触发收尾规则2', '0-关闭，1-开启；开启后满排模式按余量与窗口产能比较判收尾'),
+('116', 'MACHINE_ONLINE_LOOKBACK_DAYS', '90', '往前追溯天数', 'MES在机信息从T-1开始向前回溯的最大天数'),
 ('116', 'ENDING_DETECT_DAYS', '3', '收尾判定天数', '触发收尾判定的天数'),
 ('116', 'ENDING_TIME_TOLERANCE_MINUTES', '20', '机台收尾时间容差', '单位：分钟'),
 ('116', 'STRUCTURE_ENDING_DAYS', '5', '结构收尾判定天数', '降模排产的收尾判定天数'),
@@ -86,7 +88,10 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 ('116', 'ENABLE_LOCAL_SEARCH', '1', '局部搜索开关', '0-关闭，1-开启'),
 ('116', 'LOCAL_SEARCH_MACHINE_THRESHOLD', '10', '局部搜索候选机台阈值', '候选机台数小于该值时启用'),
 ('116', 'LOCAL_SEARCH_DEPTH', '3', '局部搜索深度', '包含当前 SKU 的回看深度'),
-('116', 'LOCAL_SEARCH_TIME_BUDGET_MS', '50', '局部搜索耗时预算', '单位：毫秒')
+('116', 'LOCAL_SEARCH_TIME_BUDGET_MS', '50', '局部搜索耗时预算', '单位：毫秒'),
+
+-- ======================== 优先级跟踪日志规则 ========================
+('116', 'ENABLE_PRIORITY_TRACE_LOG', '0', '优先级跟踪日志开关', '0-关闭，1-开启')
 ;
 
 -- 工厂 F002 的规则配置示例（如有需要）

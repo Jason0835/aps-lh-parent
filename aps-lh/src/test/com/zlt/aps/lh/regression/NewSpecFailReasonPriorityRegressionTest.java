@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.ICapacityCalculateStrategy;
+import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
@@ -29,7 +30,7 @@ class NewSpecFailReasonPriorityRegressionTest {
     @Test
     void scheduleNewSpecs_shouldKeepHighestPriorityFailReason() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
-        injectOrderNoGenerator(strategy);
+        injectDependencies(strategy, false);
 
         LhScheduleContext context = buildContext();
         SkuScheduleDTO sku = buildSku();
@@ -78,7 +79,7 @@ class NewSpecFailReasonPriorityRegressionTest {
             }
 
             @Override
-            public Date allocateMouldChange(LhScheduleContext ctx, Date endingTime) {
+            public Date allocateMouldChange(LhScheduleContext ctx, String machineCode, Date endingTime) {
                 if (mouldFailReadyTime.equals(endingTime)) {
                     return null;
                 }
@@ -154,7 +155,7 @@ class NewSpecFailReasonPriorityRegressionTest {
         return sku;
     }
 
-    private void injectOrderNoGenerator(NewSpecProductionStrategy strategy) throws Exception {
+    private void injectDependencies(NewSpecProductionStrategy strategy, boolean isEnding) throws Exception {
         OrderNoGenerator orderNoGenerator = new OrderNoGenerator();
 
         Field useRedisField = OrderNoGenerator.class.getDeclaredField("useRedis");
@@ -164,6 +165,26 @@ class NewSpecFailReasonPriorityRegressionTest {
         Field generatorField = NewSpecProductionStrategy.class.getDeclaredField("orderNoGenerator");
         generatorField.setAccessible(true);
         generatorField.set(strategy, orderNoGenerator);
+
+        IEndingJudgmentStrategy endingJudgmentStrategy = new IEndingJudgmentStrategy() {
+            @Override
+            public boolean isEnding(LhScheduleContext context, SkuScheduleDTO sku) {
+                return isEnding;
+            }
+
+            @Override
+            public int calculateEndingShifts(LhScheduleContext context, SkuScheduleDTO sku) {
+                return isEnding ? 1 : 0;
+            }
+
+            @Override
+            public int calculateEndingDays(LhScheduleContext context, SkuScheduleDTO sku) {
+                return isEnding ? 1 : 0;
+            }
+        };
+        Field endingField = NewSpecProductionStrategy.class.getDeclaredField("endingJudgmentStrategy");
+        endingField.setAccessible(true);
+        endingField.set(strategy, endingJudgmentStrategy);
     }
 
     private static Date dateTime(int year, int month, int day, int hour, int minute) {

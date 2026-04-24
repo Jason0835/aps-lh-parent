@@ -3,12 +3,11 @@ package com.zlt.aps.lh.context;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
-import com.zlt.aps.lh.api.domain.entity.LhCleaningPlan;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
+import com.zlt.aps.lh.api.domain.entity.LhMouldCleanPlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
-import com.zlt.aps.lh.api.domain.entity.LhShiftFinishQty;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
@@ -23,8 +22,10 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
+import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import lombok.Data;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.util.CollectionUtils;
 
 import java.util.*;
 import java.util.Objects;
@@ -72,6 +73,8 @@ public class LhScheduleContext {
 
     /** 月生产计划列表 */
     private List<FactoryMonthPlanProductionFinalResult> monthPlanList = new ArrayList<>();
+    /** 周程滚动调整结果Map, key=materialCode */
+    private Map<String, List<MpAdjustResult>> mpAdjustResultMap = new HashMap<>();
     /** 工作日历列表 */
     private List<MdmWorkCalendar> workCalendarList = new ArrayList<>();
     /** SKU日硫化产能Map, key=materialCode */
@@ -85,13 +88,21 @@ public class LhScheduleContext {
     /** 硫化机台信息Map, key=machineCode */
     private Map<String, LhMachineInfo> machineInfoMap = new LinkedHashMap<>();
     /** 模具清洗计划列表 */
-    private List<LhCleaningPlan> cleaningPlanList = new ArrayList<>();
+    private List<LhMouldCleanPlan> cleaningPlanList = new ArrayList<>();
     /** 月底计划余量Map, key=materialCode */
     private Map<String, MdmMonthSurplus> monthSurplusMap = new HashMap<>();
-    /** 各班次完成量Map, key=machineCode+materialCode */
-    private Map<String, LhShiftFinishQty> shiftFinishQtyMap = new HashMap<>();
+    /** 日完成量Map（按物料+完成日期聚合）, key=materialCode_finishDate(yyyy-MM-dd) */
+    private Map<String, Integer> materialDayFinishedQtyMap = new HashMap<>();
+    /** 月累计完成量Map（截至目标排产日期含当天）, key=materialCode */
+    private Map<String, Integer> materialMonthFinishedQtyMap = new HashMap<>();
     /** 物料信息Map, key=materialCode */
     private Map<String, MdmMaterialInfo> materialInfoMap = new HashMap<>();
+    /** 胶囊规格分组Map, key=规格, value=归一化后的分组编码 */
+    private Map<String, String> capsuleSpecPeerMap = new HashMap<>();
+    /** 胶囊英寸分组Map, key=英寸, value=归一化后的分组编码 */
+    private Map<String, String> capsuleProSizePeerMap = new HashMap<>();
+    /** 胎胚描述对应物料数量Map, key=胎胚描述 */
+    private Map<String, Integer> embryoDescMaterialCountMap = new HashMap<>();
     /** MES硫化在机信息Map, key=machineCode */
     private Map<String, LhMachineOnlineInfo> machineOnlineInfoMap = new HashMap<>();
     /** 硫化定点机台Map, key=specCode */
@@ -154,6 +165,8 @@ public class LhScheduleContext {
     private String currentStep;
     /** 校验错误信息集合 */
     private List<String> validationErrorList = new ArrayList<>();
+    /** 优先级跟踪日志静默深度（局部搜索模拟分支时递增） */
+    private int priorityTraceMuteDepth = 0;
 
     /**
      * 追加一条校验错误信息（空串或 null 将被忽略）
@@ -211,6 +224,104 @@ public class LhScheduleContext {
     public void interruptSchedule(String reason) {
         this.interrupted = true;
         this.interruptReason = reason;
+    }
+
+    /**
+     * 进入优先级跟踪日志静默区间。
+     * <p>用于局部搜索等模拟分支，避免输出非最终决策日志。</p>
+     */
+    public void enterPriorityTraceMuteScope() {
+        priorityTraceMuteDepth++;
+    }
+
+    /**
+     * 退出优先级跟踪日志静默区间。
+     */
+    public void exitPriorityTraceMuteScope() {
+        if (priorityTraceMuteDepth > 0) {
+            priorityTraceMuteDepth--;
+        }
+    }
+
+    /**
+     * 当前是否处于优先级跟踪日志静默区间。
+     *
+     * @return true-静默，false-正常输出
+     */
+    public boolean isPriorityTraceMuted() {
+        return priorityTraceMuteDepth > 0;
+    }
+
+    /**
+     * 将已移出待排队列的SKU同步从结构分组中剔除。
+     * <p>structureSkuMap 在 S4.4 / S4.5 期间既用于顺序3结构收尾判断，也作为 SKU 兜底查询来源，
+     * 因此需要与当前待排视图保持一致，避免已消费SKU继续影响后续排序与查询。</p>
+     *
+     * @param sku 已移出待排队列的SKU
+     */
+    public void removePendingSkuFromStructureMap(SkuScheduleDTO sku) {
+        if (Objects.isNull(sku)
+                || CollectionUtils.isEmpty(structureSkuMap)
+                || StringUtils.isEmpty(sku.getStructureName())) {
+            return;
+        }
+        List<SkuScheduleDTO> structureSkuList = structureSkuMap.get(sku.getStructureName());
+        if (CollectionUtils.isEmpty(structureSkuList)) {
+            structureSkuMap.remove(sku.getStructureName());
+            return;
+        }
+        List<SkuScheduleDTO> mutableStructureSkuList = new ArrayList<>(structureSkuList);
+        Iterator<SkuScheduleDTO> iterator = mutableStructureSkuList.iterator();
+        while (iterator.hasNext()) {
+            SkuScheduleDTO currentSku = iterator.next();
+            if (isSameStructureSku(currentSku, sku)) {
+                iterator.remove();
+                break;
+            }
+        }
+        if (CollectionUtils.isEmpty(mutableStructureSkuList)) {
+            structureSkuMap.remove(sku.getStructureName());
+            return;
+        }
+        structureSkuMap.put(sku.getStructureName(), mutableStructureSkuList);
+    }
+
+    /**
+     * 判断结构分组中的SKU是否与目标SKU一致。
+     *
+     * @param currentSku 结构分组中的SKU
+     * @param targetSku  目标SKU
+     * @return true-同一SKU，false-不同SKU
+     */
+    private boolean isSameStructureSku(SkuScheduleDTO currentSku, SkuScheduleDTO targetSku) {
+        if (currentSku == targetSku) {
+            return true;
+        }
+        if (Objects.isNull(currentSku) || Objects.isNull(targetSku)) {
+            return false;
+        }
+        return StringUtils.equals(currentSku.getMaterialCode(), targetSku.getMaterialCode());
+    }
+
+    /**
+     * 基于当前待排SKU列表重建结构分组。
+     * <p>用于阶段性收口结构视图，避免已消费SKU继续影响后续优先级判断。</p>
+     *
+     * @param pendingSkuList 当前待排SKU列表
+     */
+    public void rebuildStructureSkuMapFromPending(List<SkuScheduleDTO> pendingSkuList) {
+        if (CollectionUtils.isEmpty(pendingSkuList)) {
+            structureSkuMap = new LinkedHashMap<>();
+            return;
+        }
+        Map<String, List<SkuScheduleDTO>> rebuiltStructureSkuMap = new LinkedHashMap<>(16);
+        for (SkuScheduleDTO sku : pendingSkuList) {
+            if (Objects.isNull(sku) || StringUtils.isEmpty(sku.getStructureName())) {
+                continue;
+            }
+            rebuiltStructureSkuMap.computeIfAbsent(sku.getStructureName(), key -> new ArrayList<>()).add(sku);
+        }
+        structureSkuMap = rebuiltStructureSkuMap;
     }
 
     /**

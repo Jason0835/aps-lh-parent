@@ -1,22 +1,28 @@
 package com.zlt.aps.lh.regression;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.lh.api.domain.entity.LhDayFinishQty;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
-import com.zlt.aps.lh.mapper.LhCleaningPlanMapper;
+import com.zlt.aps.lh.mapper.LhDayFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
-import com.zlt.aps.lh.mapper.LhShiftFinishQtyMapper;
+import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
+import com.zlt.aps.lh.mapper.MdmCapsuleChuckMapper;
 import com.zlt.aps.lh.mapper.LhMachineOnlineInfoMapper;
 import com.zlt.aps.lh.mapper.LhRepairCapsuleMapper;
 import com.zlt.aps.lh.mapper.MdmMaterialInfoMapper;
+import com.zlt.aps.lh.mapper.MdmModelInfoMapper;
 import com.zlt.aps.lh.mapper.MdmMonthSurplusMapper;
 import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
@@ -25,20 +31,29 @@ import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.service.impl.LhBaseDataServiceImpl;
 import com.zlt.aps.mp.api.domain.entity.MpFactoryProductionVersion;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -61,15 +76,19 @@ class ScheduleDataWindowRegressionTest {
     @Mock
     private MdmSkuMouldRelMapper skuMouldRelMapper;
     @Mock
+    private MdmModelInfoMapper mdmModelInfoMapper;
+    @Mock
     private LhMachineInfoMapper lhMachineInfoMapper;
     @Mock
-    private LhCleaningPlanMapper lhCleaningPlanMapper;
+    private LhMouldCleanPlanMapper lhMouldCleanPlanMapper;
     @Mock
     private MdmMonthSurplusMapper monthSurplusMapper;
     @Mock
-    private LhShiftFinishQtyMapper lhShiftFinishQtyMapper;
+    private LhDayFinishQtyMapper lhDayFinishQtyMapper;
     @Mock
     private MdmMaterialInfoMapper mdmMaterialInfoMapper;
+    @Mock
+    private MdmCapsuleChuckMapper mdmCapsuleChuckMapper;
     @Mock
     private LhMachineOnlineInfoMapper lhMachineOnlineInfoMapper;
     @Mock
@@ -126,32 +145,44 @@ class ScheduleDataWindowRegressionTest {
         // [startDate,endDate) 与 T～T+2 对齐见 scheduleWindow_targetDayTDayAndHalfOpenEndMatchFormula；此处仅确认三类数据按该窗口加载
         verify(workCalendarMapper).selectList(any());
         verify(devicePlanShutMapper).selectList(any());
-        verify(lhCleaningPlanMapper).selectList(any());
+        verify(lhMouldCleanPlanMapper).selectList(any());
         verify(lhScheduleResultMapper).selectList(any());
     }
 
     @Test
-    void loadAllBaseData_shouldUseLatestSnapshotInConfiguredLookbackWindow() {
+    void loadAllBaseData_shouldUseNearestOnlineInfoPerMachineInLookbackWindow() {
         Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 17));
         Date scheduleDate = LhScheduleTimeUtil.addDays(target, -2);
         prepareRequiredBaseMocks();
 
-        // 第一次查询仅用于命中“最近有数据日期”，4/12 有数据，4/14 与 4/13 均为空
-        LhMachineOnlineInfo latestDateRow = new LhMachineOnlineInfo();
-        latestDateRow.setOnlineDate(dateTime(2026, 4, 12, 8, 30, 0));
+        // 模拟查询结果已按 onlineDate/updateTime 倒序；同机台保留第一条即最近记录。
+        LhMachineOnlineInfo machineARecent = new LhMachineOnlineInfo();
+        machineARecent.setOnlineDate(date(2026, 4, 14));
+        machineARecent.setUpdateTime(dateTime(2026, 4, 14, 8, 30, 0));
+        machineARecent.setLhCode("K1501");
+        machineARecent.setMaterialCode("MAT-A-NEW");
 
-        // 第二次查询加载命中日期（4/12）整天快照
-        LhMachineOnlineInfo snapshot1 = new LhMachineOnlineInfo();
-        snapshot1.setOnlineDate(dateTime(2026, 4, 12, 9, 0, 0));
-        snapshot1.setLhCode("K1501");
-        snapshot1.setMaterialCode("MAT-A");
-        LhMachineOnlineInfo snapshot2 = new LhMachineOnlineInfo();
-        snapshot2.setOnlineDate(dateTime(2026, 4, 12, 10, 0, 0));
-        snapshot2.setLhCode("K1502");
-        snapshot2.setMaterialCode("MAT-B");
+        LhMachineOnlineInfo machineAOld = new LhMachineOnlineInfo();
+        machineAOld.setOnlineDate(date(2026, 4, 13));
+        machineAOld.setUpdateTime(dateTime(2026, 4, 13, 9, 0, 0));
+        machineAOld.setLhCode("K1501");
+        machineAOld.setMaterialCode("MAT-A-OLD");
+
+        // 同机台同日记录通过 updateTime 决定优先级（ONLINE_DATE 在数据库是 date 类型）。
+        LhMachineOnlineInfo machineBRecentByUpdateTime = new LhMachineOnlineInfo();
+        machineBRecentByUpdateTime.setOnlineDate(date(2026, 4, 12));
+        machineBRecentByUpdateTime.setUpdateTime(dateTime(2026, 4, 12, 10, 0, 0));
+        machineBRecentByUpdateTime.setLhCode("K1502");
+        machineBRecentByUpdateTime.setMaterialCode("MAT-B-LATE");
+
+        LhMachineOnlineInfo machineBOldByUpdateTime = new LhMachineOnlineInfo();
+        machineBOldByUpdateTime.setOnlineDate(date(2026, 4, 12));
+        machineBOldByUpdateTime.setUpdateTime(dateTime(2026, 4, 12, 9, 0, 0));
+        machineBOldByUpdateTime.setLhCode("K1502");
+        machineBOldByUpdateTime.setMaterialCode("MAT-B-EARLY");
+
         when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(
-                Collections.singletonList(latestDateRow),
-                Arrays.asList(snapshot1, snapshot2));
+                Arrays.asList(machineARecent, machineAOld, machineBRecentByUpdateTime, machineBOldByUpdateTime));
 
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode("FC01");
@@ -162,8 +193,8 @@ class ScheduleDataWindowRegressionTest {
         lhBaseDataService.loadAllBaseData(context);
 
         assertEquals(2, context.getMachineOnlineInfoMap().size());
-        assertEquals("MAT-A", context.getMachineOnlineInfoMap().get("K1501").getMaterialCode());
-        assertEquals("MAT-B", context.getMachineOnlineInfoMap().get("K1502").getMaterialCode());
+        assertEquals("MAT-A-NEW", context.getMachineOnlineInfoMap().get("K1501").getMaterialCode());
+        assertEquals("MAT-B-LATE", context.getMachineOnlineInfoMap().get("K1502").getMaterialCode());
     }
 
     @Test
@@ -184,10 +215,113 @@ class ScheduleDataWindowRegressionTest {
         assertTrue(context.getMachineOnlineInfoMap().isEmpty());
     }
 
+    @Test
+    void loadAllBaseData_shouldLoadDayFinishQtyAndAggregateMonthFinishedQtyUntilTargetDate() {
+        Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 17));
+        Date scheduleDate = LhScheduleTimeUtil.addDays(target, -2);
+        prepareRequiredBaseMocks();
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        LhDayFinishQty previousDayFinishQty = new LhDayFinishQty();
+        previousDayFinishQty.setFinishDate(dateTime(2026, 4, 16, 8, 30, 0));
+        previousDayFinishQty.setMaterialCode("MAT-TODAY");
+        previousDayFinishQty.setDayFinishQty(BigDecimal.valueOf(20));
+
+        LhDayFinishQty monthFinishQtyA = new LhDayFinishQty();
+        monthFinishQtyA.setFinishDate(dateTime(2026, 4, 2, 9, 0, 0));
+        monthFinishQtyA.setMaterialCode("MAT-MONTH");
+        monthFinishQtyA.setDayFinishQty(BigDecimal.valueOf(60));
+
+        LhDayFinishQty monthFinishQtyB = new LhDayFinishQty();
+        monthFinishQtyB.setFinishDate(dateTime(2026, 4, 17, 13, 15, 0));
+        monthFinishQtyB.setMaterialCode("MAT-MONTH");
+        monthFinishQtyB.setDayFinishQty(BigDecimal.valueOf(20));
+
+        LhDayFinishQty otherMaterialMonthFinishQty = new LhDayFinishQty();
+        otherMaterialMonthFinishQty.setFinishDate(dateTime(2026, 4, 15, 10, 0, 0));
+        otherMaterialMonthFinishQty.setMaterialCode("MAT-OTHER");
+        otherMaterialMonthFinishQty.setDayFinishQty(BigDecimal.valueOf(9));
+
+        when(lhDayFinishQtyMapper.selectList(any())).thenReturn(
+                Collections.singletonList(previousDayFinishQty),
+                Arrays.asList(monthFinishQtyA, monthFinishQtyB, otherMaterialMonthFinishQty));
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("FC01");
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        assertEquals(1, context.getMaterialDayFinishedQtyMap().size());
+        assertEquals(20, context.getMaterialDayFinishedQtyMap().get("MAT-TODAY_2026-04-16").intValue());
+        assertEquals(80, context.getMaterialMonthFinishedQtyMap().get("MAT-MONTH").intValue());
+        assertEquals(9, context.getMaterialMonthFinishedQtyMap().get("MAT-OTHER").intValue());
+
+        List<LambdaQueryWrapper<LhDayFinishQty>> wrappers = captureDayFinishQtyWrappers();
+        assertQueryContainsDateRange(wrappers.get(0), stripTime(date(2026, 4, 16)), stripTime(date(2026, 4, 17)));
+        assertQueryContainsDateRange(wrappers.get(1), stripTime(date(2026, 4, 1)), stripTime(date(2026, 4, 18)));
+        assertQueryCompatibleWithNullDeleteFlag(wrappers.get(0));
+        assertQueryCompatibleWithNullDeleteFlag(wrappers.get(1));
+    }
+
+    @Test
+    void loadAllBaseData_shouldAggregateMonthFinishedQtyUsingTargetMonthWhenWindowCrossesMonth() {
+        Date target = LhScheduleTimeUtil.clearTime(date(2026, 5, 2));
+        Date scheduleDate = LhScheduleTimeUtil.addDays(target, -2);
+        prepareRequiredBaseMocks();
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        LhDayFinishQty previousDayFinishQty = new LhDayFinishQty();
+        previousDayFinishQty.setFinishDate(dateTime(2026, 5, 1, 9, 0, 0));
+        previousDayFinishQty.setMaterialCode("MAT-TODAY");
+        previousDayFinishQty.setDayFinishQty(BigDecimal.valueOf(6));
+
+        LhDayFinishQty targetMonthFinishQtyA = new LhDayFinishQty();
+        targetMonthFinishQtyA.setFinishDate(dateTime(2026, 5, 1, 10, 0, 0));
+        targetMonthFinishQtyA.setMaterialCode("MAT-CROSS");
+        targetMonthFinishQtyA.setDayFinishQty(BigDecimal.valueOf(15));
+
+        LhDayFinishQty targetMonthFinishQtyB = new LhDayFinishQty();
+        targetMonthFinishQtyB.setFinishDate(dateTime(2026, 5, 2, 15, 0, 0));
+        targetMonthFinishQtyB.setMaterialCode("MAT-CROSS");
+        targetMonthFinishQtyB.setDayFinishQty(BigDecimal.valueOf(7));
+
+        when(lhDayFinishQtyMapper.selectList(any())).thenReturn(
+                Collections.singletonList(previousDayFinishQty),
+                Arrays.asList(targetMonthFinishQtyA, targetMonthFinishQtyB));
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("FC01");
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        assertEquals(22, context.getMaterialMonthFinishedQtyMap().get("MAT-CROSS").intValue());
+
+        List<LambdaQueryWrapper<LhDayFinishQty>> wrappers = captureDayFinishQtyWrappers();
+        assertQueryContainsDateRange(wrappers.get(1), stripTime(date(2026, 5, 1)), stripTime(date(2026, 5, 3)));
+        assertQueryCompatibleWithNullDeleteFlag(wrappers.get(1));
+    }
+
+    @Test
+    void resolveDayFinishedQty_shouldTreatNullAsZero() {
+        LhDayFinishQty finishQty = new LhDayFinishQty();
+        finishQty.setDayFinishQty(BigDecimal.valueOf(11));
+        Integer finishedQty = ReflectionTestUtils.invokeMethod(lhBaseDataService,
+                "resolveDayFinishedQty", finishQty);
+        assertEquals(11, finishedQty.intValue());
+
+        finishQty.setDayFinishQty(null);
+        Integer nullFinishedQty = ReflectionTestUtils.invokeMethod(lhBaseDataService,
+                "resolveDayFinishedQty", finishQty);
+        assertEquals(0, nullFinishedQty.intValue());
+    }
+
     private void prepareRequiredBaseMocks() {
         MpFactoryProductionVersion finalVersion = new MpFactoryProductionVersion();
         finalVersion.setProductionVersion("PV_REGRESSION_01");
-        when(mpFactoryProductionVersionMapper.selectCount(any())).thenReturn(1L);
         when(mpFactoryProductionVersionMapper.selectList(any())).thenReturn(Collections.singletonList(finalVersion));
 
         when(monthPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
@@ -195,6 +329,7 @@ class ScheduleDataWindowRegressionTest {
         when(skuLhCapacityMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devicePlanShutMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(skuMouldRelMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(mdmModelInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
 
         LhMachineInfo machine = new LhMachineInfo();
         machine.setMachineCode("M1");
@@ -202,14 +337,72 @@ class ScheduleDataWindowRegressionTest {
         machine.setIsDelete(DeleteFlagEnum.NORMAL.getCode());
         when(lhMachineInfoMapper.selectList(any())).thenReturn(Collections.singletonList(machine));
 
-        when(lhCleaningPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(lhMouldCleanPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(monthSurplusMapper.selectList(any())).thenReturn(Collections.emptyList());
-        when(lhShiftFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(lhDayFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(mdmMaterialInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(mdmCapsuleChuckMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhSpecifyMachineMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhRepairCapsuleMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(devMaintenancePlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhScheduleResultMapper.selectList(any())).thenReturn(Collections.emptyList());
+    }
+
+    /**
+     * 抓取日完成量查询使用的 wrapper，确保回归测试能直接校验查询条件。
+     *
+     * @return 按调用顺序捕获到的 wrapper 列表
+     */
+    @SuppressWarnings("unchecked")
+    private List<LambdaQueryWrapper<LhDayFinishQty>> captureDayFinishQtyWrappers() {
+        initializeDayFinishQtyTableInfo();
+        ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(lhDayFinishQtyMapper, times(2)).selectList(captor.capture());
+        return (List<LambdaQueryWrapper<LhDayFinishQty>>) (List<?>) captor.getAllValues();
+    }
+
+    /**
+     * 初始化实体表信息，避免测试环境下解析 wrapper SQL 时缺少 lambda cache。
+     */
+    private void initializeDayFinishQtyTableInfo() {
+        if (TableInfoHelper.getTableInfo(LhDayFinishQty.class) != null) {
+            return;
+        }
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(),
+                LhDayFinishQty.class.getName());
+        TableInfoHelper.initTableInfo(assistant, LhDayFinishQty.class);
+    }
+
+    /**
+     * 校验查询使用半开区间日期条件，防止回退为等值匹配。
+     *
+     * @param wrapper    查询条件
+     * @param rangeStart 区间起点（含）
+     * @param rangeEnd   区间终点（不含）
+     */
+    private void assertQueryContainsDateRange(LambdaQueryWrapper<LhDayFinishQty> wrapper, Date rangeStart, Date rangeEnd) {
+        String sqlSegment = wrapper.getSqlSegment().toLowerCase(Locale.ROOT);
+        Map<String, Object> paramMap = wrapper.getParamNameValuePairs();
+        assertTrue(sqlSegment.contains("finish_date"));
+        assertTrue(sqlSegment.contains(">="));
+        assertTrue(sqlSegment.contains("<"));
+        assertFalse(sqlSegment.contains("finish_date ="));
+        assertTrue(paramMap.containsValue(rangeStart));
+        assertTrue(paramMap.containsValue(rangeEnd));
+    }
+
+    /**
+     * 校验删除标记兼容 `0` 与 `NULL`，避免快照数据被遗漏。
+     *
+     * @param wrapper 查询条件
+     */
+    private void assertQueryCompatibleWithNullDeleteFlag(LambdaQueryWrapper<LhDayFinishQty> wrapper) {
+        String sqlSegment = wrapper.getSqlSegment().toLowerCase(Locale.ROOT);
+        Map<String, Object> paramMap = wrapper.getParamNameValuePairs();
+        assertTrue(sqlSegment.contains("is_delete"));
+        assertTrue(sqlSegment.contains("is null"));
+        assertTrue(sqlSegment.contains("or"));
+        assertTrue(paramMap.containsValue(DeleteFlagEnum.NORMAL.getCode()));
     }
 
     private static Date date(int y, int month, int day) {

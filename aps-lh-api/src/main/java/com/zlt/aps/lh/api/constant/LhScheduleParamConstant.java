@@ -80,6 +80,10 @@ public final class LhScheduleParamConstant {
     public static final String CAPSULE_PREHEAT_HOURS = "CAPSULE_PREHEAT_HOURS";
     /** 排程天数 */
     public static final String SCHEDULE_DAYS = "SCHEDULE_DAYS";
+    /** 是否按产能满排 */
+    public static final String ENABLE_FULL_CAPACITY_SCHEDULING = "ENABLE_FULL_CAPACITY_SCHEDULING";
+    /** 满排模式是否按余量命中收尾规则2 */
+    public static final String ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE = "ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE";
     /** MES在机信息往前追溯天数 */
     public static final String MACHINE_ONLINE_LOOKBACK_DAYS = "MACHINE_ONLINE_LOOKBACK_DAYS";
     /** 停机超时阈值（小时） */
@@ -110,4 +114,6 @@ public final class LhScheduleParamConstant {
     public static final String LOCAL_SEARCH_DEPTH = "LOCAL_SEARCH_DEPTH";
     /** 局部搜索单次耗时预算（毫秒） */
     public static final String LOCAL_SEARCH_TIME_BUDGET_MS = "LOCAL_SEARCH_TIME_BUDGET_MS";
+    /** 优先级跟踪日志开关（0-关闭，1-开启） */
+    public static final String ENABLE_PRIORITY_TRACE_LOG = "ENABLE_PRIORITY_TRACE_LOG";
 }

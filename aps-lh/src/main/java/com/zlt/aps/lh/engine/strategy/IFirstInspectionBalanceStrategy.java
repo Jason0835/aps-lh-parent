@@ -9,7 +9,7 @@ import java.util.Date;
 
 /**
  * 首检均衡策略接口
- * <p>将需首检任务均衡分配到早/中班, 避免单班组过载</p>
+ * <p>将需首检任务分配到可用班次；默认实现中夜班允许首检但不占早/中班上限</p>
  *
  * @author APS
  */
@@ -24,6 +24,7 @@ public interface IFirstInspectionBalanceStrategy {
      *   <li>优先分配到操作数更少的班次</li>
      *   <li>中班可安排时间窗口: 14:00-20:00</li>
      *   <li>每个班首检数量可配置，参数 {@code MAX_FIRST_INSPECTION_PER_SHIFT} 为 {@code -1} 时不限制</li>
+     *   <li>夜班允许首检，但不占早/中班计数</li>
      *   <li>不足则顺延到次日早班</li>
      * </ol>
      * </p>

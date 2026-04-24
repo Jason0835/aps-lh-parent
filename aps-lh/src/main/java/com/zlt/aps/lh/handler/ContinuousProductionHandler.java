@@ -5,6 +5,7 @@ import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.engine.factory.ScheduleStrategyFactory;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.engine.strategy.ISkuPriorityStrategy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -25,14 +26,17 @@ public class ContinuousProductionHandler extends AbsScheduleStepHandler {
 
     @Override
     protected void doHandle(LhScheduleContext context) {
+        ISkuPriorityStrategy priorityStrategy = strategyFactory.getSkuPriorityStrategy();
+        priorityStrategy.sortByPriority(context);
+
         IProductionStrategy strategy = strategyFactory.getProductionStrategy(
                 ScheduleTypeEnum.CONTINUOUS.getCode());
 
-        // S4.4.1 换活字块排产(同胎胚同模具)
-        strategy.scheduleTypeBlockChange(context);
-
-        // S4.4.2 续作收尾判定与排产
+        // S4.4.1 MES在机原物料延续生产与续作收尾
         strategy.scheduleContinuousEnding(context);
+
+        // S4.4.2 收尾后衔接排产（同产品结构直续优先，其次换活字块）
+        strategy.scheduleTypeBlockChange(context);
 
         // S4.4.3 班次计划量分配
         strategy.allocateShiftPlanQty(context);

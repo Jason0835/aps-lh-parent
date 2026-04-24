@@ -38,6 +38,10 @@ public class MachineScheduleDTO {
     private String currentMaterialCode;
     /** 当前在产物料描述 */
     private String currentMaterialDesc;
+    /** 前规格物料编码（换模前机台当前在机物料编码） */
+    private String previousMaterialCode;
+    /** 前规格物料描述（换模前机台当前在机物料描述） */
+    private String previousMaterialDesc;
     /** 前规格(用于换模匹配) */
     private String previousSpecCode;
     /** 前规格英寸 */
@@ -72,6 +76,8 @@ public class MachineScheduleDTO {
     private boolean hasSandBlastCleaning;
     /** 清洗计划时间 */
     private Date cleaningPlanTime;
+    /** 清洗时间窗口明细 */
+    private List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
 
     // ========== 保养/维修 ==========
     /** 是否有保养计划 */

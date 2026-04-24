@@ -16,7 +16,7 @@ import java.util.Date;
 
 /**
  * 默认首检均衡策略实现
- * <p>将需首检任务均衡分配到早/中班, 每班上限可配置（-1 不限制）, 避免单班组过载</p>
+ * <p>将需首检任务均衡分配到早/中/夜班，其中夜班首检不占早/中班上限计数</p>
  *
  * @author APS
  */
@@ -79,7 +79,13 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
                 continue;
             }
 
-            // 夜班不做首检，延后到次日早班
+            if (LhScheduleTimeUtil.isNightShift(context, inspectionTime)) {
+                // 夜班首检允许执行，但不占早/中班上限计数。
+                log.debug("首检分配到夜班(不占上限), 机台: {}, 日期: {}", machineCode, dateKey);
+                return inspectionTime;
+            }
+
+            // 未命中任何班次时，保守顺延到次日早班
             inspectionTime = getNextDayMorningStart(context, inspectionTime);
         }
 
@@ -124,7 +130,9 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
     }
 
     /**
-     * 获取次日早班开始时间
+     * 获取日历次日早班开始时间。
+     * <p>用于早/中班首检配额用尽后的再顺延；语义为「clearTime(current)+1 天」的早班，
+     * 与 {@link LhScheduleTimeUtil#resolveNextMorningAfterNoMouldChangeWindow}（禁止换模跨凌晨回退到当日早班）不同。</p>
      */
     private Date getNextDayMorningStart(LhScheduleContext context, Date currentTime) {
         Date nextDay = LhScheduleTimeUtil.addDays(LhScheduleTimeUtil.clearTime(currentTime), 1);

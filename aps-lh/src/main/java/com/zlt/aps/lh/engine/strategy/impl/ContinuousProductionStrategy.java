@@ -47,6 +47,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -194,7 +195,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if (!"01".equals(result.getScheduleType())) {
+            if (!CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())
+                    && !"1".equals(result.getIsTypeBlock())) {
                 continue;
             }
             // 重新按班次分配（夜->早->中顺序按可用量分配）
@@ -523,27 +525,50 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                                         Date candidateStartTime) {
         if (context == null
                 || StringUtils.isEmpty(machineCode)
-                || candidateStartTime == null
-                || CollectionUtils.isEmpty(context.getDevicePlanShutList())) {
+                || candidateStartTime == null) {
             return candidateStartTime;
         }
         Date candidateEndTime = LhScheduleTimeUtil.addHours(
                 candidateStartTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
         Date latestOverlapEndTime = null;
-        for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
-            if (planShut == null
-                    || !StringUtils.equals(machineCode, planShut.getMachineCode())
-                    || planShut.getBeginDate() == null
-                    || planShut.getEndDate() == null
-                    || !planShut.getBeginDate().before(planShut.getEndDate())) {
-                continue;
+        if (!CollectionUtils.isEmpty(context.getDevicePlanShutList())) {
+            for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
+                if (planShut == null
+                        || !StringUtils.equals(machineCode, planShut.getMachineCode())
+                        || planShut.getBeginDate() == null
+                        || planShut.getEndDate() == null
+                        || !planShut.getBeginDate().before(planShut.getEndDate())) {
+                    continue;
+                }
+                if (!candidateStartTime.before(planShut.getEndDate())
+                        || !planShut.getBeginDate().before(candidateEndTime)) {
+                    continue;
+                }
+                if (latestOverlapEndTime == null || planShut.getEndDate().after(latestOverlapEndTime)) {
+                    latestOverlapEndTime = planShut.getEndDate();
+                }
             }
-            if (!candidateStartTime.before(planShut.getEndDate())
-                    || !planShut.getBeginDate().before(candidateEndTime)) {
-                continue;
-            }
-            if (latestOverlapEndTime == null || planShut.getEndDate().after(latestOverlapEndTime)) {
-                latestOverlapEndTime = planShut.getEndDate();
+        }
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(context, machineCode);
+        if (!CollectionUtils.isEmpty(cleaningWindowList)) {
+            for (MachineCleaningWindowDTO cleaningWindow : cleaningWindowList) {
+                if (Objects.isNull(cleaningWindow)
+                        || Objects.isNull(cleaningWindow.getCleanStartTime())) {
+                    continue;
+                }
+                Date cleaningReadyTime = cleaningWindow.getReadyTime() != null
+                        ? cleaningWindow.getReadyTime() : cleaningWindow.getCleanEndTime();
+                if (Objects.isNull(cleaningReadyTime)
+                        || !cleaningWindow.getCleanStartTime().before(cleaningReadyTime)) {
+                    continue;
+                }
+                if (!candidateStartTime.before(cleaningReadyTime)
+                        || !cleaningWindow.getCleanStartTime().before(candidateEndTime)) {
+                    continue;
+                }
+                if (latestOverlapEndTime == null || cleaningReadyTime.after(latestOverlapEndTime)) {
+                    latestOverlapEndTime = cleaningReadyTime;
+                }
             }
         }
         return latestOverlapEndTime != null ? latestOverlapEndTime : candidateStartTime;

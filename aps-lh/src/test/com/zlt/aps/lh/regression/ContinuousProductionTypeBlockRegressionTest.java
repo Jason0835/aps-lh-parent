@@ -254,6 +254,40 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
+    void scheduleTypeBlockChange_shouldStartAfterSandBlastEndThenAddTypeBlockHours() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
+        machine.setEstimatedEndTime(dateTime(2026, 4, 18, 11, 0, 0));
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("02");
+        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 18, 8, 0, 0));
+        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 18, 18, 0, 0));
+        cleaningWindow.setReadyTime(dateTime(2026, 4, 18, 18, 0, 0));
+        List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
+        cleaningWindowList.add(cleaningWindow);
+        machine.setCleaningWindowList(cleaningWindowList);
+        context.getMachineScheduleMap().put("M1", machine);
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        strategy.scheduleTypeBlockChange(context);
+
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        assertEquals(dateTime(2026, 4, 19, 2, 0, 0), resolveFirstStartTime(typeBlockResult));
+        assertEquals(dateTime(2026, 4, 18, 18, 0, 0),
+                ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"));
+    }
+
+    @Test
     void scheduleTypeBlockChange_shouldSelectFirstSkuWithinPriorityTwoCandidates() {
         LhScheduleContext context = newContext();
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));

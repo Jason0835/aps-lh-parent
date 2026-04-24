@@ -305,8 +305,8 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         } else if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleanType)) {
             cleanDurationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_DURATION_HOURS,
                     LhScheduleConstant.SAND_BLAST_DURATION_HOURS);
-            readyDurationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_WITH_INSPECTION_HOURS,
-                    LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
+            // 喷砂窗口只表达清洗结束时刻，后续换模/换活字块时间由各自排产链路继续叠加。
+            readyDurationHours = cleanDurationHours;
         } else {
             return null;
         }

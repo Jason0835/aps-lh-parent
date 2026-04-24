@@ -108,7 +108,7 @@ class MachineStateInitRegressionTest {
         assertEquals("R", firstCleaningWindow.getLeftRightMould());
         assertEquals(dateTime(2026, 4, 12, 7, 30), firstCleaningWindow.getCleanStartTime());
         assertEquals(dateTime(2026, 4, 12, 17, 30), firstCleaningWindow.getCleanEndTime());
-        assertEquals(dateTime(2026, 4, 12, 19, 30), firstCleaningWindow.getReadyTime());
+        assertEquals(dateTime(2026, 4, 12, 17, 30), firstCleaningWindow.getReadyTime());
 
         MachineCleaningWindowDTO secondCleaningWindow = machine.getCleaningWindowList().get(1);
         assertEquals("01", secondCleaningWindow.getCleanType());

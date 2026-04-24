@@ -68,6 +68,31 @@ class CleaningPlanScheduleImpactRegressionTest {
         assertEquals(result.getSpecEndTime(), result.getTdaySpecEndTime());
     }
 
+    @Test
+    void allocateShiftPlanQty_shouldApplyDryIceLossForTypeBlockResult() {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+        LhScheduleContext context = buildSingleShiftContext();
+        context.getMachineScheduleMap().put("K1514", buildMachineWithDryIceCleaning());
+
+        LhScheduleResult result = buildResult("K1514", "02");
+        result.setIsTypeBlock("1");
+        result.setIsChangeMould("1");
+        result.setIsEnd("1");
+        result.setSingleMouldShiftQty(18);
+        result.setClass1PlanQty(18);
+        result.setClass1StartTime(dateTime(2026, 4, 21, 6, 0, 0));
+        result.setClass1EndTime(dateTime(2026, 4, 21, 14, 0, 0));
+        context.getScheduleResultList().add(result);
+
+        strategy.allocateShiftPlanQty(context);
+
+        assertEquals(12, result.getDailyPlanQty(), "换活字块结果重新分配班次时也应扣减干冰清洗损失");
+        assertEquals(12, result.getClass1PlanQty());
+        assertNotNull(result.getSpecEndTime());
+        assertEquals(dateTime(2026, 4, 21, 14, 0, 0), result.getSpecEndTime());
+        assertEquals(result.getSpecEndTime(), result.getTdaySpecEndTime());
+    }
+
     private LhScheduleContext buildSingleShiftContext() {
         LhScheduleContext context = new LhScheduleContext();
         Date scheduleDate = date(2026, 4, 21);

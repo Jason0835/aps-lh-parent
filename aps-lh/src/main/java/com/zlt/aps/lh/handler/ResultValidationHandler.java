@@ -196,13 +196,13 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
      * <p>01-正规换模, 02-更换活字块, 03-模具喷砂清洗, 04-模具干冰清洗</p>
      */
     private String determineChangeMouldType(LhScheduleResult result) {
+        // 换活字块：通过 isTypeBlock 精确识别
+        if ("1".equals(result.getIsTypeBlock())) {
+            return "02";
+        }
         // 新增排产（换模）
         if ("02".equals(result.getScheduleType())) {
             return "01";
-        }
-        // 续作且有换模标记的为换活字块
-        if ("01".equals(result.getScheduleType()) && "1".equals(result.getIsChangeMould())) {
-            return "02";
         }
         return "01";
     }

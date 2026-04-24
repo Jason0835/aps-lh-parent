@@ -530,18 +530,19 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             sku.setTargetScheduleQty(originalTargetScheduleQty);
             return false;
         }
-        result.setScheduleType("01");
-        result.setIsEnd(isEnding ? "1" : "0");
         if (typeBlock) {
+            result.setScheduleType("02");  // 换活字块显示为新增类型（用于前端展示）
             result.setIsChangeMould("1");
             result.setIsTypeBlock("1");
             result.setMouldCode(resolveMouldCode(context, sku.getMaterialCode(), machine.getCurrentMaterialCode()));
             // 换活字块虽然不是新增规格换模，但下游换模计划仍按真实切换开始时间生成。
             result.setMouldChangeStartTime(resolveTypeBlockChangeStartTime(context, startTime));
         } else {
+            result.setScheduleType("01");  // 续作保持不变
             result.setIsChangeMould("0");
             result.setIsTypeBlock("0");
         }
+        result.setIsEnd(isEnding ? "1" : "0");
         // 续作衔接结果即便非收尾，也必须补齐可计算完工时刻，避免结果校验失败。
         Date actualCompletionTime = resolveActualCompletionTime(context, result);
         if (actualCompletionTime == null) {

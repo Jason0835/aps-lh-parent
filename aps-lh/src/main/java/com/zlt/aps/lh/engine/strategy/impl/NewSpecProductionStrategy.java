@@ -103,7 +103,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         log.info("新增排产 - 胎胚库存调整");
         // 新增SKU的胎胚库存调整
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if (!NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType())) {
+            // 排除换活字块（换活字块不需要胎胚库存调整）
+            if (!NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType()) 
+                    || "1".equals(result.getIsTypeBlock())) {
                 continue;
             }
             // 检查胎胚库存是否满足，若不足则削减计划量
@@ -681,7 +683,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         Map<String, Integer> zeroPlanQtyMap = new LinkedHashMap<>(8);
         List<LhScheduleResult> zeroPlanResults = new ArrayList<>(8);
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if (!NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType())) {
+            // 排除换活字块（换活字块不需要零计划量裁剪）
+            if (!NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType()) 
+                    || "1".equals(result.getIsTypeBlock())) {
                 continue;
             }
             if (result.getDailyPlanQty() != null && result.getDailyPlanQty() > 0) {
@@ -940,6 +944,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             if (result == null
                     || !StringUtils.equals(materialCode, result.getMaterialCode())
                     || !NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType())
+                    || "1".equals(result.getIsTypeBlock())  // 排除换活字块
                     || result.getDailyPlanQty() == null
                     || result.getDailyPlanQty() <= 0) {
                 continue;

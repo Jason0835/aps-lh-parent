@@ -376,16 +376,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 复用现有候选优先级：收尾SKU优先，其次按列表顺序取首个。
+     * 按月度计划SKU排序结果选择候选首位。
      */
     private SkuScheduleDTO selectPreferredSkuFromCandidates(LhScheduleContext context, List<SkuScheduleDTO> candidates) {
         if (CollectionUtils.isEmpty(candidates)) {
             return null;
-        }
-        for (SkuScheduleDTO sku : candidates) {
-            if (endingJudgmentStrategy.isEnding(context, sku)) {
-                return sku;
-            }
         }
         return candidates.get(0);
     }

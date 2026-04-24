@@ -253,7 +253,7 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
-    void scheduleTypeBlockChange_shouldPreferEndingSkuWithinPriorityTwoCandidates() {
+    void scheduleTypeBlockChange_shouldSelectFirstSkuWithinPriorityTwoCandidates() {
         LhScheduleContext context = newContext();
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
@@ -276,9 +276,9 @@ class ContinuousProductionTypeBlockRegressionTest {
         strategy.scheduleTypeBlockChange(context);
 
         LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
-        assertEquals("MAT-T2", typeBlockResult.getMaterialCode());
+        assertEquals("MAT-T1", typeBlockResult.getMaterialCode());
         assertEquals(1, context.getNewSpecSkuList().size());
-        assertEquals("MAT-T1", context.getNewSpecSkuList().get(0).getMaterialCode());
+        assertEquals("MAT-T2", context.getNewSpecSkuList().get(0).getMaterialCode());
     }
 
     @Test

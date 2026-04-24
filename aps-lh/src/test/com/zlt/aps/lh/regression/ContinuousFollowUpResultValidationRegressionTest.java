@@ -96,7 +96,7 @@ class ContinuousFollowUpResultValidationRegressionTest {
         assertNotNull(followUpResult.getSpecEndTime());
         assertNotNull(followUpResult.getTdaySpecEndTime());
         Date latestSpecEndTime = context.getScheduleResultList().stream()
-                .filter(result -> "01".equals(result.getScheduleType()))
+                .filter(result -> "01".equals(result.getScheduleType()) || "1".equals(result.getIsTypeBlock()))
                 .filter(result -> result.getDailyPlanQty() != null && result.getDailyPlanQty() > 0)
                 .map(LhScheduleResult::getSpecEndTime)
                 .filter(endTime -> endTime != null)
@@ -117,7 +117,6 @@ class ContinuousFollowUpResultValidationRegressionTest {
         continuousSku.setEmbryoStock(0);
         context.getContinuousSkuList().add(continuousSku);
         SkuScheduleDTO typeBlockSku = buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1);
-        typeBlockSku.setEmbryoStock(0);
         context.getNewSpecSkuList().add(typeBlockSku);
         context.getStructureSkuMap().put("STRUCT-TEST", Arrays.asList(continuousSku, typeBlockSku));
         putMouldRel(context, "MAT-C1", "MOULD-1");
@@ -145,8 +144,8 @@ class ContinuousFollowUpResultValidationRegressionTest {
                 .orElse(-1);
         assertEquals(1, typeBlockUnscheduledQty);
 
-        assertDoesNotThrow(() -> resultValidationHandler.handle(context));
         assertEquals(0, context.getMouldChangePlanList().size());
+        assertDoesNotThrow(() -> resultValidationHandler.handle(context));
     }
 
     @Test

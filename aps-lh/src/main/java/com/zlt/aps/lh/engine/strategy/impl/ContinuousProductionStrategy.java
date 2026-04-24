@@ -227,10 +227,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         log.info("续作排产 - 降模排产");
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
-        // 按materialCode分组找出同SKU多机台情况
+        // 按materialCode分组找出同SKU多机台情况（续作+换活字块统一收口）
         Map<String, List<LhScheduleResult>> skuResultMap = new HashMap<>();
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if ("01".equals(result.getScheduleType())) {
+            if (isContinuousPhaseResult(result)) {
                 skuResultMap.computeIfAbsent(result.getMaterialCode(), k -> new ArrayList<>()).add(result);
             }
         }
@@ -1256,7 +1256,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         Map<String, Integer> zeroPlanQtyMap = new LinkedHashMap<>(8);
         List<LhScheduleResult> zeroPlanResults = new ArrayList<>(8);
         for (LhScheduleResult result : context.getScheduleResultList()) {
-            if (!CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())) {
+            if (!isContinuousPhaseResult(result)) {
                 continue;
             }
             if (result.getDailyPlanQty() != null && result.getDailyPlanQty() > 0) {
@@ -1333,18 +1333,33 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 判断结果是否属于可驱动机台终态的有效续作结果。
+     * 判断结果是否属于可驱动机台终态的有效结果。
+     * <p>除续作结果外，S4.4 产生的换活字块结果也需要参与机台终态回写，
+     * 否则会在 S4.5 选机时丢失真实收尾时间。</p>
      *
      * @param result 排程结果
-     * @return true-有效续作结果；false-非有效续作结果
+     * @return true-有效结果；false-非有效结果
      */
     private boolean isEffectiveContinuousResult(LhScheduleResult result) {
-        return result != null
-                && CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())
+        return isContinuousPhaseResult(result)
                 && result.getDailyPlanQty() != null
                 && result.getDailyPlanQty() > 0
                 && result.getSpecEndTime() != null
                 && StringUtils.isNotEmpty(result.getLhMachineCode());
+    }
+
+    /**
+     * 判断结果是否属于续作阶段结果（含换活字块）。
+     *
+     * @param result 排程结果
+     * @return true-续作阶段结果；false-非续作阶段结果
+     */
+    private boolean isContinuousPhaseResult(LhScheduleResult result) {
+        if (result == null) {
+            return false;
+        }
+        return CONTINUOUS_SCHEDULE_TYPE.equals(result.getScheduleType())
+                || "1".equals(result.getIsTypeBlock());
     }
 
     /**
@@ -1437,8 +1452,33 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             return 0;
         }
         int targetScheduleQty = sku.resolveTargetScheduleQty();
-        int retainedQty = resolveEffectiveScheduledQty(context, materialCode, CONTINUOUS_SCHEDULE_TYPE);
+        int retainedQty = resolveEffectiveContinuousPhaseScheduledQty(context, materialCode);
         return Math.max(targetScheduleQty - retainedQty, 0);
+    }
+
+    /**
+     * 统计同物料在续作阶段最终保留的有效计划量（含换活字块）。
+     *
+     * @param context 排程上下文
+     * @param materialCode 物料编码
+     * @return 有效计划量
+     */
+    private int resolveEffectiveContinuousPhaseScheduledQty(LhScheduleContext context, String materialCode) {
+        if (context == null || StringUtils.isEmpty(materialCode) || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return 0;
+        }
+        int totalQty = 0;
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (result == null
+                    || !StringUtils.equals(materialCode, result.getMaterialCode())
+                    || !isContinuousPhaseResult(result)
+                    || result.getDailyPlanQty() == null
+                    || result.getDailyPlanQty() <= 0) {
+                continue;
+            }
+            totalQty += result.getDailyPlanQty();
+        }
+        return totalQty;
     }
 
     /**

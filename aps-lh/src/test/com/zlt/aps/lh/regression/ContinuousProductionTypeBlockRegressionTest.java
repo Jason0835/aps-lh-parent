@@ -15,6 +15,7 @@ import com.zlt.aps.lh.engine.strategy.impl.ContinuousProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
+import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -569,6 +570,38 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
+    void scheduleTypeBlockChange_shouldDelayTypeBlockToNextMorningWhenDowntimeOverlapsAndNightForbidden() {
+        LhScheduleContext context = newContext();
+        context.setScheduleDate(date(2026, 4, 21));
+        context.setScheduleTargetDate(date(2026, 4, 23));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        MachineScheduleDTO machine = buildMachine("K2024", "3302001556");
+        machine.setEnding(true);
+        machine.setEstimatedEndTime(dateTime(2026, 4, 21, 6, 0, 0));
+        context.getMachineScheduleMap().put("K2024", machine);
+        context.getNewSpecSkuList().add(buildNewSku("3302002174", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 50));
+        putMaterialInfo(context, "3302001556", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "3302002174", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        context.getDevicePlanShutList().add(buildDevicePlanShut(
+                "K2024", dateTime(2026, 4, 21, 6, 0, 0), dateTime(2026, 4, 21, 23, 59, 59)));
+        putMouldRel(context, "3302001556", "MOULD-1");
+        putMouldRel(context, "3302002174", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
+
+        strategy.scheduleTypeBlockChange(context);
+
+        assertEquals(1, context.getScheduleResultList().size());
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(0);
+        assertEquals("3302002174", typeBlockResult.getMaterialCode());
+        assertEquals(dateTime(2026, 4, 22, 14, 0, 0), resolveFirstStartTime(typeBlockResult),
+                "停机重叠且夜班禁换时，应顺延到次日早班发起换活字块，次日中班开始生产");
+        Integer class3PlanQty = ShiftFieldUtil.getShiftPlanQty(typeBlockResult, 3);
+        assertTrue(class3PlanQty == null || class3PlanQty <= 0, "停机日夜班不应出现换活字块后的生产计划量");
+    }
+
+    @Test
     void scheduleTypeBlockChange_shouldWriteTraceLogsAfterActualEndTimeUpdate() {
         LhScheduleContext context = newTraceContext();
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
@@ -737,6 +770,14 @@ class ContinuousProductionTypeBlockRegressionTest {
         materialInfo.setMainPattern(mainPattern);
         materialInfo.setPattern(pattern);
         context.getMaterialInfoMap().put(materialCode, materialInfo);
+    }
+
+    private MdmDevicePlanShut buildDevicePlanShut(String machineCode, Date beginDate, Date endDate) {
+        MdmDevicePlanShut planShut = new MdmDevicePlanShut();
+        planShut.setMachineCode(machineCode);
+        planShut.setBeginDate(beginDate);
+        planShut.setEndDate(endDate);
+        return planShut;
     }
 
     private Date resolveFirstStartTime(LhScheduleResult result) {

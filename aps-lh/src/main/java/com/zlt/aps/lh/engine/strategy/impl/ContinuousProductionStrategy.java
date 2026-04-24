@@ -29,6 +29,7 @@ import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
+import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -66,6 +67,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     private static final String TYPE_BLOCK_TRIGGER_FALLBACK = "在机前规格兜底触发";
     private static final String TYPE_BLOCK_SKIP_REASON_T1_NOT_END =
             "T-1 最新记录未收尾，跳过兜底反查";
+    private static final int TYPE_BLOCK_SWITCH_MAX_ATTEMPTS = 16;
 
     @Resource
     private OrderNoGenerator orderNoGenerator;
@@ -467,7 +469,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (machine.getEstimatedEndTime() == null) {
             return null;
         }
-        Date switchStartTime = resolveAllowedSwitchStartTime(context, machine.getEstimatedEndTime());
+        Date switchStartTime = resolveAllowedSwitchStartTime(
+                context, machine.getMachineCode(), machine.getEstimatedEndTime());
         // 换活字块：允许切换时间 + 换活字块总耗时
         return LhScheduleTimeUtil.addHours(switchStartTime,
                 LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
@@ -489,18 +492,71 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * 解析允许发起切换（换模/换活字块）的开始时间。
      * <p>20:00:00（含）到次日早班前禁止发起切换，需顺延到下一个早班开始时间。</p>
      */
-    private Date resolveAllowedSwitchStartTime(LhScheduleContext context, Date endingTime) {
+    private Date resolveAllowedSwitchStartTime(LhScheduleContext context, String machineCode, Date endingTime) {
         if (endingTime == null) {
             return null;
         }
-        if (!LhScheduleTimeUtil.isNoMouldChangeTime(context, endingTime)) {
-            return endingTime;
+        Date adjustedTime = endingTime;
+        for (int attempt = 0; attempt < TYPE_BLOCK_SWITCH_MAX_ATTEMPTS; attempt++) {
+            Date downtimeAdjustedTime = resolveDowntimeAdjustedSwitchStartTime(
+                    context, machineCode, adjustedTime);
+            if (downtimeAdjustedTime.after(adjustedTime)) {
+                adjustedTime = downtimeAdjustedTime;
+                continue;
+            }
+            if (!LhScheduleTimeUtil.isNoMouldChangeTime(context, adjustedTime)) {
+                return adjustedTime;
+            }
+            adjustedTime = resolveNextMorningShiftStart(context, adjustedTime);
         }
+        log.warn("换活字块切换起点达到最大尝试次数, 机台: {}, 原始时间: {}",
+                machineCode, LhScheduleTimeUtil.formatDateTime(endingTime));
+        return adjustedTime;
+    }
 
+    /**
+     * 根据停机窗口顺延换活字块切换起点。
+     * <p>当候选切换窗口与机台停机窗口重叠时，顺延到重叠停机结束时刻。</p>
+     */
+    private Date resolveDowntimeAdjustedSwitchStartTime(LhScheduleContext context,
+                                                        String machineCode,
+                                                        Date candidateStartTime) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || candidateStartTime == null
+                || CollectionUtils.isEmpty(context.getDevicePlanShutList())) {
+            return candidateStartTime;
+        }
+        Date candidateEndTime = LhScheduleTimeUtil.addHours(
+                candidateStartTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+        Date latestOverlapEndTime = null;
+        for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
+            if (planShut == null
+                    || !StringUtils.equals(machineCode, planShut.getMachineCode())
+                    || planShut.getBeginDate() == null
+                    || planShut.getEndDate() == null
+                    || !planShut.getBeginDate().before(planShut.getEndDate())) {
+                continue;
+            }
+            if (!candidateStartTime.before(planShut.getEndDate())
+                    || !planShut.getBeginDate().before(candidateEndTime)) {
+                continue;
+            }
+            if (latestOverlapEndTime == null || planShut.getEndDate().after(latestOverlapEndTime)) {
+                latestOverlapEndTime = planShut.getEndDate();
+            }
+        }
+        return latestOverlapEndTime != null ? latestOverlapEndTime : candidateStartTime;
+    }
+
+    /**
+     * 解析下一个可发起换活字块的早班开始时刻。
+     */
+    private Date resolveNextMorningShiftStart(LhScheduleContext context, Date baseTime) {
         Calendar calendar = Calendar.getInstance();
-        calendar.setTime(endingTime);
+        calendar.setTime(baseTime);
         int hour = calendar.get(Calendar.HOUR_OF_DAY);
-        Date morningBaseDate = LhScheduleTimeUtil.clearTime(endingTime);
+        Date morningBaseDate = LhScheduleTimeUtil.clearTime(baseTime);
         if (hour >= LhScheduleTimeUtil.getNoMouldChangeStartHour(context)) {
             morningBaseDate = LhScheduleTimeUtil.addDays(morningBaseDate, 1);
         }
@@ -616,7 +672,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                             + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
                             + ", 基准时间=" + PriorityTraceLogHelper.formatDateTime(estimatedEndTime)
                             + ", 实际切换起点=" + PriorityTraceLogHelper.formatDateTime(
-                            resolveAllowedSwitchStartTime(context, estimatedEndTime)));
+                            resolveAllowedSwitchStartTime(context, machine.getMachineCode(), estimatedEndTime)));
         }
         String detail = detailBuilder.toString().trim();
         log.info("{}\n{}", title, detail);

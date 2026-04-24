@@ -130,7 +130,9 @@ public class DefaultFirstInspectionBalanceStrategy implements IFirstInspectionBa
     }
 
     /**
-     * 获取次日早班开始时间
+     * 获取日历次日早班开始时间。
+     * <p>用于早/中班首检配额用尽后的再顺延；语义为「clearTime(current)+1 天」的早班，
+     * 与 {@link LhScheduleTimeUtil#resolveNextMorningAfterNoMouldChangeWindow}（禁止换模跨凌晨回退到当日早班）不同。</p>
      */
     private Date getNextDayMorningStart(LhScheduleContext context, Date currentTime) {
         Date nextDay = LhScheduleTimeUtil.addDays(LhScheduleTimeUtil.clearTime(currentTime), 1);

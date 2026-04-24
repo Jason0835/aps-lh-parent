@@ -472,6 +472,29 @@ public final class LhScheduleTimeUtil {
     }
 
     /**
+     * 禁止换模时段结束后，第一个可发起换模/切换的早班开始时刻。
+     * <p>与跨日夜班口径一致：晚间段（≥禁止换模起始小时，默认 20:00）顺延到<strong>次日</strong>早班；
+     * 凌晨段（&lt;早班起始小时，默认 6:00）属于同一跨日夜班的后半段，顺延到<strong>当日</strong>早班。</p>
+     *
+     * @param context  排程上下文
+     * @param baseTime 当前处于禁止换模时段内的时间点
+     * @return 下一个早班开始时间；context 或 baseTime 为 null 时返回 null
+     */
+    public static Date resolveNextMorningAfterNoMouldChangeWindow(LhScheduleContext context, Date baseTime) {
+        if (context == null || baseTime == null) {
+            return null;
+        }
+        Calendar calendar = Calendar.getInstance();
+        calendar.setTime(baseTime);
+        int hour = calendar.get(Calendar.HOUR_OF_DAY);
+        Date morningBaseDate = clearTime(baseTime);
+        if (hour >= getNoMouldChangeStartHour(context)) {
+            morningBaseDate = addDays(morningBaseDate, 1);
+        }
+        return buildTime(morningBaseDate, getMorningStartHour(context), 0, 0);
+    }
+
+    /**
      * 判断指定时间是否在早班时段
      *
      * @param context 排程上下文

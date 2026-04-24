@@ -39,7 +39,6 @@ import org.springframework.util.CollectionUtils;
 import javax.annotation.Resource;
 
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.HashMap;
@@ -509,7 +508,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             if (!LhScheduleTimeUtil.isNoMouldChangeTime(context, adjustedTime)) {
                 return adjustedTime;
             }
-            adjustedTime = resolveNextMorningShiftStart(context, adjustedTime);
+            adjustedTime = LhScheduleTimeUtil.resolveNextMorningAfterNoMouldChangeWindow(context, adjustedTime);
         }
         log.warn("换活字块切换起点达到最大尝试次数, 机台: {}, 原始时间: {}",
                 machineCode, LhScheduleTimeUtil.formatDateTime(endingTime));
@@ -572,21 +571,6 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             }
         }
         return latestOverlapEndTime != null ? latestOverlapEndTime : candidateStartTime;
-    }
-
-    /**
-     * 解析下一个可发起换活字块的早班开始时刻。
-     */
-    private Date resolveNextMorningShiftStart(LhScheduleContext context, Date baseTime) {
-        Calendar calendar = Calendar.getInstance();
-        calendar.setTime(baseTime);
-        int hour = calendar.get(Calendar.HOUR_OF_DAY);
-        Date morningBaseDate = LhScheduleTimeUtil.clearTime(baseTime);
-        if (hour >= LhScheduleTimeUtil.getNoMouldChangeStartHour(context)) {
-            morningBaseDate = LhScheduleTimeUtil.addDays(morningBaseDate, 1);
-        }
-        return LhScheduleTimeUtil.buildTime(
-                morningBaseDate, LhScheduleTimeUtil.getMorningStartHour(context), 0, 0);
     }
 
     /**

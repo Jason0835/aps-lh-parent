@@ -57,9 +57,9 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
                 continue;
             }
 
-            // 若在禁止换模时间段内（20:00-次日6:00），延后到次日早班开始时间
+            // 若在禁止换模时间段内（20:00-次日6:00），顺延到禁止时段结束后的第一个早班（凌晨段为当日早班，晚间段为次日早班）
             if (LhScheduleTimeUtil.isNoMouldChangeTime(context, adjustedTime)) {
-                adjustedTime = getNextMorningShiftStart(context, adjustedTime);
+                adjustedTime = LhScheduleTimeUtil.resolveNextMorningAfterNoMouldChangeWindow(context, adjustedTime);
                 continue;
             }
 
@@ -88,13 +88,13 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
                     log.debug("换模分配到中班, 日期: {}, 中班已用: {}/{}", dateKey, counts[IDX_AFTERNOON], afternoonLimit);
                     return adjustedTime;
                 }
-                // 中班也满了，延后到次日早班
-                adjustedTime = getNextMorningShiftStart(context, adjustedTime);
+                // 中班也满了，延后到日历次日早班（与禁止换模窗口后的「当日早班」语义不同）
+                adjustedTime = getNextCalendarDayMorningStart(context, adjustedTime);
                 continue;
             }
 
-            // 夜班不换模，直接延后到次日早班
-            adjustedTime = getNextMorningShiftStart(context, adjustedTime);
+            // 夜班不换模，直接顺延到日历次日早班（常规配置下多由禁止换模分支先行处理）
+            adjustedTime = getNextCalendarDayMorningStart(context, adjustedTime);
         }
 
         log.warn("换模均衡分配失败，无可用换模班次, 原始时间: {}",
@@ -164,9 +164,9 @@ public class DefaultMouldChangeBalanceStrategy implements IMouldChangeBalanceStr
     }
 
     /**
-     * 获取次日早班开始时间
+     * 日历次日早班开始时间（用于中班换模配额已满等「已进入可换模日段」后的再顺延）
      */
-    private Date getNextMorningShiftStart(LhScheduleContext context, Date currentTime) {
+    private Date getNextCalendarDayMorningStart(LhScheduleContext context, Date currentTime) {
         Date nextDay = LhScheduleTimeUtil.addDays(LhScheduleTimeUtil.clearTime(currentTime), 1);
         return LhScheduleTimeUtil.buildTime(nextDay, LhScheduleTimeUtil.getMorningStartHour(context), 0, 0);
     }

@@ -11,6 +11,7 @@ import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultEndingJudgmentStrategy;
 import com.zlt.aps.lh.handler.ScheduleAdjustHandler;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
@@ -353,6 +354,76 @@ class ScheduleAdjustCarryForwardRegressionTest {
     }
 
     @Test
+    void doHandle_shouldDeductInheritedPlanQtyFromRollingWindowPendingQty() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 24));
+        context.setScheduleTargetDate(date(2026, 4, 26));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.getInheritedPlanQtyMap().put("MAT-ROLL", 80);
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-ROLL");
+        plan.setMaterialDesc("MAT-ROLL-DESC");
+        plan.setStructureName("S-ROLL");
+        plan.setSpecifications("SPEC-ROLL");
+        plan.setTotalQty(300);
+        plan.setDay24(40);
+        plan.setDay25(40);
+        plan.setDay26(30);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-ROLL").get(0);
+        assertEquals(110, sku.getWindowPlanQty());
+        assertEquals(30, sku.getPendingQty());
+        assertEquals(30, sku.getTargetScheduleQty().intValue());
+    }
+
+    @Test
+    void doHandle_shouldExcludeRollingInheritedWindowShiftFromCarryForwardQty() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 24));
+        context.setScheduleTargetDate(date(2026, 4, 26));
+        context.setRollingScheduleHandoff(true);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.getInheritedPlanQtyMap().put("MAT-ROLL-DUP", 60);
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-ROLL-DUP");
+        plan.setMaterialDesc("MAT-ROLL-DUP-DESC");
+        plan.setStructureName("S-ROLL-DUP");
+        plan.setSpecifications("SPEC-ROLL-DUP");
+        plan.setTotalQty(300);
+        plan.setDay24(60);
+        plan.setDay25(60);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        LhScheduleResult previous = new LhScheduleResult();
+        previous.setMaterialCode("MAT-ROLL-DUP");
+        ShiftFieldUtil.setShiftPlanQty(previous, 1, 40,
+                dateTime(2026, 4, 23, 6, 0), dateTime(2026, 4, 23, 14, 0));
+        ShiftFieldUtil.setShiftPlanQty(previous, 2, 60,
+                dateTime(2026, 4, 23, 22, 0), dateTime(2026, 4, 24, 7, 0));
+        context.setPreviousScheduleResultList(Collections.singletonList(previous));
+        context.getMaterialDayFinishedQtyMap().put("MAT-ROLL-DUP_2026-04-23", 40);
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-ROLL-DUP").get(0);
+        assertNull(context.getCarryForwardQtyMap().get("MAT-ROLL-DUP"));
+        assertEquals(120, sku.getWindowPlanQty());
+        assertEquals(60, sku.getPendingQty());
+        assertEquals(60, sku.getTargetScheduleQty().intValue());
+    }
+
+    @Test
     void doHandle_shouldMatchContinuousSkuByMachineOnlineInfo() {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
@@ -457,6 +528,17 @@ class ScheduleAdjustCarryForwardRegressionTest {
         c.set(Calendar.YEAR, y);
         c.set(Calendar.MONTH, month - 1);
         c.set(Calendar.DAY_OF_MONTH, day);
+        return c.getTime();
+    }
+
+    private static java.util.Date dateTime(int y, int month, int day, int hour, int minute) {
+        Calendar c = Calendar.getInstance();
+        c.clear();
+        c.set(Calendar.YEAR, y);
+        c.set(Calendar.MONTH, month - 1);
+        c.set(Calendar.DAY_OF_MONTH, day);
+        c.set(Calendar.HOUR_OF_DAY, hour);
+        c.set(Calendar.MINUTE, minute);
         return c.getTime();
     }
 

@@ -17,6 +17,7 @@ import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.service.ILhShiftConfigService;
+import com.zlt.aps.lh.service.impl.RollingScheduleHandoffService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
@@ -53,6 +54,9 @@ public class DataInitHandler extends AbsScheduleStepHandler {
     @Resource
     private ILhShiftConfigService lhShiftConfigService;
 
+    @Resource
+    private RollingScheduleHandoffService rollingScheduleHandoffService;
+
     @Override
     protected void doHandle(LhScheduleContext context) {
         // S4.2.1 解析班次配置（无表数据则用默认模板），并写入上下文
@@ -85,6 +89,11 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
         List<LhShiftConfigVO> windowShifts = context.getScheduleWindowShifts();
         LhScheduleTimeUtil.initShiftRuntimeStateMap(context, windowShifts);
+        // 滚动排程衔接：将前批次重叠班次继承到本次，推进机台状态
+        rollingScheduleHandoffService.apply(context);
+        if (context.isInterrupted()) {
+            return;
+        }
 
         log.info("基础数据初始化完成, 机台数量: {}, 月计划SKU数: {}",
                 context.getMachineInfoMap().size(), context.getMonthPlanList().size());

@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMouldCleanPlan;
+import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
@@ -14,6 +15,7 @@ import com.zlt.aps.lh.mapper.MpFactoryProductionVersionMapper;
 import com.zlt.aps.lh.mapper.LhDayFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
+import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
@@ -140,6 +142,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     @Resource
     private LhScheduleResultMapper lhScheduleResultMapper;
 
+    @Resource
+    private LhMouldChangePlanMapper lhMouldChangePlanMapper;
+
     @Override
     public void loadAllBaseData(LhScheduleContext context) {
         String factoryCode = context.getFactoryCode();
@@ -223,6 +228,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
         // 19. 加载前日硫化排程结果
         loadPreviousScheduleResults(context, factoryCode, targetDate);
+        // 20. 加载前日模具交替计划，供滚动衔接继承
+        loadPreviousMouldChangePlans(context, factoryCode, targetDate);
 
         log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}",
                 factoryCode, LhScheduleTimeUtil.formatDate(targetDate), LhScheduleTimeUtil.formatDate(scheduleDate));
@@ -249,6 +256,24 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         }
         context.setPreviousScheduleResultList(list);
         log.info("前日排程基础数据加载完成, 数量: {}, 日期: {}", list.size(), LhScheduleTimeUtil.formatDate(previousDate));
+    }
+
+    /**
+     * 加载前日模具交替计划。
+     *
+     * @param context 排程上下文
+     * @param factoryCode 分厂编号
+     * @param targetDate 排程目标日
+     */
+    private void loadPreviousMouldChangePlans(LhScheduleContext context, String factoryCode, Date targetDate) {
+        Date previousDate = LhScheduleTimeUtil.addDays(targetDate, -1);
+        List<LhMouldChangePlan> list = lhMouldChangePlanMapper.selectList(new LambdaQueryWrapper<LhMouldChangePlan>()
+                .eq(LhMouldChangePlan::getFactoryCode, factoryCode)
+                .eq(LhMouldChangePlan::getScheduleDate, previousDate)
+                .eq(LhMouldChangePlan::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        context.setPreviousMouldChangePlanList(list != null ? list : new ArrayList<>());
+        log.info("前日模具交替计划加载完成, 数量: {}, 日期: {}",
+                context.getPreviousMouldChangePlanList().size(), LhScheduleTimeUtil.formatDate(previousDate));
     }
 
     /**

@@ -6,6 +6,7 @@ import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Date;
+import java.util.Objects;
 
 /**
  * 通过 Hutool BeanUtil 统一读写 {@link LhScheduleResult} 的 class1～class8 班次字段（与 shiftIndex 对应）。
@@ -37,6 +38,42 @@ public final class ShiftFieldUtil {
         BeanUtil.setProperty(result, prefix + "PlanQty", qty);
         BeanUtil.setProperty(result, prefix + "StartTime", startTime);
         BeanUtil.setProperty(result, prefix + "EndTime", endTime);
+    }
+
+    /**
+     * 清空全部班次计划字段。
+     *
+     * @param result 排程结果
+     */
+    public static void clearShiftPlanFields(LhScheduleResult result) {
+        if (Objects.isNull(result)) {
+            return;
+        }
+        for (int shiftIndex = 1; shiftIndex <= LhScheduleConstant.MAX_SHIFT_SLOT_COUNT; shiftIndex++) {
+            setShiftPlanQty(result, shiftIndex, null, null, null);
+            setShiftAnalysis(result, shiftIndex, null);
+        }
+    }
+
+    /**
+     * 复制指定班次计划字段。
+     *
+     * @param source 源排程结果
+     * @param sourceShiftIndex 源班次索引
+     * @param target 目标排程结果
+     * @param targetShiftIndex 目标班次索引
+     */
+    public static void copyShiftPlanFields(LhScheduleResult source, int sourceShiftIndex,
+            LhScheduleResult target, int targetShiftIndex) {
+        if (Objects.isNull(source) || Objects.isNull(target)
+                || !isValidIndex(sourceShiftIndex) || !isValidIndex(targetShiftIndex)) {
+            return;
+        }
+        setShiftPlanQty(target, targetShiftIndex,
+                getShiftPlanQty(source, sourceShiftIndex),
+                getShiftStartTime(source, sourceShiftIndex),
+                getShiftEndTime(source, sourceShiftIndex));
+        setShiftAnalysis(target, targetShiftIndex, getShiftAnalysis(source, sourceShiftIndex));
     }
 
     /**

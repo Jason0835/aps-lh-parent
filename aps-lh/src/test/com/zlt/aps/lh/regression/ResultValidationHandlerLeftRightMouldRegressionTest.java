@@ -167,6 +167,38 @@ class ResultValidationHandlerLeftRightMouldRegressionTest {
         assertEquals(mouldChangeStartTime, plan.getChangeTime());
     }
 
+    @Test
+    void generateMouldChangePlan_shouldKeepInheritedPlanAndOnlyAppendNewPlan() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.setInitialMachineScheduleMap(new LinkedHashMap<>());
+
+        LhMouldChangePlan inheritedPlan = new LhMouldChangePlan();
+        inheritedPlan.setFactoryCode("116");
+        inheritedPlan.setLhResultBatchNo("LHPC20260417003");
+        inheritedPlan.setScheduleDate(date(2026, 4, 17));
+        inheritedPlan.setLhMachineCode("K1501");
+        inheritedPlan.setChangeMouldType("02");
+        context.getMouldChangePlanList().add(inheritedPlan);
+
+        LhScheduleResult inheritedResult = buildChangeResult("K1501", "MAT-INHERITED", "继承物料",
+                dateTime(2026, 4, 17, 7, 0), dateTime(2026, 4, 17, 14, 0));
+        inheritedResult.setRollingInherited(true);
+        context.getScheduleResultList().add(inheritedResult);
+
+        LhScheduleResult newResult = buildChangeResult("K1502", "MAT-NEW", "新增物料",
+                dateTime(2026, 4, 17, 15, 0), dateTime(2026, 4, 17, 22, 0));
+        context.getScheduleResultList().add(newResult);
+
+        ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
+
+        assertEquals(2, context.getMouldChangePlanList().size());
+        assertEquals("02", context.getMouldChangePlanList().get(0).getChangeMouldType());
+        assertEquals("K1501", context.getMouldChangePlanList().get(0).getLhMachineCode());
+        assertEquals("K1502", context.getMouldChangePlanList().get(1).getLhMachineCode());
+    }
+
     private LhScheduleContext newContext() {
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode("116");

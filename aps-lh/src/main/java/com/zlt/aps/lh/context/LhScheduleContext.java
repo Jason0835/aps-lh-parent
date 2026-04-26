@@ -116,6 +116,14 @@ public class LhScheduleContext {
 
     /** 前日排程结果列表(修正后) */
     private List<LhScheduleResult> previousScheduleResultList = new ArrayList<>();
+    /** 前日模具交替计划列表，供滚动衔接继承到本批次 */
+    private List<LhMouldChangePlan> previousMouldChangePlanList = new ArrayList<>();
+    /** 滚动排程继承结果列表，仅存放本批次继承的排程结果 */
+    private List<LhScheduleResult> rollingInheritedScheduleResultList = new ArrayList<>();
+    /** 滚动排程继承计划量Map，key=materialCode；ScheduleAdjustHandler据此从待排量中扣减 */
+    private Map<String, Integer> inheritedPlanQtyMap = new HashMap<>();
+    /** 是否已执行滚动排程衔接，影响结转口径和前日日期解析 */
+    private boolean rollingScheduleHandoff;
     /** SKU按结构归集, key=structureName, value=SKU排程DTO列表 */
     private Map<String, List<SkuScheduleDTO>> structureSkuMap = new LinkedHashMap<>();
     /** 续作SKU列表 */

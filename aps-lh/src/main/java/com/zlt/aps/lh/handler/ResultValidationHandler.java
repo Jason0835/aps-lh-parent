@@ -140,6 +140,8 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
     private void generateMouldChangePlan(LhScheduleContext context) {
         List<LhScheduleResult> changeResults = context.getScheduleResultList().stream()
                 .filter(r -> "1".equals(r.getIsChangeMould())
+                        // 继承结果的换模信息已在滚动衔接中处理，跳过避免重复生成
+                        && !r.isRollingInherited()
                         && r.getDailyPlanQty() != null
                         && r.getDailyPlanQty() > 0)
                 .sorted(Comparator.comparing(LhScheduleResult::getLhMachineCode, Comparator.nullsLast(String::compareTo))
@@ -149,10 +151,9 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
         log.info("生成模具交替计划, 换模排程结果数: {}", changeResults.size());
 
         List<LhMouldChangePlan> plans = context.getMouldChangePlanList();
-        plans.clear();
-
+        // 不清空列表，保留滚动衔接中已继承的换模计划，新计划从尾部追加
         Map<String, RollingMachineState> rollingStateMap = new HashMap<>();
-        int planOrder = 1;
+        int planOrder = plans.size() + 1;
 
         for (LhScheduleResult result : changeResults) {
             RollingMachineState state = rollingStateMap.computeIfAbsent(result.getLhMachineCode(),

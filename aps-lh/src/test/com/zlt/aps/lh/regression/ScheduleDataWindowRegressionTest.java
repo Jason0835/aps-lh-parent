@@ -14,6 +14,7 @@ import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.LhDayFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
+import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
@@ -81,6 +82,8 @@ class ScheduleDataWindowRegressionTest {
     private LhMachineInfoMapper lhMachineInfoMapper;
     @Mock
     private LhMouldCleanPlanMapper lhMouldCleanPlanMapper;
+    @Mock
+    private LhMouldChangePlanMapper lhMouldChangePlanMapper;
     @Mock
     private MdmMonthSurplusMapper monthSurplusMapper;
     @Mock
@@ -338,6 +341,7 @@ class ScheduleDataWindowRegressionTest {
         when(lhMachineInfoMapper.selectList(any())).thenReturn(Collections.singletonList(machine));
 
         when(lhMouldCleanPlanMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(lhMouldChangePlanMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(monthSurplusMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(lhDayFinishQtyMapper.selectList(any())).thenReturn(Collections.emptyList());
         when(mdmMaterialInfoMapper.selectList(any())).thenReturn(Collections.emptyList());

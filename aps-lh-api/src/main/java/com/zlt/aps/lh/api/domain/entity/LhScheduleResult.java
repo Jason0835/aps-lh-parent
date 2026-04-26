@@ -747,4 +747,10 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
      */
     @TableField(exist = false)
     private Date mouldChangeStartTime;
+
+    /**
+     * 是否为滚动排程继承结果，仅用于本次排程运行期识别，不落库。
+     */
+    @TableField(exist = false)
+    private boolean rollingInherited;
 }

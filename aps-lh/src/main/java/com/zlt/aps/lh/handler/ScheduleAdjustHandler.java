@@ -99,7 +99,8 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             if (StringUtils.isEmpty(result.getMaterialCode())) {
                 continue;
             }
-            int plannedQty = ShiftFieldUtil.sumPlanQty(result, LhScheduleConstant.MAX_SHIFT_SLOT_COUNT);
+            // 滚动衔接时只结转继承窗口之前的班次量，避免与继承量重复
+            int plannedQty = resolveCarryForwardPlanQty(context, result);
             materialPlannedQtyMap.merge(result.getMaterialCode(), plannedQty, Integer::sum);
         }
         Map<String, Integer> carryForwardQtyMap = new LinkedHashMap<>();
@@ -250,9 +251,12 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         int carryForwardQty = Math.max(0, context.getCarryForwardQtyMap().getOrDefault(plan.getMaterialCode(), 0));
         int windowPlanQty = MonthPlanDayQtyUtil.resolveWindowPlanQty(
                 plan, context.getScheduleDate(), context.getScheduleTargetDate());
+        // 继承量已由滚动衔接占用，需从窗口待排量中扣减，防止重复排产
+        int inheritedPlanQty = Math.max(0, context.getInheritedPlanQtyMap().getOrDefault(plan.getMaterialCode(), 0));
         dto.setWindowPlanQty(windowPlanQty);
         dto.setSurplusQty(surplus.getSurplusQty());
-        dto.setPendingQty(windowPlanQty + carryForwardQty);
+        // 待排量 = (窗口计划量 - 已继承量) + 欠产传导量
+        dto.setPendingQty(Math.max(0, windowPlanQty - inheritedPlanQty) + carryForwardQty);
         dto.setDailyPlanQty(plan.getDayVulcanizationQty() != null ? plan.getDayVulcanizationQty() : 0);
 
         // 产能信息（从SKU日硫化产能Map获取）
@@ -341,6 +345,44 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
+     * 解析欠/超产传导使用的计划量。
+     *
+     * @param context 排程上下文
+     * @param result 前批次排程结果
+     * @return 参与传导的计划量
+     */
+    private int resolveCarryForwardPlanQty(LhScheduleContext context, LhScheduleResult result) {
+        if (!context.isRollingScheduleHandoff()) {
+            return ShiftFieldUtil.sumPlanQty(result, LhScheduleConstant.MAX_SHIFT_SLOT_COUNT);
+        }
+        // 结转边界 = 排程窗口最早班次开始时间，此前的班次量参与欠超产传导，此后的已被继承
+        Date carryForwardBoundaryTime = resolveCarryForwardBoundaryTime(context);
+        int totalQty = 0;
+        for (int shiftIndex = 1; shiftIndex <= LhScheduleConstant.MAX_SHIFT_SLOT_COUNT; shiftIndex++) {
+            Date endTime = ShiftFieldUtil.getShiftEndTime(result, shiftIndex);
+            // 滚动衔接场景下，只结转完整结束在继承窗口前的班次，避免与继承量重复。
+            if (Objects.nonNull(endTime) && !endTime.after(carryForwardBoundaryTime)) {
+                totalQty += safeInt(ShiftFieldUtil.getShiftPlanQty(result, shiftIndex));
+            }
+        }
+        return totalQty;
+    }
+
+    /**
+     * 解析滚动排程结转边界。
+     *
+     * @param context 排程上下文
+     * @return 结转边界时间
+     */
+    private Date resolveCarryForwardBoundaryTime(LhScheduleContext context) {
+        return context.getScheduleWindowShifts().stream()
+                .map(LhShiftConfigVO::getShiftStartDateTime)
+                .filter(Objects::nonNull)
+                .min(Date::compareTo)
+                .orElseThrow(() -> new IllegalStateException("滚动排程结转边界解析失败：排程窗口班次为空"));
+    }
+
+    /**
      * 获取指定日期的物料日完成量（按“物料+日期”聚合）。
      *
      * @param context 排程上下文
@@ -375,6 +417,10 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @return 前日日期
      */
     private Date resolvePreviousScheduleDate(LhScheduleContext context) {
+        // 滚动衔接时前日排程日期以scheduleDate(实际排程日)为准，而非scheduleTargetDate(目标日)
+        if (context.isRollingScheduleHandoff() && Objects.nonNull(context.getScheduleDate())) {
+            return LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(context.getScheduleDate(), -1));
+        }
         if (Objects.nonNull(context.getScheduleTargetDate())) {
             return LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(context.getScheduleTargetDate(), -1));
         }

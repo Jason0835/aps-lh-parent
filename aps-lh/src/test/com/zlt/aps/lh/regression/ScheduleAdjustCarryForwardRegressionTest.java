@@ -1,5 +1,8 @@
 package com.zlt.aps.lh.regression;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
@@ -16,6 +19,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmSkuLhCapacity;
 import com.zlt.aps.mp.api.domain.entity.FactoryMonthPlanProductionFinalResult;
 import com.zlt.aps.mp.api.domain.entity.MpAdjustResult;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
@@ -23,10 +27,13 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 欠产传导：前一日净欠产应进入当天需求对象，而不是回写昨天计划。
@@ -424,6 +431,54 @@ class ScheduleAdjustCarryForwardRegressionTest {
     }
 
     @Test
+    void doHandle_shouldLogRollingPendingQtyBreakdown() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 24));
+        context.setScheduleTargetDate(date(2026, 4, 26));
+        context.setRollingScheduleHandoff(true);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.getInheritedPlanQtyMap().put("MAT-ROLL-LOG", 60);
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-ROLL-LOG");
+        plan.setMaterialDesc("MAT-ROLL-LOG-DESC");
+        plan.setStructureName("S-ROLL-LOG");
+        plan.setSpecifications("SPEC-ROLL-LOG");
+        plan.setTotalQty(300);
+        plan.setDay24(60);
+        plan.setDay25(60);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        LhScheduleResult previous = new LhScheduleResult();
+        previous.setMaterialCode("MAT-ROLL-LOG");
+        ShiftFieldUtil.setShiftPlanQty(previous, 1, 40,
+                dateTime(2026, 4, 23, 6, 0), dateTime(2026, 4, 23, 14, 0));
+        context.setPreviousScheduleResultList(Collections.singletonList(previous));
+        context.getMaterialDayFinishedQtyMap().put("MAT-ROLL-LOG_2026-04-23", 20);
+
+        ListAppender<ILoggingEvent> appender = attachAppender();
+        try {
+            ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+        } finally {
+            detachAppender(appender);
+        }
+
+        List<String> messages = appender.list.stream()
+                .map(ILoggingEvent::getFormattedMessage)
+                .collect(Collectors.toList());
+        assertTrue(messages.stream().anyMatch(message -> message.contains("滚动待排量拆解")
+                        && message.contains("MAT-ROLL-LOG")
+                        && message.contains("窗口计划量")
+                        && message.contains("已继承量")
+                        && message.contains("欠产传导量")
+                        && message.contains("待排量")),
+                "应输出滚动待排量拆解日志，便于核对 windowPlanQty、inheritedPlanQty 和 pendingQty");
+    }
+
+    @Test
     void doHandle_shouldMatchContinuousSkuByMachineOnlineInfo() {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
@@ -520,6 +575,19 @@ class ScheduleAdjustCarryForwardRegressionTest {
         onlineInfo.setLhCode(machineCode);
         onlineInfo.setMaterialCode(materialCode);
         return onlineInfo;
+    }
+
+    private ListAppender<ILoggingEvent> attachAppender() {
+        Logger logger = (Logger) LoggerFactory.getLogger(ScheduleAdjustHandler.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        return appender;
+    }
+
+    private void detachAppender(ListAppender<ILoggingEvent> appender) {
+        Logger logger = (Logger) LoggerFactory.getLogger(ScheduleAdjustHandler.class);
+        logger.detachAppender(appender);
     }
 
     private static java.util.Date date(int y, int month, int day) {

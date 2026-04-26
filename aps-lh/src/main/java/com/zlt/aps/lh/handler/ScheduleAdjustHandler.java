@@ -274,6 +274,11 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         // 填充日硫化产能
         fillDailyCapacity(dto, capacity);
         dto.setTargetScheduleQty(getTargetScheduleQtyResolver().resolveInitialTargetQty(context, dto));
+        if (context.isRollingScheduleHandoff() || inheritedPlanQty > 0) {
+            log.info("滚动待排量拆解, 物料: {}, 窗口计划量: {}, 已继承量: {}, 欠产传导量: {}, 待排量: {}, 余量: {}, 目标量: {}",
+                    dto.getMaterialCode(), windowPlanQty, inheritedPlanQty, carryForwardQty,
+                    dto.getPendingQty(), dto.getSurplusQty(), dto.getTargetScheduleQty());
+        }
 
         // 优先级信息
         dto.setSupplyChainPriority(plan.getProductionType());

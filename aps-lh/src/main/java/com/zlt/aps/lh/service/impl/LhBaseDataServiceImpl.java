@@ -202,8 +202,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 12. 加载前日物料日完成量（用于前日欠/超产差值修正）
         loadDayFinishQty(context, factoryCode, LhScheduleTimeUtil.addDays(targetDate, -1));
 
-        // 13. 加载月累计完成量（截至目标排产日期，按目标日所在月份统计）
-        loadMaterialMonthFinishedQty(context, factoryCode, targetDate);
+        // 13. 加载月累计完成量（截至排产T-1日（包含），按目标日所在月份统计）
+        loadMaterialMonthFinishedQty(context, factoryCode, LhScheduleTimeUtil.addDays(scheduleDate, -1));
 
         // 14. 加载物料信息
         loadMaterialInfo(context, factoryCode);
@@ -490,7 +490,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         if (skuMouldRelList != null) {
             for (MdmSkuMouldRel rel : skuMouldRelList) {
                 if (rel.getMaterialCode() != null) {
-                    skuMouldRelMap.computeIfAbsent(rel.getMaterialCode(), k -> new java.util.ArrayList<>()).add(rel);
+                    skuMouldRelMap.computeIfAbsent(rel.getMaterialCode(), k -> new ArrayList<>()).add(rel);
                 }
             }
         }
@@ -635,14 +635,14 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     }
 
     /**
-     * 加载月累计完成量（截至目标排产日期含当天），按物料编号建立Map。
+     * 加载月累计完成量（截至排产T-1日（包含）），按物料编号建立Map。
      *
      * @param context     排程上下文
      * @param factoryCode 分厂编号
-     * @param targetDate  排程目标日
+     * @param cutoffDate  截止日期（T-1日，含当天）
      */
-    private void loadMaterialMonthFinishedQty(LhScheduleContext context, String factoryCode, Date targetDate) {
-        Date targetDay = LhScheduleTimeUtil.clearTime(targetDate);
+    private void loadMaterialMonthFinishedQty(LhScheduleContext context, String factoryCode, Date cutoffDate) {
+        Date targetDay = LhScheduleTimeUtil.clearTime(cutoffDate);
         Date nextTargetDay = LhScheduleTimeUtil.addDays(targetDay, 1);
         Calendar calendar = Calendar.getInstance();
         calendar.setTime(targetDay);
@@ -672,7 +672,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         }
 
         context.setMaterialMonthFinishedQtyMap(materialMonthFinishedQtyMap);
-        log.debug("月累计完成量加载完成, 数量: {}, 起始日: {}, 截止: {}(含当天)",
+        log.debug("月累计完成量加载完成, 数量: {}, 起始日: {}, 截止: {}(含当天, 即T-1日)",
                 materialMonthFinishedQtyMap.size(),
                 LhScheduleTimeUtil.formatDate(monthStart),
                 LhScheduleTimeUtil.formatDate(targetDay));

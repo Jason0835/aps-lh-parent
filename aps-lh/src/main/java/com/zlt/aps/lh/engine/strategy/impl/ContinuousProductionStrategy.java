@@ -115,36 +115,107 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         }
         traceEndingMachineOrder(context, candidateMachines);
 
-        for (MachineScheduleDTO machine : candidateMachines) {
-            // 按当前业务要求，先停用同产品结构直续逻辑，保留代码便于后续恢复。
-            // SkuScheduleDTO sameStructureSku = findSameStructureContinuousSku(context, machine);
-            // if (sameStructureSku != null
-            //         && appendFollowUpResult(context, machine, sameStructureSku,
-            //         machine.getEstimatedEndTime(), shifts, false)) {
-            //     continue;
-            // }
-
-            // 续作收尾机台候选SKU按“同胎胚描述+同主花纹 -> 同规格”分层筛选。
-            List<SkuScheduleDTO> priorityOneCandidates = filterSameEmbryoDescAndMainPatternCandidates(context, machine);
-            List<SkuScheduleDTO> priorityTwoCandidates = CollectionUtils.isEmpty(priorityOneCandidates)
-                    ? filterSameSpecCandidates(context, machine) : new ArrayList<SkuScheduleDTO>(0);
-            SkuScheduleDTO typeBlockSku = !CollectionUtils.isEmpty(priorityOneCandidates)
-                    ? selectPreferredSkuFromCandidates(context, priorityOneCandidates)
-                    : selectPreferredSkuFromCandidates(context, priorityTwoCandidates);
-            String matchedLayer = !CollectionUtils.isEmpty(priorityOneCandidates) ? "第一层"
-                    : (!CollectionUtils.isEmpty(priorityTwoCandidates) ? "第二层" : "未命中");
-            if (typeBlockSku == null) {
-                // 两级都未命中时，本轮不再给该收尾机台补衔接SKU。
-                traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
-                        null, matchedLayer, false, null, machineTriggerSourceMap.get(machine.getMachineCode()));
-                continue;
+        Map<String, Boolean> strictPriorityOneMachineMap = new HashMap<>(Math.max(16, candidateMachines.size() * 2));
+        Map<String, Boolean> completedMachineMap = new HashMap<>(Math.max(16, candidateMachines.size() * 2));
+        while (!CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
+            List<MachineScheduleDTO> activeMachines = new ArrayList<>(candidateMachines.size());
+            for (MachineScheduleDTO machine : candidateMachines) {
+                if (machine == null || StringUtils.isEmpty(machine.getMachineCode())) {
+                    continue;
+                }
+                String machineCode = machine.getMachineCode();
+                if (Boolean.TRUE.equals(completedMachineMap.get(machineCode))) {
+                    continue;
+                }
+                String triggerSource = machineTriggerSourceMap.get(machineCode);
+                if (StringUtils.equals(TYPE_BLOCK_TRIGGER_ENDING, triggerSource) && !machine.isEnding()) {
+                    completedMachineMap.put(machineCode, true);
+                    continue;
+                }
+                activeMachines.add(machine);
             }
-            Date typeBlockStartTime = calcTypeBlockStartTime(context, machine);
-            boolean success = appendFollowUpResult(context, machine, typeBlockSku, typeBlockStartTime, shifts, true);
-            traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
-                    typeBlockSku, matchedLayer, success, typeBlockStartTime,
-                    machineTriggerSourceMap.get(machine.getMachineCode()));
+            if (CollectionUtils.isEmpty(activeMachines)) {
+                break;
+            }
+            activeMachines.sort((leftMachine, rightMachine) -> {
+                String leftTriggerSource = machineTriggerSourceMap.get(leftMachine.getMachineCode());
+                String rightTriggerSource = machineTriggerSourceMap.get(rightMachine.getMachineCode());
+                int triggerOrderCompare = Integer.compare(
+                        resolveTypeBlockTriggerOrder(leftTriggerSource),
+                        resolveTypeBlockTriggerOrder(rightTriggerSource));
+                if (triggerOrderCompare != 0) {
+                    return triggerOrderCompare;
+                }
+                Date leftEndTime = leftMachine.getEstimatedEndTime();
+                Date rightEndTime = rightMachine.getEstimatedEndTime();
+                if (leftEndTime == null && rightEndTime == null) {
+                    return 0;
+                }
+                if (leftEndTime == null) {
+                    return 1;
+                }
+                if (rightEndTime == null) {
+                    return -1;
+                }
+                return leftEndTime.compareTo(rightEndTime);
+            });
+
+            boolean scheduledInCurrentRound = false;
+            for (MachineScheduleDTO machine : activeMachines) {
+                String machineCode = machine.getMachineCode();
+                boolean strictPriorityOneAfterFirstHit = Boolean.TRUE.equals(strictPriorityOneMachineMap.get(machineCode));
+                // 续作收尾机台候选SKU按“同胎胚描述+同主花纹 -> 同规格”分层筛选。
+                List<SkuScheduleDTO> priorityOneCandidates =
+                        filterSameEmbryoDescAndMainPatternCandidates(context, machine);
+                List<SkuScheduleDTO> priorityTwoCandidates =
+                        !strictPriorityOneAfterFirstHit && CollectionUtils.isEmpty(priorityOneCandidates)
+                                ? filterSameSpecCandidates(context, machine) : new ArrayList<SkuScheduleDTO>(0);
+                SkuScheduleDTO typeBlockSku = !CollectionUtils.isEmpty(priorityOneCandidates)
+                        ? selectPreferredSkuFromCandidates(context, priorityOneCandidates)
+                        : selectPreferredSkuFromCandidates(context, priorityTwoCandidates);
+                String matchedLayer = !CollectionUtils.isEmpty(priorityOneCandidates) ? "第一层"
+                        : (!CollectionUtils.isEmpty(priorityTwoCandidates) ? "第二层" : "未命中");
+                if (typeBlockSku == null) {
+                    traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                            null, matchedLayer, false, null, machineTriggerSourceMap.get(machineCode));
+                    completedMachineMap.put(machineCode, true);
+                    continue;
+                }
+                Date typeBlockStartTime = calcTypeBlockStartTime(context, machine);
+                boolean success = appendFollowUpResult(context, machine, typeBlockSku, typeBlockStartTime, shifts, true);
+                traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                        typeBlockSku, matchedLayer, success, typeBlockStartTime,
+                        machineTriggerSourceMap.get(machineCode));
+                if (!success) {
+                    completedMachineMap.put(machineCode, true);
+                    continue;
+                }
+                scheduledInCurrentRound = true;
+                if (CollectionUtils.isEmpty(priorityOneCandidates)) {
+                    completedMachineMap.put(machineCode, true);
+                } else {
+                    strictPriorityOneMachineMap.put(machineCode, true);
+                }
+                if (!machine.isEnding()) {
+                    completedMachineMap.put(machineCode, true);
+                }
+                // 每轮仅落一条结果，随后按更新后的机台收尾时间重新排序。
+                break;
+            }
+            if (!scheduledInCurrentRound) {
+                break;
+            }
         }
+    }
+
+    private int resolveTypeBlockTriggerOrder(String triggerSource) {
+        if (StringUtils.equals(TYPE_BLOCK_TRIGGER_ENDING, triggerSource)) {
+            return 0;
+        }
+        if (StringUtils.equals(TYPE_BLOCK_TRIGGER_FALLBACK, triggerSource)) {
+            return 1;
+        }
+        return 2;
     }
 
     @Override

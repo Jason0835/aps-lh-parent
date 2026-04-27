@@ -24,6 +24,7 @@ import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhRepairCapsule;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.Resource;
@@ -262,6 +263,16 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         return current;
     }
 
+    private Date later(Date current, Date candidate) {
+        if (candidate == null) {
+            return current;
+        }
+        if (current == null || candidate.after(current)) {
+            return candidate;
+        }
+        return current;
+    }
+
     /**
      * 挂载机台清洗计划明细，并回填兼容摘要字段。
      *
@@ -312,21 +323,75 @@ public class DataInitHandler extends AbsScheduleStepHandler {
                     LhScheduleConstant.DRY_ICE_DURATION_HOURS);
             readyDurationHours = cleanDurationHours;
         } else if (CleaningTypeEnum.SAND_BLAST.getCode().equals(cleanType)) {
-            cleanDurationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_DURATION_HOURS,
+            cleanDurationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_WITH_INSPECTION_HOURS,
+                    LhScheduleConstant.SAND_BLAST_WITH_INSPECTION_HOURS);
+            // 喷砂总停机口径用于班次扣减；机台再次可开产时间仍沿用喷砂清洗原时长，
+            // 后续换模/换活字块时间继续由各自排产链路单独叠加，避免重复计时。
+            readyDurationHours = context.getParamIntValue(LhScheduleParamConstant.SAND_BLAST_DURATION_HOURS,
                     LhScheduleConstant.SAND_BLAST_DURATION_HOURS);
-            // 喷砂窗口只表达清洗结束时刻，后续换模/换活字块时间由各自排产链路继续叠加。
-            readyDurationHours = cleanDurationHours;
         } else {
             return null;
         }
 
+        // 清洗计划与设备计划停机重叠时，清洗必须顺延到停机结束后执行。
+        Date adjustedCleanStartTime = resolveAdjustedCleaningStartTime(
+                context, cleaningPlan.getLhCode(), cleaningPlan.getCleanTime(), cleanDurationHours);
+
         MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
         cleaningWindow.setCleanType(cleanType);
         cleaningWindow.setLeftRightMould(cleaningPlan.getLeftRightMould());
-        cleaningWindow.setCleanStartTime(cleaningPlan.getCleanTime());
-        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(cleaningPlan.getCleanTime(), cleanDurationHours));
-        cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(cleaningPlan.getCleanTime(), readyDurationHours));
+        cleaningWindow.setCleanStartTime(adjustedCleanStartTime);
+        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(adjustedCleanStartTime, cleanDurationHours));
+        cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(adjustedCleanStartTime, readyDurationHours));
         return cleaningWindow;
+    }
+
+    /**
+     * 解析清洗窗口的有效开始时刻。
+     * <p>若清洗窗口与机台计划停机窗口重叠，则将清洗开始顺延到命中停机窗口的结束时刻。</p>
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @param originalStartTime 原始清洗开始时刻
+     * @param cleanDurationHours 清洗时长（小时）
+     * @return 顺延后的清洗开始时刻
+     */
+    private Date resolveAdjustedCleaningStartTime(LhScheduleContext context,
+                                                  String machineCode,
+                                                  Date originalStartTime,
+                                                  int cleanDurationHours) {
+        if (context == null
+                || originalStartTime == null
+                || cleanDurationHours <= 0
+                || StringUtils.isEmpty(machineCode)
+                || context.getDevicePlanShutList() == null
+                || context.getDevicePlanShutList().isEmpty()) {
+            return originalStartTime;
+        }
+        Date adjustedStartTime = originalStartTime;
+        while (true) {
+            Date adjustedEndTime = LhScheduleTimeUtil.addHours(adjustedStartTime, cleanDurationHours);
+            Date latestOverlapStopEndTime = null;
+            for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
+                if (planShut == null
+                        || !StringUtils.equals(machineCode, planShut.getMachineCode())
+                        || planShut.getBeginDate() == null
+                        || planShut.getEndDate() == null
+                        || !planShut.getBeginDate().before(planShut.getEndDate())) {
+                    continue;
+                }
+                // 命中重叠：停机开始早于清洗结束，且停机结束晚于清洗开始。
+                if (planShut.getBeginDate().before(adjustedEndTime)
+                        && planShut.getEndDate().after(adjustedStartTime)) {
+                    latestOverlapStopEndTime = later(latestOverlapStopEndTime, planShut.getEndDate());
+                }
+            }
+            if (latestOverlapStopEndTime == null || !latestOverlapStopEndTime.after(adjustedStartTime)) {
+                return adjustedStartTime;
+            }
+            // 顺延到重叠停机窗口结束后，继续判断是否命中后续停机窗口。
+            adjustedStartTime = latestOverlapStopEndTime;
+        }
     }
 
     @Override

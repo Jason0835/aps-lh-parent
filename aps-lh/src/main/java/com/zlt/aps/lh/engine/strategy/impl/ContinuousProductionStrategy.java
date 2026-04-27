@@ -242,9 +242,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             LhScheduleResult result = inheritedResult != null
                     ? appendScheduleToInheritedResult(context, inheritedResult, machine, sku,
                     startTime, shifts, machineMouldQty, isEnding)
-                    : buildScheduleResult(context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
+                    : buildScheduleResult(context, machine, sku, startTime, null, shifts, machineMouldQty, isEnding);
             if (result != null) {
                 result.setScheduleType("01");
+                result.setIsChangeMould("0");
+                result.setIsTypeBlock("0");
                 result.setIsEnd(isEnding ? "1" : "0");
                 if (inheritedResult == null) {
                     context.getScheduleResultList().add(result);
@@ -338,7 +340,6 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             LhScheduleResult assignedResult = assignedResults.get(i);
             if (assignedResult == null
                     || !assignedResult.isRollingInherited()
-                    || !StringUtils.equals(CONTINUOUS_SCHEDULE_TYPE, assignedResult.getScheduleType())
                     || !StringUtils.equals(materialCode, assignedResult.getMaterialCode())) {
                 continue;
             }
@@ -1276,9 +1277,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 return shiftEndTime;
             }
             long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
+            List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
+                    context, result, resolveFirstPlannedShiftStartTime(result));
             Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
                     context.getDevicePlanShutList(),
-                    resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
+                    cleaningWindowList,
                     result.getLhMachineCode(),
                     shiftStartTime,
                     secondsNeeded);
@@ -1331,8 +1334,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         int shiftCapacity = result.getSingleMouldShiftQty() != null ? result.getSingleMouldShiftQty() : 0;
         int remaining = targetQty;
         Date cursorStartTime = resolveRedistributeStartTime(result, shifts);
-        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(
-                context, result.getLhMachineCode());
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
+                context, result, resolveFirstPlannedShiftStartTime(result));
         int dryIceLossQty = context.getParamIntValue(
                 LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
         int dryIceDurationHours = context.getParamIntValue(
@@ -1891,6 +1894,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 result.getMouldQty() != null ? result.getMouldQty() : 0);
         if (lhTimeSeconds > 0 && mouldQty > 0) {
             Date actualCompletionTime = null;
+            List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
+                    context, result, resolveFirstPlannedShiftStartTime(result));
             for (int shiftIndex = 1; shiftIndex <= 8; shiftIndex++) {
                 Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
                 Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shiftIndex);
@@ -1901,7 +1906,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 long secondsNeeded = (long) Math.ceil((double) shiftPlanQty / mouldQty) * lhTimeSeconds;
                 Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
                         context.getDevicePlanShutList(),
-                        resolveMachineCleaningWindowList(context, result.getLhMachineCode()),
+                        cleaningWindowList,
                         result.getLhMachineCode(),
                         shiftStartTime,
                         secondsNeeded);
@@ -2001,6 +2006,26 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             return new ArrayList<>();
         }
         return machine.getCleaningWindowList();
+    }
+
+    /**
+     * 解析续作/换活字块结果在排产阶段需要生效的清洗窗口。
+     *
+     * @param context 排程上下文
+     * @param result 排程结果
+     * @param firstProductionStartTime 首个有排产量班次开始时间
+     * @return 有效清洗窗口列表
+     */
+    private List<MachineCleaningWindowDTO> resolveEffectiveCleaningWindowList(LhScheduleContext context,
+                                                                              LhScheduleResult result,
+                                                                              Date firstProductionStartTime) {
+        if (result == null) {
+            return new ArrayList<>(0);
+        }
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(
+                context, result.getLhMachineCode());
+        return new ArrayList<>(MachineCleaningOverlapUtil.excludeOverlapWindows(
+                cleaningWindowList, result.getMouldChangeStartTime(), firstProductionStartTime));
     }
 
     private String resolveMachineEmbryoCode(LhScheduleContext context, MachineScheduleDTO machine) {

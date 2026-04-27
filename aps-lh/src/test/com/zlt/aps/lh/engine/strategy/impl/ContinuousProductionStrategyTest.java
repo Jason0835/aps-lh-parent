@@ -121,6 +121,43 @@ public class ContinuousProductionStrategyTest {
     }
 
     /**
+     * 用例说明：滚动继承结果即使是新增类型（02），续作追加也应并入同机同料继承结果，
+     * 不能再额外新建一条续作记录。
+     *
+     * @throws Exception 反射注入异常
+     */
+    @Test
+    public void shouldMergeRollingInheritedNewSpecResultAndAvoidDuplicateRow() throws Exception {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+        injectField(strategy, "orderNoGenerator", new OrderNoGenerator());
+        injectField(strategy, "targetScheduleQtyResolver", new TargetScheduleQtyResolver());
+        injectField(strategy, "endingJudgmentStrategy", new StubEndingJudgmentStrategy());
+
+        LhScheduleContext context = buildRollingContext();
+        LhScheduleResult inheritedResult = buildInheritedResult(context);
+        inheritedResult.setScheduleType("02");
+        inheritedResult.setIsChangeMould("1");
+        inheritedResult.setIsTypeBlock("1");
+        context.getScheduleResultList().add(inheritedResult);
+        context.getRollingInheritedScheduleResultList().add(inheritedResult);
+        context.getMachineAssignmentMap().put("K1111", new ArrayList<>(Collections.singletonList(inheritedResult)));
+
+        strategy.scheduleContinuousEnding(context);
+
+        Assertions.assertEquals(1, context.getScheduleResultList().size());
+        LhScheduleResult mergedResult = context.getScheduleResultList().get(0);
+        Assertions.assertSame(inheritedResult, mergedResult);
+        Assertions.assertEquals("01", mergedResult.getScheduleType());
+        Assertions.assertEquals("0", mergedResult.getIsTypeBlock());
+        Assertions.assertEquals("0", mergedResult.getIsChangeMould());
+        for (int shiftIndex = 1; shiftIndex <= 8; shiftIndex++) {
+            Assertions.assertEquals(Integer.valueOf(16),
+                    ShiftFieldUtil.getShiftPlanQty(mergedResult, shiftIndex));
+        }
+        Assertions.assertEquals(Integer.valueOf(128), mergedResult.getDailyPlanQty());
+    }
+
+    /**
      * 用例说明：滚动衔接存在继承结果但追加窗口排不出量时，不应移除待排SKU。
      *
      * @throws Exception 反射注入异常

@@ -233,17 +233,22 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
             boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
 
-            // 创建排程结果（续作从班次1开始）
-            Date startTime = shifts.isEmpty() ? new Date() : shifts.get(0).getShiftStartDateTime();
+            // 滚动衔接时沿用机台继承后的可用时间，避免从重叠窗口首班重复起排。
+            Date startTime = resolveContinuousStartTime(context, machine, shifts);
             int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
             sku.setMouldQty(machineMouldQty);
-            LhScheduleResult result = buildScheduleResult(
-                    context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
+            LhScheduleResult inheritedResult = findMergeableRollingInheritedResult(context, machineCode, sku.getMaterialCode());
+            LhScheduleResult result = inheritedResult != null
+                    ? appendScheduleToInheritedResult(context, inheritedResult, machine, sku,
+                    startTime, shifts, machineMouldQty, isEnding)
+                    : buildScheduleResult(context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
             if (result != null) {
                 result.setScheduleType("01");
                 result.setIsEnd(isEnding ? "1" : "0");
-                context.getScheduleResultList().add(result);
-                registerMachineAssignment(context, machineCode, result);
+                if (inheritedResult == null) {
+                    context.getScheduleResultList().add(result);
+                    registerMachineAssignment(context, machineCode, result);
+                }
                 // 续作已完成当日排产，不应继续参与后续结构优先级判断。
                 context.removePendingSkuFromStructureMap(sku);
 
@@ -256,6 +261,129 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 }
             }
         }
+    }
+
+    /**
+     * 解析续作起排时间。
+     * <p>滚动衔接场景下从机台继承后的可用时间继续排；普通场景仍从窗口首班开始。</p>
+     */
+    private Date resolveContinuousStartTime(LhScheduleContext context,
+                                            MachineScheduleDTO machine,
+                                            List<LhShiftConfigVO> shifts) {
+        Date defaultStartTime = CollectionUtils.isEmpty(shifts) ? new Date() : shifts.get(0).getShiftStartDateTime();
+        if (context == null || !context.isRollingScheduleHandoff()) {
+            return defaultStartTime;
+        }
+        Date appendStartTime = resolveRollingAppendStartTime(context, shifts);
+        if (machine == null || machine.getEstimatedEndTime() == null) {
+            return appendStartTime != null ? appendStartTime : defaultStartTime;
+        }
+        if (appendStartTime == null || machine.getEstimatedEndTime().after(appendStartTime)) {
+            return machine.getEstimatedEndTime();
+        }
+        return appendStartTime;
+    }
+
+    /**
+     * 解析滚动排程的追加起点。
+     * <p>只允许续作从目标日第一班开始继续排，避免回写到重叠继承窗口。</p>
+     */
+    private Date resolveRollingAppendStartTime(LhScheduleContext context, List<LhShiftConfigVO> shifts) {
+        if (context == null
+                || context.getScheduleTargetDate() == null
+                || CollectionUtils.isEmpty(shifts)) {
+            return null;
+        }
+        Date targetDate = LhScheduleTimeUtil.clearTime(context.getScheduleTargetDate());
+        Date appendStartTime = null;
+        for (LhShiftConfigVO shift : shifts) {
+            if (shift == null
+                    || shift.getWorkDate() == null
+                    || shift.getShiftStartDateTime() == null) {
+                continue;
+            }
+            if (!targetDate.equals(LhScheduleTimeUtil.clearTime(shift.getWorkDate()))) {
+                continue;
+            }
+            if (appendStartTime == null || shift.getShiftStartDateTime().before(appendStartTime)) {
+                appendStartTime = shift.getShiftStartDateTime();
+            }
+        }
+        return appendStartTime;
+    }
+
+    /**
+     * 查找可并入的滚动继承续作结果。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编号
+     * @param materialCode 物料编码
+     * @return 可并入结果；未命中返回 null
+     */
+    private LhScheduleResult findMergeableRollingInheritedResult(LhScheduleContext context,
+                                                                 String machineCode,
+                                                                 String materialCode) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || StringUtils.isEmpty(materialCode)
+                || CollectionUtils.isEmpty(context.getMachineAssignmentMap())) {
+            return null;
+        }
+        List<LhScheduleResult> assignedResults = context.getMachineAssignmentMap().get(machineCode);
+        if (CollectionUtils.isEmpty(assignedResults)) {
+            return null;
+        }
+        for (int i = assignedResults.size() - 1; i >= 0; i--) {
+            LhScheduleResult assignedResult = assignedResults.get(i);
+            if (assignedResult == null
+                    || !assignedResult.isRollingInherited()
+                    || !StringUtils.equals(CONTINUOUS_SCHEDULE_TYPE, assignedResult.getScheduleType())
+                    || !StringUtils.equals(materialCode, assignedResult.getMaterialCode())) {
+                continue;
+            }
+            return assignedResult;
+        }
+        return null;
+    }
+
+    /**
+     * 将滚动衔接后的续作剩余计划并入已继承结果。
+     *
+     * @param context 排程上下文
+     * @param inheritedResult 已继承结果
+     * @param machine 机台
+     * @param sku SKU
+     * @param startTime 起排时间
+     * @param shifts 班次列表
+     * @param machineMouldQty 机台模台数
+     * @param isEnding 是否收尾
+     * @return 合并后的继承结果
+     */
+    private LhScheduleResult appendScheduleToInheritedResult(LhScheduleContext context,
+                                                             LhScheduleResult inheritedResult,
+                                                             MachineScheduleDTO machine,
+                                                             SkuScheduleDTO sku,
+                                                             Date startTime,
+                                                             List<LhShiftConfigVO> shifts,
+                                                             int machineMouldQty,
+                                                             boolean isEnding) {
+        LhScheduleResult appendedResult = buildScheduleResult(
+                context, machine, sku, startTime, shifts, machineMouldQty, isEnding);
+        if (appendedResult == null
+                || appendedResult.getDailyPlanQty() == null
+                || appendedResult.getDailyPlanQty() <= 0) {
+            return null;
+        }
+        for (int shiftIndex = 1; shiftIndex <= LhScheduleConstant.MAX_SHIFT_SLOT_COUNT; shiftIndex++) {
+            Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(appendedResult, shiftIndex);
+            if (shiftPlanQty == null || shiftPlanQty <= 0) {
+                continue;
+            }
+            ShiftFieldUtil.copyShiftPlanFields(appendedResult, shiftIndex, inheritedResult, shiftIndex);
+        }
+        inheritedResult.setIsEnd(isEnding ? "1" : "0");
+        refreshResultSummary(context, inheritedResult, shifts);
+        return inheritedResult;
     }
 
     @Override

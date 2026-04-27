@@ -636,6 +636,129 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
+    void scheduleTypeBlockChange_shouldChainPriorityOneCandidatesBeforeSpecFallbackOnSameMachine() {
+        LhScheduleContext context = newContext();
+        context.setScheduleDate(date(2026, 4, 24));
+        context.setScheduleTargetDate(date(2026, 4, 24));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        MachineScheduleDTO machine = buildMachine("K2024", "3302001556");
+        machine.setEnding(true);
+        machine.setEstimatedEndTime(dateTime(2026, 4, 24, 6, 0, 0));
+        context.getMachineScheduleMap().put("K2024", machine);
+
+        context.getNewSpecSkuList().add(buildNewSku("3302002174", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("3302001647", "EMB-1", "STRUCT-B", "SPEC-B", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("3302001002", "EMB-9", "STRUCT-C", "SPEC-B", "PAT-Z", 1));
+
+        putMaterialInfo(context, "3302001556", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "3302002174", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "3302001647", "胎胚描述-A", "SPEC-B", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "3302001002", "胎胚描述-B", "SPEC-B", "PAT-Z", "PAT-Z");
+
+        putMouldRel(context, "3302001556", "MOULD-1");
+        putMouldRel(context, "3302002174", "MOULD-1");
+        putMouldRel(context, "3302001647", "MOULD-1");
+        putMouldRel(context, "3302001002", "MOULD-2");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2", "ORD-3");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "3302002174".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleTypeBlockChange(context);
+
+        assertTrue(context.getScheduleResultList().size() >= 2);
+        List<String> scheduledMaterials = new ArrayList<>(context.getScheduleResultList().size());
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            scheduledMaterials.add(result.getMaterialCode());
+        }
+        assertEquals("3302002174", scheduledMaterials.get(0));
+        assertEquals("3302001647", scheduledMaterials.get(1));
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldResortAcrossMachinesAfterEachSuccess() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getMachineScheduleMap().put("M2", buildMachine("M2", "MAT-C2"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C2", "M2", "EMB-2", "STRUCT-B", "SPEC-B", "PAT-B", 3));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-A1", "SPEC-A1", "PAT-A", 4));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T2", "EMB-2", "STRUCT-B1", "SPEC-B1", "PAT-B", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T3", "EMB-1", "STRUCT-A2", "SPEC-A2", "PAT-A", 1));
+        putMaterialInfo(context, "MAT-C1", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-C2", "胎胚描述-B", "SPEC-B", "PAT-B", "PAT-B");
+        putMaterialInfo(context, "MAT-T1", "胎胚描述-A", "SPEC-A1", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-T2", "胎胚描述-B", "SPEC-B1", "PAT-B", "PAT-B");
+        putMaterialInfo(context, "MAT-T3", "胎胚描述-A", "SPEC-A2", "PAT-A", "PAT-A");
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-C2", "MOULD-2");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+        putMouldRel(context, "MAT-T2", "MOULD-2");
+        putMouldRel(context, "MAT-T3", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2", "ORD-3", "ORD-4", "ORD-5");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode())
+                    || "MAT-C2".equals(sku.getMaterialCode())
+                    || "MAT-T1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        strategy.scheduleTypeBlockChange(context);
+
+        List<String> scheduledMaterials = new ArrayList<>(context.getScheduleResultList().size());
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            scheduledMaterials.add(result.getMaterialCode());
+        }
+        assertEquals(Arrays.asList("MAT-C1", "MAT-C2", "MAT-T1", "MAT-T2", "MAT-T3"), scheduledMaterials);
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldStopChainWhenMachineBecomesNonEnding() {
+        LhScheduleContext context = newContext();
+        context.setScheduleDate(date(2026, 4, 24));
+        context.setScheduleTargetDate(date(2026, 4, 24));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        MachineScheduleDTO machine = buildMachine("K2024", "3302001556");
+        machine.setEnding(true);
+        machine.setEstimatedEndTime(dateTime(2026, 4, 24, 6, 0, 0));
+        context.getMachineScheduleMap().put("K2024", machine);
+
+        context.getNewSpecSkuList().add(buildNewSku("3302002174", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("3302001647", "EMB-1", "STRUCT-B", "SPEC-B", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("3302001648", "EMB-1", "STRUCT-C", "SPEC-C", "PAT-A", 1));
+
+        putMaterialInfo(context, "3302001556", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "3302002174", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "3302001647", "胎胚描述-A", "SPEC-B", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "3302001648", "胎胚描述-A", "SPEC-C", "PAT-A", "PAT-A");
+
+        putMouldRel(context, "3302001556", "MOULD-1");
+        putMouldRel(context, "3302002174", "MOULD-1");
+        putMouldRel(context, "3302001647", "MOULD-1");
+        putMouldRel(context, "3302001648", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2", "ORD-3");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "3302002174".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleTypeBlockChange(context);
+
+        List<String> scheduledMaterials = new ArrayList<>(context.getScheduleResultList().size());
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            scheduledMaterials.add(result.getMaterialCode());
+        }
+        assertEquals(Arrays.asList("3302002174", "3302001647"), scheduledMaterials);
+        assertEquals(1, context.getNewSpecSkuList().size());
+        assertEquals("3302001648", context.getNewSpecSkuList().get(0).getMaterialCode());
+    }
+
+    @Test
     void scheduleTypeBlockChange_shouldWriteTraceLogsAfterActualEndTimeUpdate() {
         LhScheduleContext context = newTraceContext();
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));

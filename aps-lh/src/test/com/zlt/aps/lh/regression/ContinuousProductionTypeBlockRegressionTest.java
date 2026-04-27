@@ -164,10 +164,10 @@ class ContinuousProductionTypeBlockRegressionTest {
         MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
         MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
         cleaningWindow.setCleanType("01");
-        // 清洗窗口覆盖换活字块衔接班次，且不影响续作收尾时刻计算。
-        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 18, 15, 0, 0));
-        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 18, 17, 0, 0));
-        cleaningWindow.setReadyTime(dateTime(2026, 4, 18, 17, 0, 0));
+        // 清洗窗口与换活字块窗口严格相交，应写入组合原因分析。
+        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 18, 9, 0, 0));
+        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 18, 11, 0, 0));
+        cleaningWindow.setReadyTime(dateTime(2026, 4, 18, 11, 0, 0));
         List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
         cleaningWindowList.add(cleaningWindow);
         machine.setCleaningWindowList(cleaningWindowList);
@@ -239,9 +239,9 @@ class ContinuousProductionTypeBlockRegressionTest {
 
         MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
         cleaningWindow.setCleanType("01");
-        cleaningWindow.setCleanStartTime(LhScheduleTimeUtil.addHours(typeBlockStartBoundary, -1));
-        cleaningWindow.setCleanEndTime(typeBlockStartBoundary);
-        cleaningWindow.setReadyTime(typeBlockStartBoundary);
+        cleaningWindow.setCleanStartTime(typeBlockStartBoundary);
+        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(typeBlockStartBoundary, 1));
+        cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(typeBlockStartBoundary, 1));
         List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
         cleaningWindowList.add(cleaningWindow);
         machine.setCleaningWindowList(cleaningWindowList);
@@ -254,18 +254,52 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
-    void scheduleTypeBlockChange_shouldStartAfterSandBlastEndThenAddTypeBlockHours() {
+    void scheduleTypeBlockChange_shouldIgnoreDryIceOverlapAndWriteCleaningAnalysis() {
         LhScheduleContext context = newContext();
-        MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
-        machine.setEstimatedEndTime(dateTime(2026, 4, 18, 11, 0, 0));
+        Date scheduleDate = date(2026, 4, 22);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+        MachineScheduleDTO machine = buildMachine("K2003", "MAT-C1");
+        context.getMachineScheduleMap().put("K2003", machine);
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "K2003", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        LhScheduleResult continuousResult = context.getScheduleResultList().get(0);
         MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
-        cleaningWindow.setCleanType("02");
-        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 18, 8, 0, 0));
-        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 18, 18, 0, 0));
-        cleaningWindow.setReadyTime(dateTime(2026, 4, 18, 18, 0, 0));
+        cleaningWindow.setCleanType("01");
+        cleaningWindow.setCleanStartTime(continuousResult.getSpecEndTime());
+        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 2));
+        cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 2));
         List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
         cleaningWindowList.add(cleaningWindow);
         machine.setCleaningWindowList(cleaningWindowList);
+        strategy.scheduleTypeBlockChange(context);
+
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        assertEquals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(),
+                        LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context)),
+                resolveFirstStartTime(typeBlockResult),
+                "干冰与换活字块重叠时，不应再按清洗结束时间顺延开产");
+        assertEquals(continuousResult.getSpecEndTime(),
+                ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"));
+        assertEquals("模具清洗+换活字块",
+                ShiftFieldUtil.getShiftAnalysis(typeBlockResult, resolveFirstPlannedShiftIndex(typeBlockResult)));
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldIgnoreSandBlastOverlapAndOnlyAddTypeBlockHours() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
         context.getMachineScheduleMap().put("M1", machine);
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
         context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
@@ -279,12 +313,24 @@ class ContinuousProductionTypeBlockRegressionTest {
         });
 
         strategy.scheduleContinuousEnding(context);
+        LhScheduleResult continuousResult = context.getScheduleResultList().get(0);
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("02");
+        cleaningWindow.setCleanStartTime(continuousResult.getSpecEndTime());
+        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 10));
+        cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 10));
+        List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
+        cleaningWindowList.add(cleaningWindow);
+        machine.setCleaningWindowList(cleaningWindowList);
         strategy.scheduleTypeBlockChange(context);
 
         LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
-        assertEquals(dateTime(2026, 4, 19, 2, 0, 0), resolveFirstStartTime(typeBlockResult));
-        assertEquals(dateTime(2026, 4, 18, 18, 0, 0),
+        assertEquals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(),
+                LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context)), resolveFirstStartTime(typeBlockResult));
+        assertEquals(continuousResult.getSpecEndTime(),
                 ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"));
+        assertEquals("模具清洗+换活字块",
+                ShiftFieldUtil.getShiftAnalysis(typeBlockResult, resolveFirstPlannedShiftIndex(typeBlockResult)));
     }
 
     @Test

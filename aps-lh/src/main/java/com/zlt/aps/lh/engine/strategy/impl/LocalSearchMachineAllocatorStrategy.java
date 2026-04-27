@@ -15,6 +15,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.MachineCleaningOverlapUtil;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -301,8 +302,22 @@ public class LocalSearchMachineAllocatorStrategy {
         }
         // 业务口径：换模总时长已包含首检时长，局部搜索与主流程保持一致，不再额外 +FIRST_INSPECTION_HOURS
         Date productionStartTime = inspectionTime;
+        int machineMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
+        Date firstProductionStartTime = ShiftCapacityResolverUtil.resolveFirstSchedulableStartIgnoringCleaning(
+                context.getDevicePlanShutList(),
+                machineCode,
+                productionStartTime,
+                shifts,
+                sku.getShiftCapacity(),
+                sku.getLhTimeSeconds(),
+                machineMouldQty);
+        if (firstProductionStartTime == null) {
+            inspectionBalance.rollbackInspection(context, inspectionTime);
+            mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+            return null;
+        }
         LocalSearchCapacityEstimate capacityEstimate = estimateCapacity(
-                context, sku, machine, productionStartTime, shifts);
+                context, sku, machine, mouldChangeStartTime, firstProductionStartTime, shifts);
         if (capacityEstimate.getTotalQty() <= 0 || capacityEstimate.getSpecEndTime() == null) {
             // 产能不可行时回滚已占用的首检/换模窗口
             inspectionBalance.rollbackInspection(context, inspectionTime);
@@ -347,6 +362,7 @@ public class LocalSearchMachineAllocatorStrategy {
     private LocalSearchCapacityEstimate estimateCapacity(LhScheduleContext context,
                                                          SkuScheduleDTO sku,
                                                          MachineScheduleDTO machine,
+                                                         Date mouldChangeStartTime,
                                                          Date productionStartTime,
                                                          List<LhShiftConfigVO> shifts) {
         if (sku == null || machine == null || productionStartTime == null || CollectionUtils.isEmpty(shifts)) {
@@ -359,8 +375,8 @@ public class LocalSearchMachineAllocatorStrategy {
         if (lhTimeSeconds <= 0 || remainingQty <= 0) {
             return LocalSearchCapacityEstimate.empty();
         }
-        List<MachineCleaningWindowDTO> cleaningWindowList = CollectionUtils.isEmpty(machine.getCleaningWindowList())
-                ? new ArrayList<>() : machine.getCleaningWindowList();
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
+                machine, mouldChangeStartTime, productionStartTime);
         int dryIceLossQty = context.getParamIntValue(
                 LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
         int dryIceDurationHours = context.getParamIntValue(
@@ -428,6 +444,24 @@ public class LocalSearchMachineAllocatorStrategy {
         }
         long penaltyScore = productionStartTime.getTime() / MILLIS_PER_MINUTE + (long) remainingQty * INFEASIBLE_PENALTY;
         return new LocalSearchCapacityEstimate(totalQty, specEndTime, penaltyScore);
+    }
+
+    /**
+     * 解析局部搜索估产时需要生效的清洗窗口。
+     *
+     * @param machine 候选机台
+     * @param switchStartTime 换模开始时间
+     * @param firstProductionStartTime 首个可排产开始时间
+     * @return 有效清洗窗口列表
+     */
+    private List<MachineCleaningWindowDTO> resolveEffectiveCleaningWindowList(MachineScheduleDTO machine,
+                                                                              Date switchStartTime,
+                                                                              Date firstProductionStartTime) {
+        if (machine == null || CollectionUtils.isEmpty(machine.getCleaningWindowList())) {
+            return new ArrayList<>(0);
+        }
+        return new ArrayList<>(MachineCleaningOverlapUtil.excludeOverlapWindows(
+                machine.getCleaningWindowList(), switchStartTime, firstProductionStartTime));
     }
 
     /**

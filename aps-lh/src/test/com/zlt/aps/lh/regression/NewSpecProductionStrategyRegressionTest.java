@@ -15,10 +15,13 @@ import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
+import com.zlt.aps.lh.engine.strategy.impl.DefaultCapacityCalculateStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultMachineMatchStrategy;
+import com.zlt.aps.lh.engine.strategy.impl.DefaultMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.LocalSearchMachineAllocatorStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.NewSpecProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import org.junit.jupiter.api.Test;
 
@@ -248,6 +251,53 @@ class NewSpecProductionStrategyRegressionTest {
                 "新增规格应按实际开产后的窗口剩余产能收敛目标量");
         assertEquals(112, sku.getTargetScheduleQty().intValue(),
                 "收敛后的目标量应回写到SKU，供后续未排与收尾口径复用");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldIgnoreSandBlastOverlapAndWriteCleaningMouldChangeAnalysis() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 4, 22, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("K2025");
+        machine.setMachineName("K2025");
+        machine.setMaxMoldNum(1);
+        machine.setEstimatedEndTime(dateTime(2026, 4, 22, 6, 0));
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("02");
+        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 22, 6, 0));
+        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 22, 18, 0));
+        cleaningWindow.setReadyTime(dateTime(2026, 4, 22, 16, 0));
+        machine.setCleaningWindowList(Arrays.asList(cleaningWindow));
+        context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("MAT-CLEAN");
+        sku.setMaterialDesc("喷砂重叠测试物料");
+        context.getNewSpecSkuList().add(sku);
+
+        ICapacityCalculateStrategy capacityCalculateStrategy = new DefaultCapacityCalculateStrategy();
+        IMouldChangeBalanceStrategy mouldChangeBalanceStrategy = new DefaultMouldChangeBalanceStrategy();
+        IFirstInspectionBalanceStrategy inspectionBalanceStrategy =
+                (ctx, machineCode, mouldChangeTime) -> mouldChangeTime;
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), mouldChangeBalanceStrategy,
+                inspectionBalanceStrategy, capacityCalculateStrategy);
+
+        assertEquals(1, context.getScheduleResultList().size(), "重叠场景应正常生成新增换模结果");
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals(dateTime(2026, 4, 22, 6, 0), result.getMouldChangeStartTime(),
+                "喷砂与换模重叠时，不应再按清洗readyTime顺延换模开始");
+        assertEquals(dateTime(2026, 4, 22, 14, 0), ShiftFieldUtil.getShiftStartTime(result, 2),
+                "喷砂重叠时，新增换模仍只应消耗8小时换模时间");
+        assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, 2),
+                "首个排产班次应写入模具清洗+换模原因分析");
     }
 
     @Test

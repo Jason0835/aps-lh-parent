@@ -88,6 +88,69 @@ public final class ShiftCapacityResolverUtil {
     }
 
     /**
+     * 解析忽略清洗扣量时的首个可排产开始时间。
+     *
+     * @param devicePlanShutList 设备停机列表
+     * @param machineCode 机台编号
+     * @param productionStartTime 切换完成后的理论开产时间
+     * @param shifts 排程班次窗口
+     * @param shiftCapacity 班产
+     * @param lhTimeSeconds 硫化时长（秒）
+     * @param mouldQty 模台数
+     * @return 首个可排产开始时间；不存在可排产班次时返回 null
+     */
+    public static Date resolveFirstSchedulableStartIgnoringCleaning(List<MdmDevicePlanShut> devicePlanShutList,
+                                                                    String machineCode,
+                                                                    Date productionStartTime,
+                                                                    List<LhShiftConfigVO> shifts,
+                                                                    int shiftCapacity,
+                                                                    int lhTimeSeconds,
+                                                                    int mouldQty) {
+        if (Objects.isNull(productionStartTime) || CollectionUtils.isEmpty(shifts)) {
+            return null;
+        }
+        Date cursorStartTime = productionStartTime;
+        boolean started = false;
+        for (LhShiftConfigVO shift : shifts) {
+            if (Objects.isNull(shift)
+                    || Objects.isNull(shift.getShiftStartDateTime())
+                    || Objects.isNull(shift.getShiftEndDateTime())) {
+                continue;
+            }
+            if (!started) {
+                if (cursorStartTime.before(shift.getShiftEndDateTime())) {
+                    started = true;
+                } else {
+                    continue;
+                }
+            }
+            Date effectiveStartTime = cursorStartTime.after(shift.getShiftStartDateTime())
+                    ? cursorStartTime : shift.getShiftStartDateTime();
+            if (!effectiveStartTime.before(shift.getShiftEndDateTime())) {
+                cursorStartTime = shift.getShiftEndDateTime();
+                continue;
+            }
+            long netAvailableSeconds = resolveNetAvailableSeconds(
+                    devicePlanShutList, machineCode, effectiveStartTime, shift.getShiftEndDateTime());
+            if (netAvailableSeconds <= 0) {
+                cursorStartTime = shift.getShiftEndDateTime();
+                continue;
+            }
+            int shiftMaxQty = resolveShiftCapacity(
+                    shiftCapacity,
+                    lhTimeSeconds,
+                    mouldQty,
+                    resolveShiftDurationSeconds(shift),
+                    netAvailableSeconds);
+            if (shiftMaxQty > 0) {
+                return effectiveStartTime;
+            }
+            cursorStartTime = shift.getShiftEndDateTime();
+        }
+        return null;
+    }
+
+    /**
      * 按统一业务口径解析班次产能。
      *
      * @param shiftCapacity 班产

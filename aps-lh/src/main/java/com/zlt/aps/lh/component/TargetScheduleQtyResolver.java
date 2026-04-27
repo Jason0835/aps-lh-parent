@@ -10,6 +10,7 @@ import com.zlt.aps.lh.api.enums.ScheduleTargetModeEnum;
 import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.MachineCleaningOverlapUtil;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
@@ -65,6 +66,7 @@ public class TargetScheduleQtyResolver {
     public int refineTargetQtyByMachineCapacity(LhScheduleContext context,
                                                 SkuScheduleDTO sku,
                                                 MachineScheduleDTO machine,
+                                                Date switchStartTime,
                                                 Date productionStartTime,
                                                 List<LhShiftConfigVO> shifts) {
         if (Objects.isNull(sku)) {
@@ -141,14 +143,25 @@ public class TargetScheduleQtyResolver {
             return 0;
         }
         int mouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(machine);
-        List<MachineCleaningWindowDTO> cleaningWindowList = CollectionUtils.isEmpty(machine.getCleaningWindowList())
-                ? new ArrayList<>() : machine.getCleaningWindowList();
+        Date firstProductionStartTime = ShiftCapacityResolverUtil.resolveFirstSchedulableStartIgnoringCleaning(
+                context.getDevicePlanShutList(),
+                machine.getMachineCode(),
+                productionStartTime,
+                shifts,
+                shiftCapacity,
+                lhTimeSeconds,
+                mouldQty);
+        if (firstProductionStartTime == null) {
+            return 0;
+        }
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
+                machine, switchStartTime, firstProductionStartTime);
         int dryIceLossQty = context.getParamIntValue(
                 LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
         int dryIceDurationHours = context.getParamIntValue(
                 LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
 
-        Date cursorStartTime = productionStartTime;
+        Date cursorStartTime = firstProductionStartTime;
         int totalQty = 0;
         boolean started = false;
         for (LhShiftConfigVO shift : shifts) {
@@ -183,6 +196,24 @@ public class TargetScheduleQtyResolver {
             cursorStartTime = shift.getShiftEndDateTime();
         }
         return Math.max(totalQty, 0);
+    }
+
+    /**
+     * 解析用于排产估算的清洗窗口。
+     *
+     * @param machine 机台
+     * @param switchStartTime 切换开始时间
+     * @param firstProductionStartTime 首个可排产开始时间
+     * @return 有效清洗窗口列表
+     */
+    private List<MachineCleaningWindowDTO> resolveEffectiveCleaningWindowList(MachineScheduleDTO machine,
+                                                                              Date switchStartTime,
+                                                                              Date firstProductionStartTime) {
+        if (Objects.isNull(machine) || CollectionUtils.isEmpty(machine.getCleaningWindowList())) {
+            return new ArrayList<>(0);
+        }
+        return new ArrayList<>(MachineCleaningOverlapUtil.excludeOverlapWindows(
+                machine.getCleaningWindowList(), switchStartTime, firstProductionStartTime));
     }
 
     /**

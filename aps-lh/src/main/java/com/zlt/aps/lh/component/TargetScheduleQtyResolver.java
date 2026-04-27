@@ -76,7 +76,7 @@ public class TargetScheduleQtyResolver {
         if (currentTargetQty <= 0 || !isFullCapacityMode(context)) {
             return Math.max(currentTargetQty, 0);
         }
-        int actualCapacityQty = resolveActualWindowCapacity(context, sku, machine, productionStartTime, shifts);
+        int actualCapacityQty = resolveActualWindowCapacity(context, sku, machine, switchStartTime, productionStartTime, shifts);
         if (actualCapacityQty <= 0) {
             return 0;
         }
@@ -128,6 +128,7 @@ public class TargetScheduleQtyResolver {
     private int resolveActualWindowCapacity(LhScheduleContext context,
                                             SkuScheduleDTO sku,
                                             MachineScheduleDTO machine,
+                                            Date switchStartTime,
                                             Date productionStartTime,
                                             List<LhShiftConfigVO> shifts) {
         if (Objects.isNull(context)

@@ -3,6 +3,7 @@ package com.zlt.aps.lh.handler;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
@@ -540,14 +541,23 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         List<SkuScheduleDTO> newSpecSkuList = new ArrayList<>();
         Map<String, List<SkuScheduleDTO>> skuByMaterialMap = buildSkuByMaterialMap(context);
 
-        // 保持MES最近快照顺序消费，同时过滤掉本轮不可排机台，避免停用机抢占续作资格。
-        Map<String, ?> schedulableMachineMap = context.getMachineScheduleMap();
+        // 保持MES最近快照顺序消费，同时优先承接滚动衔接后的机台当前物料。
+        Map<String, MachineScheduleDTO> schedulableMachineMap = context.getMachineScheduleMap();
         for (Map.Entry<String, LhMachineOnlineInfo> entry : context.getMachineOnlineInfoMap().entrySet()) {
             if (CollectionUtils.isEmpty(schedulableMachineMap)
                     || !schedulableMachineMap.containsKey(entry.getKey())) {
                 continue;
             }
-            assignContinuousSku(entry.getKey(), entry.getValue(), skuByMaterialMap, continuousSkuList);
+            String materialCode = resolveContinuousMaterialCode(
+                    context, entry.getKey(), schedulableMachineMap.get(entry.getKey()), entry.getValue());
+            assignContinuousSku(entry.getKey(), materialCode, skuByMaterialMap, continuousSkuList);
+        }
+
+        if (context.isRollingScheduleHandoff() && !CollectionUtils.isEmpty(schedulableMachineMap)) {
+            for (Map.Entry<String, MachineScheduleDTO> entry : schedulableMachineMap.entrySet()) {
+                String materialCode = resolveRollingContinuousMaterialCode(context, entry.getKey(), entry.getValue());
+                assignContinuousSku(entry.getKey(), materialCode, skuByMaterialMap, continuousSkuList);
+            }
         }
 
         for (List<SkuScheduleDTO> skuList : context.getStructureSkuMap().values()) {
@@ -596,15 +606,14 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @param skuByMaterialMap 物料编码 -> 待匹配SKU列表
      * @param continuousSkuList 续作SKU列表
      */
-    private void assignContinuousSku(String machineCode, LhMachineOnlineInfo onlineInfo,
+    private void assignContinuousSku(String machineCode,
+                                     String materialCode,
                                      Map<String, List<SkuScheduleDTO>> skuByMaterialMap,
                                      List<SkuScheduleDTO> continuousSkuList) {
-        if (onlineInfo == null
-                || StringUtils.isEmpty(machineCode)
-                || StringUtils.isEmpty(onlineInfo.getMaterialCode())) {
+        if (StringUtils.isEmpty(machineCode) || StringUtils.isEmpty(materialCode)) {
             return;
         }
-        List<SkuScheduleDTO> matchedSkuList = skuByMaterialMap.get(onlineInfo.getMaterialCode());
+        List<SkuScheduleDTO> matchedSkuList = skuByMaterialMap.get(materialCode);
         if (CollectionUtils.isEmpty(matchedSkuList)) {
             return;
         }
@@ -613,6 +622,70 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         matchedSku.setScheduleType(ScheduleTypeEnum.CONTINUOUS.getCode());
         matchedSku.setContinuousMachineCode(machineCode);
         continuousSkuList.add(matchedSku);
+    }
+
+    /**
+     * 解析机台本轮续作应承接的物料编码。
+     * <p>滚动衔接已继承且未收尾时，以继承后的机台当前物料为准；否则沿用 MES 在机物料。</p>
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @param machine 机台状态
+     * @param onlineInfo MES 在机快照
+     * @return 续作物料编码
+     */
+    private String resolveContinuousMaterialCode(LhScheduleContext context,
+                                                 String machineCode,
+                                                 MachineScheduleDTO machine,
+                                                 LhMachineOnlineInfo onlineInfo) {
+        String rollingMaterialCode = resolveRollingContinuousMaterialCode(context, machineCode, machine);
+        if (StringUtils.isNotEmpty(rollingMaterialCode)) {
+            return rollingMaterialCode;
+        }
+        return onlineInfo != null ? onlineInfo.getMaterialCode() : null;
+    }
+
+    /**
+     * 解析滚动衔接后机台应继续承接的当前物料。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编码
+     * @param machine 机台状态
+     * @return 未收尾的继承当前物料；不存在时返回 null
+     */
+    private String resolveRollingContinuousMaterialCode(LhScheduleContext context,
+                                                        String machineCode,
+                                                        MachineScheduleDTO machine) {
+        if (context == null
+                || !context.isRollingScheduleHandoff()
+                || machine == null
+                || StringUtils.isEmpty(machineCode)
+                || StringUtils.isEmpty(machine.getCurrentMaterialCode())
+                || CollectionUtils.isEmpty(context.getRollingInheritedScheduleResultList())) {
+            return null;
+        }
+        LhScheduleResult latestInheritedResult = null;
+        for (LhScheduleResult inheritedResult : context.getRollingInheritedScheduleResultList()) {
+            if (inheritedResult == null
+                    || !StringUtils.equals(machineCode, inheritedResult.getLhMachineCode())
+                    || !StringUtils.equals(machine.getCurrentMaterialCode(), inheritedResult.getMaterialCode())) {
+                continue;
+            }
+            if (latestInheritedResult == null) {
+                latestInheritedResult = inheritedResult;
+                continue;
+            }
+            Date latestSpecEndTime = latestInheritedResult.getSpecEndTime();
+            Date currentSpecEndTime = inheritedResult.getSpecEndTime();
+            if (latestSpecEndTime == null
+                    || (currentSpecEndTime != null && currentSpecEndTime.after(latestSpecEndTime))) {
+                latestInheritedResult = inheritedResult;
+            }
+        }
+        if (latestInheritedResult == null || StringUtils.equals("1", latestInheritedResult.getIsEnd())) {
+            return null;
+        }
+        return machine.getCurrentMaterialCode();
     }
 
     /**

@@ -280,6 +280,10 @@ class NewSpecProductionStrategyRegressionTest {
         SkuScheduleDTO sku = buildSku();
         sku.setMaterialCode("MAT-CLEAN");
         sku.setMaterialDesc("喷砂重叠测试物料");
+        sku.setPendingQty(8);
+        sku.setDailyPlanQty(8);
+        sku.setTargetScheduleQty(8);
+        sku.setShiftCapacity(8);
         context.getNewSpecSkuList().add(sku);
 
         ICapacityCalculateStrategy capacityCalculateStrategy = new DefaultCapacityCalculateStrategy();
@@ -296,8 +300,59 @@ class NewSpecProductionStrategyRegressionTest {
                 "喷砂与换模重叠时，不应再按清洗readyTime顺延换模开始");
         assertEquals(dateTime(2026, 4, 22, 14, 0), ShiftFieldUtil.getShiftStartTime(result, 2),
                 "喷砂重叠时，新增换模仍只应消耗8小时换模时间");
+        assertEquals(8, ShiftFieldUtil.getShiftPlanQty(result, 2).intValue(),
+                "喷砂与换模重叠时，首个排产班次不应再扣减清洗损失量");
         assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, 2),
                 "首个排产班次应写入模具清洗+换模原因分析");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldUseFirstPlannedShiftStartForCleaningMouldAnalysis() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 4, 22, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("K2026");
+        machine.setMachineName("K2026");
+        machine.setMaxMoldNum(1);
+        machine.setEstimatedEndTime(dateTime(2026, 4, 22, 13, 30));
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("02");
+        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 22, 21, 40));
+        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 22, 21, 50));
+        cleaningWindow.setReadyTime(dateTime(2026, 4, 22, 21, 50));
+        machine.setCleaningWindowList(Arrays.asList(cleaningWindow));
+        context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("MAT-LATE");
+        sku.setMaterialDesc("晚班备注测试物料");
+        sku.setPendingQty(1);
+        sku.setDailyPlanQty(1);
+        sku.setTargetScheduleQty(1);
+        sku.setShiftCapacity(8);
+        context.getNewSpecSkuList().add(sku);
+
+        ICapacityCalculateStrategy capacityCalculateStrategy = new DefaultCapacityCalculateStrategy();
+        IMouldChangeBalanceStrategy mouldChangeBalanceStrategy = new DefaultMouldChangeBalanceStrategy();
+        IFirstInspectionBalanceStrategy inspectionBalanceStrategy =
+                (ctx, machineCode, mouldChangeTime) -> mouldChangeTime;
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), mouldChangeBalanceStrategy,
+                inspectionBalanceStrategy, capacityCalculateStrategy);
+
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
+        assertEquals(dateTime(2026, 4, 22, 22, 0), ShiftFieldUtil.getShiftStartTime(result, firstPlannedShiftIndex),
+                "当 inspection 所在班次无有效产能时，应从首个有量班次开始排产");
+        assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, firstPlannedShiftIndex),
+                "原因分析应按首个有量班次开始时刻判定重叠窗口");
     }
 
     @Test
@@ -752,6 +807,16 @@ class NewSpecProductionStrategyRegressionTest {
         Field localSearchField = NewSpecProductionStrategy.class.getDeclaredField("localSearchMachineAllocator");
         localSearchField.setAccessible(true);
         localSearchField.set(strategy, new LocalSearchMachineAllocatorStrategy());
+    }
+
+    private int resolveFirstPlannedShiftIndex(LhScheduleResult result) {
+        for (int shiftIndex = 1; shiftIndex <= 8; shiftIndex++) {
+            Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
+            if (shiftPlanQty != null && shiftPlanQty > 0) {
+                return shiftIndex;
+            }
+        }
+        return -1;
     }
 
     private static Date dateTime(int year, int month, int day, int hour, int minute) {

@@ -9,6 +9,8 @@ import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.entity.LhDayFinishQty;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
+import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
+import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.DeleteFlagEnum;
 import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.LhDayFinishQtyMapper;
@@ -49,6 +51,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -150,6 +153,48 @@ class ScheduleDataWindowRegressionTest {
         verify(devicePlanShutMapper).selectList(any());
         verify(lhMouldCleanPlanMapper).selectList(any());
         verify(lhScheduleResultMapper).selectList(any());
+    }
+
+    @Test
+    void loadAllBaseData_forceRescheduleShouldLoadPreviousDataFromTMinusOne() {
+        String factoryCode = "FC01";
+        Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 26));
+        Date scheduleDate = LhScheduleTimeUtil.clearTime(date(2026, 4, 24));
+
+        prepareRequiredBaseMocks();
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode(factoryCode);
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+        context.getLhParamsMap().put(LhScheduleParamConstant.FORCE_RESCHEDULE, "1");
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        assertQueryContainsExpectedDate(captureScheduleResultWrapper(),
+                stripTime(date(2026, 4, 23)), stripTime(date(2026, 4, 25)));
+        assertQueryContainsExpectedDate(captureMouldChangePlanWrapper(),
+                stripTime(date(2026, 4, 23)), stripTime(date(2026, 4, 25)));
+    }
+
+    @Test
+    void loadAllBaseData_forceRescheduleShouldLoadDayFinishQtyFromTMinusOne() {
+        Date target = LhScheduleTimeUtil.clearTime(date(2026, 4, 26));
+        Date scheduleDate = LhScheduleTimeUtil.clearTime(date(2026, 4, 24));
+        prepareRequiredBaseMocks();
+        when(lhMachineOnlineInfoMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setFactoryCode("FC01");
+        context.setScheduleTargetDate(target);
+        context.setScheduleDate(scheduleDate);
+        context.getLhParamsMap().put(LhScheduleParamConstant.FORCE_RESCHEDULE, "1");
+
+        lhBaseDataService.loadAllBaseData(context);
+
+        List<LambdaQueryWrapper<LhDayFinishQty>> wrappers = captureDayFinishQtyWrappers();
+        assertQueryContainsDateRange(wrappers.get(0), stripTime(date(2026, 4, 23)), stripTime(date(2026, 4, 24)));
     }
 
     @Test
@@ -366,15 +411,50 @@ class ScheduleDataWindowRegressionTest {
     }
 
     /**
+     * 抓取前日排程结果查询条件。
+     *
+     * @return 前日排程查询 wrapper
+     */
+    @SuppressWarnings("unchecked")
+    private LambdaQueryWrapper<LhScheduleResult> captureScheduleResultWrapper() {
+        initializeTableInfo(LhScheduleResult.class);
+        ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(lhScheduleResultMapper).selectList(captor.capture());
+        return (LambdaQueryWrapper<LhScheduleResult>) captor.getValue();
+    }
+
+    /**
+     * 抓取前日模具交替计划查询条件。
+     *
+     * @return 前日模具交替计划查询 wrapper
+     */
+    @SuppressWarnings("unchecked")
+    private LambdaQueryWrapper<LhMouldChangePlan> captureMouldChangePlanWrapper() {
+        initializeTableInfo(LhMouldChangePlan.class);
+        ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(lhMouldChangePlanMapper).selectList(captor.capture());
+        return (LambdaQueryWrapper<LhMouldChangePlan>) captor.getValue();
+    }
+
+    /**
      * 初始化实体表信息，避免测试环境下解析 wrapper SQL 时缺少 lambda cache。
      */
     private void initializeDayFinishQtyTableInfo() {
-        if (TableInfoHelper.getTableInfo(LhDayFinishQty.class) != null) {
+        initializeTableInfo(LhDayFinishQty.class);
+    }
+
+    /**
+     * 初始化实体表信息，避免测试环境下解析 wrapper SQL 时缺少 lambda cache。
+     *
+     * @param entityClass 实体类型
+     */
+    private void initializeTableInfo(Class<?> entityClass) {
+        if (TableInfoHelper.getTableInfo(entityClass) != null) {
             return;
         }
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(new MybatisConfiguration(),
-                LhDayFinishQty.class.getName());
-        TableInfoHelper.initTableInfo(assistant, LhDayFinishQty.class);
+                entityClass.getName());
+        TableInfoHelper.initTableInfo(assistant, entityClass);
     }
 
     /**
@@ -407,6 +487,39 @@ class ScheduleDataWindowRegressionTest {
         assertTrue(sqlSegment.contains("is null"));
         assertTrue(sqlSegment.contains("or"));
         assertTrue(paramMap.containsValue(DeleteFlagEnum.NORMAL.getCode()));
+    }
+
+    /**
+     * 校验查询命中预期日期，且不再使用目标日前一日作为强制重排基线。
+     *
+     * @param wrapper        查询条件
+     * @param expectedDate   预期日期
+     * @param unexpectedDate 非预期日期
+     */
+    private void assertQueryContainsExpectedDate(LambdaQueryWrapper<?> wrapper, Date expectedDate, Date unexpectedDate) {
+        wrapper.getSqlSegment();
+        Map<String, Object> paramMap = wrapper.getParamNameValuePairs();
+        String expectedDateText = LhScheduleTimeUtil.formatDate(expectedDate);
+        String unexpectedDateText = LhScheduleTimeUtil.formatDate(unexpectedDate);
+        String paramSummary = paramMap.values().stream()
+                .map(value -> value + "(" + value.getClass().getSimpleName() + ")")
+                .collect(Collectors.joining(","));
+        assertTrue(paramMap.values().stream().anyMatch(value -> isSameDate(value, expectedDateText)), paramSummary);
+        assertFalse(paramMap.values().stream().anyMatch(value -> isSameDate(value, unexpectedDateText)), paramSummary);
+    }
+
+    /**
+     * 判断查询参数是否为指定自然日。
+     *
+     * @param value 查询参数值
+     * @param dateText 日期文本
+     * @return true-同一天
+     */
+    private boolean isSameDate(Object value, String dateText) {
+        if (!(value instanceof Date)) {
+            return false;
+        }
+        return dateText.equals(LhScheduleTimeUtil.formatDate((Date) value));
     }
 
     private static Date date(int y, int month, int day) {

@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.handler;
 
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
@@ -417,20 +418,32 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     }
 
     /**
-     * 解析前日排程日期（目标排程日-1）。
+     * 解析前日排程日期。
      *
      * @param context 排程上下文
      * @return 前日日期
      */
     private Date resolvePreviousScheduleDate(LhScheduleContext context) {
-        // 滚动衔接时前日排程日期以scheduleDate(实际排程日)为准，而非scheduleTargetDate(目标日)
-        if (context.isRollingScheduleHandoff() && Objects.nonNull(context.getScheduleDate())) {
+        // 滚动衔接或强制重排时，前日基线以窗口起点T日前一日为准。
+        if (isPreviousBaselineFromScheduleDate(context) && Objects.nonNull(context.getScheduleDate())) {
             return LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(context.getScheduleDate(), -1));
         }
         if (Objects.nonNull(context.getScheduleTargetDate())) {
             return LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(context.getScheduleTargetDate(), -1));
         }
         return LhScheduleTimeUtil.clearTime(context.getScheduleDate());
+    }
+
+    /**
+     * 判断前日传导基线是否应以窗口起点T日计算。
+     *
+     * @param context 排程上下文
+     * @return true-使用T日前一日
+     */
+    private boolean isPreviousBaselineFromScheduleDate(LhScheduleContext context) {
+        return context.isRollingScheduleHandoff()
+                || context.getParamIntValue(LhScheduleParamConstant.FORCE_RESCHEDULE,
+                        LhScheduleConstant.FORCE_RESCHEDULE) == LhScheduleConstant.FORCE_RESCHEDULE_ENABLED;
     }
 
     /**

@@ -105,6 +105,16 @@ public class LhScheduleConfig {
                 LhScheduleConstant.ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE) == 1;
     }
 
+    /**
+     * 判断是否启用强制重排。
+     *
+     * @return true-窗口内全部重排；false-滚动衔接排程
+     */
+    public boolean isForceRescheduleEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.FORCE_RESCHEDULE,
+                LhScheduleConstant.FORCE_RESCHEDULE) == LhScheduleConstant.FORCE_RESCHEDULE_ENABLED;
+    }
+
     public ScheduleTargetModeEnum getScheduleTargetMode() {
         return isFullCapacitySchedulingEnabled()
                 ? ScheduleTargetModeEnum.CAPACITY_FULL

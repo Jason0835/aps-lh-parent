@@ -90,10 +90,15 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
         List<LhShiftConfigVO> windowShifts = context.getScheduleWindowShifts();
         LhScheduleTimeUtil.initShiftRuntimeStateMap(context, windowShifts);
-        // 滚动排程衔接：将前批次重叠班次继承到本次，推进机台状态
-        rollingScheduleHandoffService.apply(context);
-        if (context.isInterrupted()) {
-            return;
+        // 强制重排时保留窗口基础数据，跳过前批次继承，从窗口起点重新计算。
+        if (context.getScheduleConfig().isForceRescheduleEnabled()) {
+            log.info("启用强制重排模式，跳过滚动排程衔接");
+        } else {
+            // 滚动排程衔接：将前批次重叠班次继承到本次，推进机台状态
+            rollingScheduleHandoffService.apply(context);
+            if (context.isInterrupted()) {
+                return;
+            }
         }
 
         log.info("基础数据初始化完成, 机台数量: {}, 月计划SKU数: {}",

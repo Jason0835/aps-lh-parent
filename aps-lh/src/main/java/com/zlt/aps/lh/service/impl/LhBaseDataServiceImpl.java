@@ -199,8 +199,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 11. 加载月底计划余量
         loadMonthSurplus(context, factoryCode, year, month);
 
-        // 12. 加载前日物料日完成量（用于前日欠/超产差值修正）
-        loadDayFinishQty(context, factoryCode, LhScheduleTimeUtil.addDays(targetDate, -1));
+        // 12. 加载前日物料日完成量（用于前日欠/超产差值修正,滚动模式取目标日前一日；强制重排取T-1）
+        Date previousDataDate = resolvePreviousDataDate(context, targetDate);
+        loadDayFinishQty(context, factoryCode, previousDataDate);
 
         // 13. 加载月累计完成量（截至排产T-1日（包含），按目标日所在月份统计）
         loadMaterialMonthFinishedQty(context, factoryCode, LhScheduleTimeUtil.addDays(scheduleDate, -1));
@@ -244,7 +245,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @return
      */
     private void loadPreviousScheduleResults(LhScheduleContext context, String factoryCode, Date targetDate) {
-        Date previousDate = LhScheduleTimeUtil.addDays(targetDate, -1);
+        Date previousDate = resolvePreviousDataDate(context, targetDate);
         List<LhScheduleResult> list = lhScheduleResultMapper.selectList(new LambdaQueryWrapper<LhScheduleResult>()
                 .eq(LhScheduleResult::getFactoryCode, factoryCode)
                 .eq(LhScheduleResult::getScheduleDate, previousDate)
@@ -266,7 +267,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param targetDate 排程目标日
      */
     private void loadPreviousMouldChangePlans(LhScheduleContext context, String factoryCode, Date targetDate) {
-        Date previousDate = LhScheduleTimeUtil.addDays(targetDate, -1);
+        Date previousDate = resolvePreviousDataDate(context, targetDate);
         List<LhMouldChangePlan> list = lhMouldChangePlanMapper.selectList(new LambdaQueryWrapper<LhMouldChangePlan>()
                 .eq(LhMouldChangePlan::getFactoryCode, factoryCode)
                 .eq(LhMouldChangePlan::getScheduleDate, previousDate)
@@ -274,6 +275,22 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         context.setPreviousMouldChangePlanList(list != null ? list : new ArrayList<>());
         log.info("前日模具交替计划加载完成, 数量: {}, 日期: {}",
                 context.getPreviousMouldChangePlanList().size(), LhScheduleTimeUtil.formatDate(previousDate));
+    }
+
+    /**
+     * 解析前日基础数据日期。
+     *
+     * @param context 排程上下文
+     * @param targetDate 排程目标日
+     * @return 前日基础数据日期
+     */
+    private Date resolvePreviousDataDate(LhScheduleContext context, Date targetDate) {
+        // 强制重排从窗口起点T日重新计算，前日排程/换模基线需取T日前一日。
+        if (context.getParamIntValue(LhScheduleParamConstant.FORCE_RESCHEDULE,
+                LhScheduleConstant.FORCE_RESCHEDULE) == LhScheduleConstant.FORCE_RESCHEDULE_ENABLED) {
+            return LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(context.getScheduleDate(), -1));
+        }
+        return LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(targetDate, -1));
     }
 
     /**

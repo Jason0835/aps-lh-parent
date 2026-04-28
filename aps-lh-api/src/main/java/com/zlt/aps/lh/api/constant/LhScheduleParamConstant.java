@@ -84,6 +84,8 @@ public final class LhScheduleParamConstant {
     public static final String ENABLE_FULL_CAPACITY_SCHEDULING = "ENABLE_FULL_CAPACITY_SCHEDULING";
     /** 满排模式是否按余量命中收尾规则2 */
     public static final String ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE = "ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE";
+    /** 是否强制重排（0-否，1-是） */
+    public static final String FORCE_RESCHEDULE = "FORCE_RESCHEDULE";
     /** MES在机信息往前追溯天数 */
     public static final String MACHINE_ONLINE_LOOKBACK_DAYS = "MACHINE_ONLINE_LOOKBACK_DAYS";
     /** 停机超时阈值（小时） */

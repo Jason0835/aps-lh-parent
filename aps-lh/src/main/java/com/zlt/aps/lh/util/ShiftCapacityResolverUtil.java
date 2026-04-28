@@ -187,10 +187,11 @@ public final class ShiftCapacityResolverUtil {
             if (shiftDurationSeconds <= 0) {
                 return shiftCapacity;
             }
-            return BigDecimal.valueOf(shiftCapacity)
+            int resolvedQty = BigDecimal.valueOf(shiftCapacity)
                     .multiply(BigDecimal.valueOf(effectiveAvailableSeconds))
                     .divide(BigDecimal.valueOf(shiftDurationSeconds), 0, RoundingMode.DOWN)
                     .intValue();
+            return normalizeQtyToMouldMultiple(resolvedQty, mouldQty, effectiveAvailableSeconds < shiftDurationSeconds);
         }
 
         // 无班产主数据时，按完整硫化周期数回退计算，仍然只统计可完整完成的周期。
@@ -384,7 +385,44 @@ public final class ShiftCapacityResolverUtil {
         int cleaningLossQty = resolveCleaningLossQty(
                 devicePlanShutList, cleaningWindowList, machineCode, windowStartTime, windowEndTime,
                 shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds, dryIceLossQty, dryIceDurationHours);
-        return Math.max(stopAdjustedQty - cleaningLossQty, 0);
+        int finalQty = Math.max(stopAdjustedQty - cleaningLossQty, 0);
+        boolean shouldNormalizeResidual = (shiftDurationSeconds > 0 && stopAdjustedSeconds < shiftDurationSeconds)
+                || cleaningLossQty > 0;
+        return normalizeQtyToMouldMultiple(finalQty, mouldQty, shouldNormalizeResidual);
+    }
+
+    /**
+     * 双模及多模残班统一向下收敛到模台数整数倍。
+     *
+     * @param qty 当前计划量
+     * @param mouldQty 模台数
+     * @param shouldNormalize 是否属于残班/扣量场景
+     * @return 收敛后的计划量
+     */
+    public static int normalizeQtyToMouldMultiple(int qty, int mouldQty, boolean shouldNormalize) {
+        if (!shouldNormalize || qty <= 0) {
+            return qty;
+        }
+        int resolvedMouldQty = resolveMachineMouldQty(mouldQty);
+        if (resolvedMouldQty <= 1) {
+            return qty;
+        }
+        if (qty < resolvedMouldQty) {
+            return 0;
+        }
+        return qty - qty % resolvedMouldQty;
+    }
+
+    /**
+     * 统一收敛班次实际落点计划量，避免双模残班落成奇数。
+     *
+     * @param allocationQty 当前拟分配计划量
+     * @param shiftMaxQty 当前班次最大可排量
+     * @param mouldQty 模台数
+     * @return 收敛后的班次计划量
+     */
+    public static int normalizeAllocatedShiftQty(int allocationQty, int shiftMaxQty, int mouldQty) {
+        return normalizeQtyToMouldMultiple(allocationQty, mouldQty, allocationQty < shiftMaxQty);
     }
 
     /**

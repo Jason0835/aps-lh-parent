@@ -319,7 +319,7 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
-    void scheduleTypeBlockChange_shouldIgnoreSandBlastOverlapAndOnlyAddTypeBlockHours() {
+    void scheduleTypeBlockChange_shouldDelaySandBlastOverlapUntilCleaningEndTime() {
         LhScheduleContext baselineContext = newContext();
         MachineScheduleDTO baselineMachine = buildMachine("M1", "MAT-C1");
         baselineContext.getMachineScheduleMap().put("M1", baselineMachine);
@@ -355,7 +355,7 @@ class ContinuousProductionTypeBlockRegressionTest {
         MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
         cleaningWindow.setCleanType("02");
         cleaningWindow.setCleanStartTime(continuousResult.getSpecEndTime());
-        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 10));
+        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 12));
         cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 10));
         List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>();
         cleaningWindowList.add(cleaningWindow);
@@ -363,15 +363,64 @@ class ContinuousProductionTypeBlockRegressionTest {
         strategy.scheduleTypeBlockChange(context);
 
         LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
-        assertEquals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(),
-                LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context)), resolveFirstStartTime(typeBlockResult));
-        assertEquals(continuousResult.getSpecEndTime(),
+        assertEquals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 20),
+                resolveFirstStartTime(typeBlockResult),
+                "喷砂与换活字块重叠时，应等待喷砂完整12小时结束后再追加8小时换活字块");
+        assertEquals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 12),
                 ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"));
-        assertEquals(ShiftFieldUtil.getShiftPlanQty(baselineTypeBlockResult, resolveFirstPlannedShiftIndex(baselineTypeBlockResult)),
-                ShiftFieldUtil.getShiftPlanQty(typeBlockResult, resolveFirstPlannedShiftIndex(typeBlockResult)),
-                "喷砂与换活字块重叠时，排产量应与无清洗基线保持一致");
-        assertEquals("模具清洗+换活字块",
-                ShiftFieldUtil.getShiftAnalysis(typeBlockResult, resolveFirstPlannedShiftIndex(typeBlockResult)));
+        assertEquals(baselineTypeBlockResult.getDailyPlanQty(), typeBlockResult.getDailyPlanQty(),
+                "喷砂与换活字块重叠时，延后只应改变班次落点，不应改变当天总排产量");
+        assertEquals(3, ShiftFieldUtil.getShiftPlanQty(typeBlockResult, resolveFirstPlannedShiftIndex(typeBlockResult)),
+                "喷砂完整12小时结束后再换活字块时，首个可排残班应按新起点重新折算");
+        assertEquals(5, ShiftFieldUtil.getShiftPlanQty(typeBlockResult, resolveFirstPlannedShiftIndex(typeBlockResult) + 1),
+                "首个残班折算后，剩余量应顺延到下一班继续排完");
+        assertEquals("模具清洗+换活字块", ShiftFieldUtil.getShiftAnalysis(typeBlockResult, resolveFirstPlannedShiftIndex(typeBlockResult)),
+                "喷砂顺延后，首个有效排产班次仍应保留模具清洗+换活字块原因分析");
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldKeepCleaningAnalysisAfterDowntimeDelay() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
+        context.getMachineScheduleMap().put("M1", machine);
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 8));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return sku != null && "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        LhScheduleResult continuousResult = context.getScheduleResultList().get(0);
+
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("02");
+        cleaningWindow.setCleanStartTime(continuousResult.getSpecEndTime());
+        cleaningWindow.setCleanEndTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 12));
+        cleaningWindow.setReadyTime(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 10));
+        machine.setCleaningWindowList(Arrays.asList(cleaningWindow));
+
+        MdmDevicePlanShut planShut = new MdmDevicePlanShut();
+        planShut.setMachineCode("M1");
+        planShut.setBeginDate(cleaningWindow.getCleanEndTime());
+        planShut.setEndDate(LhScheduleTimeUtil.addHours(cleaningWindow.getCleanEndTime(), 2));
+        context.getDevicePlanShutList().add(planShut);
+
+        strategy.scheduleTypeBlockChange(context);
+
+        assertEquals(2, context.getScheduleResultList().size(), "喷砂后又遇到停机顺延时，换活字块结果仍应正常生成");
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        assertEquals(dateTime(2026, 4, 19, 6, 0, 0),
+                ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"),
+                "喷砂结束后若先遇到停机、随后又落入禁止换活字块时段，应继续顺延到次日早班再开始换活字块");
+        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(typeBlockResult);
+        assertTrue(firstPlannedShiftIndex > 0, "顺延后应仍存在首个有效排产班次");
+        assertEquals("模具清洗+换活字块", ShiftFieldUtil.getShiftAnalysis(typeBlockResult, firstPlannedShiftIndex),
+                "喷砂后又被停机继续顺延时，首个排产班次仍应保留模具清洗+换活字块分析");
     }
 
     @Test

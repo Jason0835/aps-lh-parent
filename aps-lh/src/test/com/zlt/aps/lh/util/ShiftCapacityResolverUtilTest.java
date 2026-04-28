@@ -148,6 +148,39 @@ class ShiftCapacityResolverUtilTest {
     }
 
     @Test
+    void resolveShiftCapacity_shouldRoundPartialDoubleMouldClassCapacityDownToEvenMultiple() {
+        int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+                22, 2160, 2, 8 * 3600L, 4 * 3600L);
+
+        assertEquals(10, shiftQty, "双模机台残班按班产主数据折算时，应向下收敛到模台数整数倍");
+    }
+
+    @Test
+    void resolveShiftCapacity_shouldKeepOddFullShiftCapacityWhenShiftIsFull() {
+        int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+                21, 2160, 2, 8 * 3600L, 8 * 3600L);
+
+        assertEquals(21, shiftQty, "双模机台整班班产主数据为奇数时，本轮仍应保持原值不变");
+    }
+
+    @Test
+    void resolveShiftCapacityWithDowntime_shouldRoundCleaningAdjustedOddResultDownToEvenMultipleForDoubleMould() {
+        Date shiftStart = dateTime(2026, 4, 21, 6, 0);
+        Date shiftEnd = dateTime(2026, 4, 21, 14, 0);
+        List<MachineCleaningWindowDTO> cleaningWindowList = Arrays.asList(
+                buildCleaningWindow("02",
+                        dateTime(2026, 4, 21, 10, 0, 0),
+                        dateTime(2026, 4, 21, 14, 0, 0),
+                        dateTime(2026, 4, 21, 12, 0, 0))
+        );
+
+        int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                null, cleaningWindowList, "K2025", shiftStart, shiftEnd, 21, 2160, 2, 8 * 3600L, 6, 3);
+
+        assertEquals(10, shiftQty, "双模机台喷砂扣量后的残班计划量应向下收敛为偶数");
+    }
+
+    @Test
     void dryIcePartialOverlap_shouldUseFixedDurationAsLossDenominator() {
         Date shiftStart = dateTime(2026, 4, 21, 6, 0);
         Date shiftEnd = dateTime(2026, 4, 21, 14, 0);

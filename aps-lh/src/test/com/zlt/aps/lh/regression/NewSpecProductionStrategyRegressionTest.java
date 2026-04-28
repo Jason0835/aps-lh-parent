@@ -254,7 +254,7 @@ class NewSpecProductionStrategyRegressionTest {
     }
 
     @Test
-    void scheduleNewSpecs_shouldIgnoreSandBlastOverlapAndWriteCleaningMouldChangeAnalysis() throws Exception {
+    void scheduleNewSpecs_shouldDelaySandBlastOverlapUntilCleaningEndTime() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, false);
 
@@ -296,14 +296,64 @@ class NewSpecProductionStrategyRegressionTest {
 
         assertEquals(1, context.getScheduleResultList().size(), "重叠场景应正常生成新增换模结果");
         LhScheduleResult result = context.getScheduleResultList().get(0);
-        assertEquals(dateTime(2026, 4, 22, 6, 0), result.getMouldChangeStartTime(),
-                "喷砂与换模重叠时，不应再按清洗readyTime顺延换模开始");
-        assertEquals(dateTime(2026, 4, 22, 14, 0), ShiftFieldUtil.getShiftStartTime(result, 2),
-                "喷砂重叠时，新增换模仍只应消耗8小时换模时间");
-        assertEquals(8, ShiftFieldUtil.getShiftPlanQty(result, 2).intValue(),
-                "喷砂与换模重叠时，首个排产班次不应再扣减清洗损失量");
-        assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, 2),
-                "首个排产班次应写入模具清洗+换模原因分析");
+        assertEquals(dateTime(2026, 4, 22, 18, 0), result.getMouldChangeStartTime(),
+                "喷砂与换模重叠时，应顺延到喷砂完整12小时结束后再开始换模");
+        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
+        assertEquals(3, firstPlannedShiftIndex, "喷砂重叠顺延后，首个排产班次应落到夜班");
+        assertEquals(dateTime(2026, 4, 23, 2, 0), ShiftFieldUtil.getShiftStartTime(result, firstPlannedShiftIndex),
+                "换模8小时结束后，新增排产应从顺延后的实际开产时刻开始");
+        assertEquals(4, ShiftFieldUtil.getShiftPlanQty(result, firstPlannedShiftIndex).intValue(),
+                "顺延后的首个夜班只应保留剩余4小时对应的产量");
+        assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, firstPlannedShiftIndex),
+                "喷砂顺延后，首个排产班次仍应保留模具清洗+换模原因分析");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldKeepCleaningAnalysisAfterNoMouldChangeDelay() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 4, 22, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("K2027");
+        machine.setMachineName("K2027");
+        machine.setMaxMoldNum(1);
+        machine.setEstimatedEndTime(dateTime(2026, 4, 22, 8, 0));
+        MachineCleaningWindowDTO cleaningWindow = new MachineCleaningWindowDTO();
+        cleaningWindow.setCleanType("02");
+        cleaningWindow.setCleanStartTime(dateTime(2026, 4, 22, 8, 0));
+        cleaningWindow.setCleanEndTime(dateTime(2026, 4, 22, 20, 0));
+        cleaningWindow.setReadyTime(dateTime(2026, 4, 22, 18, 0));
+        machine.setCleaningWindowList(Arrays.asList(cleaningWindow));
+        context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("MAT-NO-CHANGE");
+        sku.setMaterialDesc("喷砂后禁换顺延测试物料");
+        sku.setPendingQty(8);
+        sku.setDailyPlanQty(8);
+        sku.setTargetScheduleQty(8);
+        sku.setShiftCapacity(8);
+        context.getNewSpecSkuList().add(sku);
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine),
+                new DefaultMouldChangeBalanceStrategy(),
+                (ctx, machineCode, mouldChangeTime) -> mouldChangeTime,
+                new DefaultCapacityCalculateStrategy());
+
+        assertEquals(1, context.getScheduleResultList().size(), "喷砂后进入禁止换模时段时，新增排产仍应正常生成结果");
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals(dateTime(2026, 4, 23, 6, 0), result.getMouldChangeStartTime(),
+                "喷砂结束时刻落入禁止换模时段时，应继续顺延到次日早班再换模");
+        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
+        assertTrue(firstPlannedShiftIndex > 0, "顺延后应仍存在首个有效排产班次");
+        assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, firstPlannedShiftIndex),
+                "喷砂后又被禁止换模继续顺延时，首个排产班次仍应保留模具清洗+换模分析");
     }
 
     @Test

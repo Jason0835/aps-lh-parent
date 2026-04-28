@@ -182,8 +182,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                     completedMachineMap.put(machineCode, true);
                     continue;
                 }
-                Date typeBlockStartTime = calcTypeBlockStartTime(context, machine);
-                boolean success = appendFollowUpResult(context, machine, typeBlockSku, typeBlockStartTime, shifts, true);
+                boolean[] sandBlastBlockedHolder = new boolean[1];
+                Date typeBlockStartTime = calcTypeBlockStartTime(context, machine, sandBlastBlockedHolder);
+                boolean success = appendFollowUpResult(
+                        context, machine, typeBlockSku, typeBlockStartTime, shifts, true, sandBlastBlockedHolder[0]);
                 traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
                         typeBlockSku, matchedLayer, success, typeBlockStartTime,
                         machineTriggerSourceMap.get(machineCode));
@@ -667,12 +669,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     /**
      * 计算换活字块开产时间（无需换模、无需首检，仅消耗换活字块时间）
      */
-    private Date calcTypeBlockStartTime(LhScheduleContext context, MachineScheduleDTO machine) {
+    private Date calcTypeBlockStartTime(LhScheduleContext context,
+                                        MachineScheduleDTO machine,
+                                        boolean[] sandBlastBlockedHolder) {
         if (machine.getEstimatedEndTime() == null) {
             return null;
         }
         Date switchStartTime = resolveAllowedSwitchStartTime(
-                context, machine.getMachineCode(), machine.getEstimatedEndTime());
+                context, machine.getMachineCode(), machine.getEstimatedEndTime(), sandBlastBlockedHolder);
         // 换活字块：允许切换时间 + 换活字块总耗时
         return LhScheduleTimeUtil.addHours(switchStartTime,
                 LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
@@ -694,7 +698,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * 解析允许发起切换（换模/换活字块）的开始时间。
      * <p>20:00:00（含）到次日早班前禁止发起切换，需顺延到下一个早班开始时间。</p>
      */
-    private Date resolveAllowedSwitchStartTime(LhScheduleContext context, String machineCode, Date endingTime) {
+    private Date resolveAllowedSwitchStartTime(LhScheduleContext context,
+                                               String machineCode,
+                                               Date endingTime,
+                                               boolean[] sandBlastBlockedHolder) {
         if (endingTime == null) {
             return null;
         }
@@ -704,6 +711,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                     context, machineCode, adjustedTime);
             if (downtimeAdjustedTime.after(adjustedTime)) {
                 adjustedTime = downtimeAdjustedTime;
+                continue;
+            }
+            Date cleaningAdjustedTime = resolveCleaningAdjustedSwitchStartTime(
+                    context, machineCode, adjustedTime);
+            if (cleaningAdjustedTime.after(adjustedTime)) {
+                markSandBlastBlocked(sandBlastBlockedHolder);
+                adjustedTime = cleaningAdjustedTime;
                 continue;
             }
             if (!LhScheduleTimeUtil.isNoMouldChangeTime(context, adjustedTime)) {
@@ -753,6 +767,32 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
+     * 根据喷砂清洗窗口顺延换活字块切换起点。
+     *
+     * @param context 排程上下文
+     * @param machineCode 机台编号
+     * @param candidateStartTime 候选切换开始时间
+     * @return 顺延后的切换开始时间
+     */
+    private Date resolveCleaningAdjustedSwitchStartTime(LhScheduleContext context,
+                                                        String machineCode,
+                                                        Date candidateStartTime) {
+        if (context == null
+                || StringUtils.isEmpty(machineCode)
+                || candidateStartTime == null) {
+            return candidateStartTime;
+        }
+        MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
+        if (machine == null) {
+            return candidateStartTime;
+        }
+        Date candidateEndTime = LhScheduleTimeUtil.addHours(
+                candidateStartTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+        return MachineCleaningOverlapUtil.resolveDelayedSwitchStartBySandBlast(
+                machine.getCleaningWindowList(), candidateStartTime, candidateEndTime);
+    }
+
+    /**
      * 追加续作衔接结果（同产品结构直续或换活字块）。
      */
     private boolean appendFollowUpResult(LhScheduleContext context,
@@ -760,7 +800,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                          SkuScheduleDTO sku,
                                          Date startTime,
                                          List<LhShiftConfigVO> shifts,
-                                         boolean typeBlock) {
+                                         boolean typeBlock,
+                                         boolean sandBlastBlocked) {
         if (startTime == null) {
             return false;
         }
@@ -796,7 +837,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setSpecEndTime(actualCompletionTime);
         result.setTdaySpecEndTime(actualCompletionTime);
         if (typeBlock) {
-            applyTypeBlockCleaningAnalysis(context, result, shifts);
+            applyTypeBlockCleaningAnalysis(context, result, shifts, sandBlastBlocked);
         }
 
         context.getScheduleResultList().add(result);
@@ -861,7 +902,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                             + ", 当前物料=" + PriorityTraceLogHelper.safeText(machine.getCurrentMaterialCode())
                             + ", 基准时间=" + PriorityTraceLogHelper.formatDateTime(estimatedEndTime)
                             + ", 实际切换起点=" + PriorityTraceLogHelper.formatDateTime(
-                            resolveAllowedSwitchStartTime(context, machine.getMachineCode(), estimatedEndTime)));
+                            resolveAllowedSwitchStartTime(context, machine.getMachineCode(), estimatedEndTime, null)));
         }
         String detail = detailBuilder.toString().trim();
         log.info("{}\n{}", title, detail);
@@ -1226,7 +1267,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             if (shiftMaxQty <= 0) {
                 continue;
             }
-            int shiftQty = Math.min(remaining, shiftMaxQty);
+            int shiftQty = ShiftCapacityResolverUtil.normalizeAllocatedShiftQty(
+                    Math.min(remaining, shiftMaxQty), shiftMaxQty, mouldQty);
+            if (shiftQty <= 0) {
+                continue;
+            }
 
             setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getShiftEndDateTime());
             remaining -= shiftQty;
@@ -1371,7 +1416,12 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
                 continue;
             }
-            int shiftQty = Math.min(remaining, shiftMaxQty);
+            int shiftQty = ShiftCapacityResolverUtil.normalizeAllocatedShiftQty(
+                    Math.min(remaining, shiftMaxQty), shiftMaxQty, mouldQty);
+            if (shiftQty <= 0) {
+                setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
+                continue;
+            }
             Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
                     context.getDevicePlanShutList(),
                     cleaningWindowList,
@@ -1933,7 +1983,10 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
      * @param result 排程结果
      * @param shifts 班次列表
      */
-    private void applyTypeBlockCleaningAnalysis(LhScheduleContext context, LhScheduleResult result, List<LhShiftConfigVO> shifts) {
+    private void applyTypeBlockCleaningAnalysis(LhScheduleContext context,
+                                                LhScheduleResult result,
+                                                List<LhShiftConfigVO> shifts,
+                                                boolean sandBlastBlocked) {
         if (context == null || result == null || CollectionUtils.isEmpty(shifts)) {
             return;
         }
@@ -1942,13 +1995,29 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (switchStartTime == null || productionStartTime == null) {
             return;
         }
-        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(context, result.getLhMachineCode());
-        if (!MachineCleaningOverlapUtil.hasOverlap(cleaningWindowList, switchStartTime, productionStartTime)) {
+        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
+        if (firstPlannedShiftIndex <= 0) {
             return;
         }
-        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
-        if (firstPlannedShiftIndex > 0) {
+        if (sandBlastBlocked) {
             ShiftFieldUtil.setShiftAnalysis(result, firstPlannedShiftIndex, TYPE_BLOCK_CLEANING_ANALYSIS);
+            return;
+        }
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveMachineCleaningWindowList(context, result.getLhMachineCode());
+        if (!MachineCleaningOverlapUtil.hasBlockingOverlap(cleaningWindowList, switchStartTime, productionStartTime)) {
+            return;
+        }
+        ShiftFieldUtil.setShiftAnalysis(result, firstPlannedShiftIndex, TYPE_BLOCK_CLEANING_ANALYSIS);
+    }
+
+    /**
+     * 标记本次切换曾被喷砂清洗阻塞。
+     *
+     * @param sandBlastBlockedHolder 喷砂阻塞标记
+     */
+    private void markSandBlastBlocked(boolean[] sandBlastBlockedHolder) {
+        if (sandBlastBlockedHolder != null && sandBlastBlockedHolder.length > 0) {
+            sandBlastBlockedHolder[0] = true;
         }
     }
 

@@ -31,14 +31,15 @@ class CleaningPlanScheduleImpactRegressionTest {
     void newSpecDistributeToShifts_shouldRefreshSpecEndTimeAfterCleaningLoss() {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         LhScheduleContext context = buildSingleShiftContext();
-        context.getMachineScheduleMap().put("K1514", buildMachineWithDryIceCleaning());
+        MachineScheduleDTO machine = buildMachineWithDryIceCleaning();
+        context.getMachineScheduleMap().put("K1514", machine);
 
         LhScheduleResult result = buildResult("K1514", "02");
         List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
         Date shiftStartTime = shifts.get(0).getShiftStartDateTime();
 
         Integer remainingQty = ReflectionTestUtils.invokeMethod(strategy, "distributeToShifts",
-                context, result, shifts, shiftStartTime, 18, 1600, 1, 18);
+                context, result, shifts, shiftStartTime, 18, 1600, 1, 18, machine.getCleaningWindowList());
         ReflectionTestUtils.invokeMethod(strategy, "refreshResultSummary", context, result);
 
         assertEquals(6, remainingQty.intValue(), "单班排产时，干冰清洗扣量后仍应保留未排数量");

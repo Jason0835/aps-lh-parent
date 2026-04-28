@@ -63,6 +63,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     private static final String AUTO_DATA_SOURCE = "0";
     private static final String ZERO_PLAN_UNSCHEDULED_REASON = "新增结果裁剪为0";
     private static final String NEW_SPEC_CLEANING_ANALYSIS = "模具清洗+换模";
+    private static final int MIN_SWITCH_DELAY_RETRY_COUNT = 2;
 
     @Resource
     private OrderNoGenerator orderNoGenerator;
@@ -211,25 +212,51 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 Date machineReadyTime = capacityCalculate.calculateStartTime(context,
                         machineCode, endingTime);
 
-                // 4. 先分配换模窗口，失败则继续尝试下一台候选机台
-                Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, machineReadyTime);
+                // 4. 先分配换模窗口；若与喷砂清洗重叠，则回滚并顺延到喷砂结束后重新分配。
+                Date mouldChangeStartTime = null;
+                Date mouldChangeCompleteTime = null;
+                Date inspectionTime = null;
+                NewSpecFailReasonEnum switchAllocateFailReason = null;
+                boolean sandBlastBlocked = false;
+                Date candidateSwitchStartTime = machineReadyTime;
+                int maxDelayRetryCount = resolveMaxSwitchDelayRetryCount(candidateMachine);
+                for (int retry = 0; retry < maxDelayRetryCount; retry++) {
+                    mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, candidateSwitchStartTime);
+                    if (mouldChangeStartTime == null) {
+                        switchAllocateFailReason = NewSpecFailReasonEnum.MOULD_CHANGE_SHIFT_ALLOCATE_FAILED;
+                        break;
+                    }
+
+                    mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
+                            mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
+                    inspectionTime = inspectionBalance.allocateInspection(context, machineCode, mouldChangeCompleteTime);
+                    if (inspectionTime == null) {
+                        mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                        mouldChangeStartTime = null;
+                        switchAllocateFailReason = NewSpecFailReasonEnum.FIRST_INSPECTION_SHIFT_ALLOCATE_FAILED;
+                        break;
+                    }
+
+                    Date delayedSwitchStartTime = resolveDelayedSwitchStartTime(
+                            candidateMachine, mouldChangeStartTime, inspectionTime);
+                    if (!delayedSwitchStartTime.after(mouldChangeStartTime)) {
+                        break;
+                    }
+
+                    sandBlastBlocked = true;
+                    inspectionBalance.rollbackInspection(context, inspectionTime);
+                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    mouldChangeStartTime = null;
+                    mouldChangeCompleteTime = null;
+                    inspectionTime = null;
+                    candidateSwitchStartTime = delayedSwitchStartTime;
+                }
                 if (mouldChangeStartTime == null) {
                     excludedMachineCodes.add(machineCode);
                     failReason = selectHigherPriorityFailReason(
-                            failReason, NewSpecFailReasonEnum.MOULD_CHANGE_SHIFT_ALLOCATE_FAILED);
-                    continue;
-                }
-
-                // 5. 换模完成后分配首检窗口，若失败需回滚已占用换模资源
-                Date mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
-                        mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
-                Date inspectionTime = inspectionBalance.allocateInspection(context,
-                        machineCode, mouldChangeCompleteTime);
-                if (inspectionTime == null) {
-                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
-                    excludedMachineCodes.add(machineCode);
-                    failReason = selectHigherPriorityFailReason(
-                            failReason, NewSpecFailReasonEnum.FIRST_INSPECTION_SHIFT_ALLOCATE_FAILED);
+                            failReason, switchAllocateFailReason == null
+                                    ? NewSpecFailReasonEnum.MOULD_CHANGE_SHIFT_ALLOCATE_FAILED
+                                    : switchAllocateFailReason);
                     continue;
                 }
 
@@ -267,7 +294,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 sku.setTargetScheduleQty(refinedTargetQty);
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, firstProductionStartTime, mouldChangeStartTime,
-                        mouldChangeCompleteTime, shifts, machineMouldQty, isEnding);
+                        mouldChangeCompleteTime, shifts, machineMouldQty, isEnding, sandBlastBlocked);
                 if (result == null || result.getDailyPlanQty() == null || result.getDailyPlanQty() <= 0) {
                     // 无有效产能时回滚首检和换模占用，避免影响后续SKU排产
                     inspectionBalance.rollbackInspection(context, inspectionTime);
@@ -471,7 +498,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                          Date mouldChangeEndTime,
                                                          List<LhShiftConfigVO> shifts,
                                                          int mouldQty,
-                                                         boolean isEnding) {
+                                                         boolean isEnding,
+                                                         boolean sandBlastBlocked) {
         LhScheduleResult result = new LhScheduleResult();
         result.setFactoryCode(context.getFactoryCode());
         result.setBatchNo(context.getBatchNo());
@@ -522,7 +550,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         distributeToShifts(context, result, shifts, startTime,
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty, cleaningWindowList);
         refreshResultSummary(context, result);
-        applyCleaningMouldChangeAnalysis(context, result);
+        applyCleaningMouldChangeAnalysis(context, result, sandBlastBlocked);
         // 新增结果先按实际排产量复核收尾标记，后续若再被库存裁剪会在 adjustEmbryoStock 收口阶段二次复核。
         refreshEndingFlagByResult(result);
         return result;
@@ -535,7 +563,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
      * @param result 新增换模结果
      */
     private void applyCleaningMouldChangeAnalysis(LhScheduleContext context,
-                                                  LhScheduleResult result) {
+                                                  LhScheduleResult result,
+                                                  boolean sandBlastBlocked) {
         Date firstPlannedShiftStartTime = resolveFirstPlannedShiftStartTime(result);
         if (context == null
                 || result == null
@@ -543,16 +572,21 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 || firstPlannedShiftStartTime == null) {
             return;
         }
+        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
+        if (firstPlannedShiftIndex <= 0) {
+            return;
+        }
+        if (sandBlastBlocked) {
+            ShiftFieldUtil.setShiftAnalysis(result, firstPlannedShiftIndex, NEW_SPEC_CLEANING_ANALYSIS);
+            return;
+        }
         MachineScheduleDTO machine = context.getMachineScheduleMap().get(result.getLhMachineCode());
         if (machine == null
-                || !MachineCleaningOverlapUtil.hasOverlap(
+                || !MachineCleaningOverlapUtil.hasBlockingOverlap(
                 machine.getCleaningWindowList(), result.getMouldChangeStartTime(), firstPlannedShiftStartTime)) {
             return;
         }
-        int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
-        if (firstPlannedShiftIndex > 0) {
-            ShiftFieldUtil.setShiftAnalysis(result, firstPlannedShiftIndex, NEW_SPEC_CLEANING_ANALYSIS);
-        }
+        ShiftFieldUtil.setShiftAnalysis(result, firstPlannedShiftIndex, NEW_SPEC_CLEANING_ANALYSIS);
     }
 
     /**
@@ -675,7 +709,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            int shiftQty = Math.min(remaining, shiftMaxQty);
+            int shiftQty = ShiftCapacityResolverUtil.normalizeAllocatedShiftQty(
+                    Math.min(remaining, shiftMaxQty), shiftMaxQty, mouldQty);
             if (shiftQty > 0) {
                 Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
                         context.getDevicePlanShutList(),
@@ -702,6 +737,37 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
     private void setShiftPlanQty(LhScheduleResult result, int shiftIndex, int qty, Date startTime, Date endTime) {
         ShiftFieldUtil.setShiftPlanQty(result, shiftIndex, qty, startTime, endTime);
+    }
+
+    /**
+     * 解析喷砂清洗导致的切换顺延起点。
+     *
+     * @param machine 候选机台
+     * @param switchStartTime 候选切换开始时间
+     * @param productionStartTime 候选开产时间
+     * @return 顺延后的切换开始时间
+     */
+    private Date resolveDelayedSwitchStartTime(MachineScheduleDTO machine,
+                                               Date switchStartTime,
+                                               Date productionStartTime) {
+        if (machine == null) {
+            return switchStartTime;
+        }
+        return MachineCleaningOverlapUtil.resolveDelayedSwitchStartBySandBlast(
+                machine.getCleaningWindowList(), switchStartTime, productionStartTime);
+    }
+
+    /**
+     * 计算喷砂重叠场景下的最大顺延重试次数。
+     *
+     * @param machine 候选机台
+     * @return 重试次数
+     */
+    private int resolveMaxSwitchDelayRetryCount(MachineScheduleDTO machine) {
+        if (machine == null || CollectionUtils.isEmpty(machine.getCleaningWindowList())) {
+            return MIN_SWITCH_DELAY_RETRY_COUNT;
+        }
+        return Math.max(machine.getCleaningWindowList().size() + 1, MIN_SWITCH_DELAY_RETRY_COUNT);
     }
 
     private int calcTotalPlanQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {

@@ -42,6 +42,8 @@ public class LocalSearchMachineAllocatorStrategy {
     private static final long MILLIS_PER_MINUTE = 60_000L;
     /** 不可行分支的惩罚分 */
     private static final long INFEASIBLE_PENALTY = 1_000_000L;
+    /** 喷砂顺延场景的最小重试次数 */
+    private static final int MIN_SWITCH_DELAY_RETRY_COUNT = 2;
 
     /**
      * 选择当前 SKU 的首选机台。
@@ -288,16 +290,36 @@ public class LocalSearchMachineAllocatorStrategy {
         // 按“机台准备 -> 换模 -> 首检 -> 产能估算”的顺序串行预占资源
         Date machineEndTime = resolveMachineEndTime(context, machine, shifts, virtualMachineEndTimeMap);
         Date machineReadyTime = capacityCalculate.calculateStartTime(context, machineCode, machineEndTime);
-        Date mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, machineReadyTime);
-        if (mouldChangeStartTime == null) {
-            return null;
-        }
-        Date mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
-                mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
-        Date inspectionTime = inspectionBalance.allocateInspection(context, machineCode, mouldChangeCompleteTime);
-        if (inspectionTime == null) {
-            // 首检失败需要回滚换模，避免污染全局资源状态
+        Date mouldChangeStartTime = null;
+        Date mouldChangeCompleteTime = null;
+        Date inspectionTime = null;
+        Date candidateSwitchStartTime = machineReadyTime;
+        int maxDelayRetryCount = resolveMaxSwitchDelayRetryCount(machine);
+        for (int retry = 0; retry < maxDelayRetryCount; retry++) {
+            mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, candidateSwitchStartTime);
+            if (mouldChangeStartTime == null) {
+                return null;
+            }
+            mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(
+                    mouldChangeStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
+            inspectionTime = inspectionBalance.allocateInspection(context, machineCode, mouldChangeCompleteTime);
+            if (inspectionTime == null) {
+                // 首检失败需要回滚换模，避免污染全局资源状态
+                mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                return null;
+            }
+            Date delayedSwitchStartTime = resolveDelayedSwitchStartTime(machine, mouldChangeStartTime, inspectionTime);
+            if (!delayedSwitchStartTime.after(mouldChangeStartTime)) {
+                break;
+            }
+            inspectionBalance.rollbackInspection(context, inspectionTime);
             mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+            mouldChangeStartTime = null;
+            mouldChangeCompleteTime = null;
+            inspectionTime = null;
+            candidateSwitchStartTime = delayedSwitchStartTime;
+        }
+        if (mouldChangeStartTime == null || inspectionTime == null) {
             return null;
         }
         // 业务口径：换模总时长已包含首检时长，局部搜索与主流程保持一致，不再额外 +FIRST_INSPECTION_HOURS
@@ -421,7 +443,8 @@ public class LocalSearchMachineAllocatorStrategy {
                 continue;
             }
 
-            int allocationQty = Math.min(remainingQty, shiftMaxQty);
+            int allocationQty = ShiftCapacityResolverUtil.normalizeAllocatedShiftQty(
+                    Math.min(remainingQty, shiftMaxQty), shiftMaxQty, mouldQty);
             if (allocationQty <= 0) {
                 continue;
             }
@@ -462,6 +485,37 @@ public class LocalSearchMachineAllocatorStrategy {
         }
         return new ArrayList<>(MachineCleaningOverlapUtil.excludeOverlapWindows(
                 machine.getCleaningWindowList(), switchStartTime, firstProductionStartTime));
+    }
+
+    /**
+     * 解析喷砂清洗导致的切换顺延起点。
+     *
+     * @param machine 候选机台
+     * @param switchStartTime 候选切换开始时间
+     * @param productionStartTime 候选开产时间
+     * @return 顺延后的切换开始时间
+     */
+    private Date resolveDelayedSwitchStartTime(MachineScheduleDTO machine,
+                                               Date switchStartTime,
+                                               Date productionStartTime) {
+        if (machine == null) {
+            return switchStartTime;
+        }
+        return MachineCleaningOverlapUtil.resolveDelayedSwitchStartBySandBlast(
+                machine.getCleaningWindowList(), switchStartTime, productionStartTime);
+    }
+
+    /**
+     * 计算喷砂重叠场景下的最大顺延重试次数。
+     *
+     * @param machine 候选机台
+     * @return 重试次数
+     */
+    private int resolveMaxSwitchDelayRetryCount(MachineScheduleDTO machine) {
+        if (machine == null || CollectionUtils.isEmpty(machine.getCleaningWindowList())) {
+            return MIN_SWITCH_DELAY_RETRY_COUNT;
+        }
+        return Math.max(machine.getCleaningWindowList().size() + 1, MIN_SWITCH_DELAY_RETRY_COUNT);
     }
 
     /**

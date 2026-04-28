@@ -18,13 +18,14 @@ import java.util.Objects;
 
 /**
  * 班次产能解析工具。
- * <p>统一处理机台模台数、满班班产和残班折算口径。</p>
+ * <p>统一处理机台模台数、整班/残班产能折算、停机清洗扣减，以及完工时间顺延等时间口径。</p>
+ * <p>本类的核心职责是把“时间窗”换算成“可排量”或“完工时刻”，避免各策略类重复实现秒级计算。</p>
  *
  * @author APS
  */
 public final class ShiftCapacityResolverUtil {
 
-    /** 默认模台数 */
+    /** 默认模台数。主数据缺失时按单模处理，避免直接算出 0 导致整条结果不可排。 */
     private static final int DEFAULT_MOULD_QTY = 1;
     /** 每分钟秒数 */
     private static final int SECONDS_PER_MINUTE = 60;
@@ -59,6 +60,7 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 按班次和实际开产时间解析班次产能。
+     * <p>适用于“已知班次对象 + 已知残班起点”的场景：先算出该班次剩余秒数，再交给统一折算公式处理。</p>
      *
      * @param shift 班次
      * @param effectiveStartTime 实际开产时间
@@ -89,6 +91,8 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 解析忽略清洗扣量时的首个可排产开始时间。
+     * <p>这里故意只扣设备停机，不扣清洗。用途是先判断“机台从哪个班开始具备排产可能”，
+     * 后续再单独把清洗窗口从可排量里扣掉，避免把“起排判断”和“扣量判断”混在一起。</p>
      *
      * @param devicePlanShutList 设备停机列表
      * @param machineCode 机台编号
@@ -152,6 +156,9 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 按统一业务口径解析班次产能。
+     * <p>当前口径分两类：</p>
+     * <p>1. 有班产主数据：按“整班班产 × 可用时间占比”折算，使用 {@link RoundingMode#DOWN} 向下取整；</p>
+     * <p>2. 无班产主数据：按“可完成硫化周期数 × 模台数”回退计算。</p>
      *
      * @param shiftCapacity 班产
      * @param lhTimeSeconds 硫化时长（秒）
@@ -175,6 +182,7 @@ public final class ShiftCapacityResolverUtil {
         }
 
         // 有班产主数据时，按整班班产基准做残班折算。
+        // 这里向下取整，表示“只保留已被有效时间完全覆盖的计划量”，不把零头时间提前算成完整产出。
         if (shiftCapacity > 0) {
             if (shiftDurationSeconds <= 0) {
                 return shiftCapacity;
@@ -185,7 +193,7 @@ public final class ShiftCapacityResolverUtil {
                     .intValue();
         }
 
-        // 无班产主数据时，按硫化时长与模台数回退计算。
+        // 无班产主数据时，按完整硫化周期数回退计算，仍然只统计可完整完成的周期。
         int resolvedMouldQty = resolveMachineMouldQty(mouldQty);
         if (lhTimeSeconds <= 0 || resolvedMouldQty <= 0) {
             return 0;
@@ -195,6 +203,7 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 解析班次总时长（秒）。
+     * <p>优先使用班次配置中的时长字段；缺失时再退回到开始/结束时间差，保持对历史配置兼容。</p>
      *
      * @param shift 班次
      * @return 班次总时长（秒）
@@ -217,6 +226,7 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 计算机台在指定时间窗内被计划停机占用的总秒数。
+     * <p>同一机台可能存在多条停机记录，本方法会先裁剪到目标时间窗，再做区间合并，避免重复扣秒。</p>
      *
      * @param devicePlanShutList 设备计划停机列表
      * @param machineCode 机台编号
@@ -285,6 +295,7 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 计算机台在指定时间窗内扣减计划停机后的净可用秒数。
+     * <p>这里的“可用”只排除设备停机，不排除清洗。常用于先判断某班是否具备基本开产条件。</p>
      *
      * @param devicePlanShutList 设备计划停机列表
      * @param machineCode 机台编号
@@ -309,6 +320,7 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 计算机台在指定时间窗内扣减计划停机和清洗后的净生产秒数。
+     * <p>与 {@link #resolveNetAvailableSeconds(List, String, Date, Date)} 的区别是：这里会把清洗窗口也一并视为不可生产时间。</p>
      *
      * @param devicePlanShutList 设备停机计划
      * @param cleaningWindowList 清洗时间窗口
@@ -336,6 +348,8 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 计算扣减停机与清洗后的班次最大计划量。
+     * <p>先按设备停机扣出“停机后的最大产能”，再减去清洗损失量。</p>
+     * <p>之所以分两步，是因为干冰和喷砂的扣量口径不同：干冰按固定损失数折算，喷砂按时间占比折算。</p>
      *
      * @param devicePlanShutList 设备停机计划
      * @param cleaningWindowList 清洗时间窗口
@@ -375,6 +389,7 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 计算班次内当前计划量对应的实际结束时间。
+     * <p>这里不是简单按“班次内占比”直接推时刻，而是先把计划量换算成所需净生产秒数，再把停机/清洗空档顺延进去。</p>
      *
      * @param devicePlanShutList 设备停机计划
      * @param cleaningWindowList 清洗时间窗口
@@ -481,6 +496,8 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 推导考虑停机与清洗空档后的完工时间。
+     * <p>语义与 {@link #resolveCompletionTimeWithPlannedStops(List, String, Date, long)} 一致，
+     * 只是把清洗窗口也当作不可生产时间一起顺延。</p>
      *
      * @param devicePlanShutList 设备停机计划
      * @param cleaningWindowList 清洗时间窗口
@@ -534,6 +551,7 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 计算指定时间窗内的停机与清洗重叠秒数。
+     * <p>返回的是“所有不可生产区间并集”的总秒数，不会因为停机与清洗重叠而重复累计。</p>
      *
      * @param devicePlanShutList 设备停机计划
      * @param cleaningWindowList 清洗时间窗口
@@ -569,6 +587,7 @@ public final class ShiftCapacityResolverUtil {
                 || !windowStartTime.before(windowEndTime)) {
             return 0;
         }
+        // 先收集停机区间，后面计算清洗损失时要扣掉“清洗与停机重叠”的部分，避免双重扣量。
         List<Date[]> stopIntervals = collectMergedPlannedStopIntervals(
                 devicePlanShutList, machineCode, windowStartTime, windowEndTime);
         int cleaningLossQty = 0;
@@ -591,6 +610,7 @@ public final class ShiftCapacityResolverUtil {
         if (dryIceLossQty <= 0 || dryIceDurationSeconds <= 0) {
             return totalLossQty;
         }
+        // 干冰按“标准清洗总损失量 × 实际重叠时长占比”折算，不直接复用班产。
         List<Date[]> dryIceIntervals = collectMergedCleaningIntervals(
                 cleaningWindowList, CleaningTypeEnum.DRY_ICE.getCode(), windowStartTime, windowEndTime);
         for (Date[] dryIceInterval : dryIceIntervals) {
@@ -616,6 +636,7 @@ public final class ShiftCapacityResolverUtil {
                                                int mouldQty,
                                                long shiftDurationSeconds) {
         int totalLossQty = 0;
+        // 喷砂按“清洗重叠时长对应能生产多少条”来扣减，因此直接复用统一班产折算公式。
         List<Date[]> sandBlastIntervals = collectMergedCleaningIntervals(
                 cleaningWindowList, CleaningTypeEnum.SAND_BLAST.getCode(), windowStartTime, windowEndTime);
         for (Date[] sandBlastInterval : sandBlastIntervals) {
@@ -642,10 +663,14 @@ public final class ShiftCapacityResolverUtil {
         }
         scopedCleaningIntervals.add(new Date[]{overlapStartTime, overlapEndTime});
         long cleaningOverlapSeconds = resolveIntervalDurationSeconds(scopedCleaningIntervals);
+        // 清洗与停机重叠的时间已经在停机侧扣过，这里需要剔除，避免再次计入清洗损失。
         long duplicatedStopSeconds = resolveIntervalIntersectionSeconds(scopedCleaningIntervals, stopIntervals);
         return Math.max(cleaningOverlapSeconds - duplicatedStopSeconds, 0L);
     }
 
+    /**
+     * 收集并合并“停机 + 清洗”的所有不可生产区间。
+     */
     private static List<Date[]> collectMergedDowntimeIntervals(List<MdmDevicePlanShut> devicePlanShutList,
                                                                List<MachineCleaningWindowDTO> cleaningWindowList,
                                                                String machineCode,
@@ -659,6 +684,10 @@ public final class ShiftCapacityResolverUtil {
         return mergeIntervals(downtimeIntervals);
     }
 
+    /**
+     * 收集并合并指定时间窗内的停机区间。
+     * <p>windowEndTime 允许为 null，表示一直统计到停机记录自身结束时刻。</p>
+     */
     private static List<Date[]> collectMergedPlannedStopIntervals(List<MdmDevicePlanShut> devicePlanShutList,
                                                                   String machineCode,
                                                                   Date windowStartTime,
@@ -688,6 +717,10 @@ public final class ShiftCapacityResolverUtil {
         return mergeIntervals(stopIntervals);
     }
 
+    /**
+     * 收集并合并指定时间窗内的清洗区间。
+     * <p>cleanType 为空时表示不过滤清洗类型，统一返回所有清洗窗口。</p>
+     */
     private static List<Date[]> collectMergedCleaningIntervals(List<MachineCleaningWindowDTO> cleaningWindowList,
                                                                String cleanType,
                                                                Date windowStartTime,
@@ -718,6 +751,9 @@ public final class ShiftCapacityResolverUtil {
         return mergeIntervals(cleaningIntervals);
     }
 
+    /**
+     * 合并有交叉或首尾相接的区间，统一输出不重叠区间列表。
+     */
     private static List<Date[]> mergeIntervals(List<Date[]> intervals) {
         List<Date[]> mergedIntervals = new ArrayList<>();
         if (CollectionUtils.isEmpty(intervals)) {
@@ -749,6 +785,9 @@ public final class ShiftCapacityResolverUtil {
         return mergedIntervals;
     }
 
+    /**
+     * 统计区间列表总时长（秒）。
+     */
     private static long resolveIntervalDurationSeconds(List<Date[]> intervals) {
         long totalSeconds = 0L;
         for (Date[] interval : intervals) {
@@ -757,6 +796,10 @@ public final class ShiftCapacityResolverUtil {
         return Math.max(totalSeconds, 0L);
     }
 
+    /**
+     * 统计两组区间的交集总时长（秒）。
+     * <p>用于识别“清洗已经被停机覆盖”的重叠部分，避免重复扣减。</p>
+     */
     private static long resolveIntervalIntersectionSeconds(List<Date[]> leftIntervals, List<Date[]> rightIntervals) {
         if (CollectionUtils.isEmpty(leftIntervals) || CollectionUtils.isEmpty(rightIntervals)) {
             return 0L;
@@ -781,6 +824,9 @@ public final class ShiftCapacityResolverUtil {
         return Math.max(overlapSeconds, 0L);
     }
 
+    /**
+     * 计算单个时间区间时长（秒）。
+     */
     private static long intervalDurationSeconds(Date startTime, Date endTime) {
         if (Objects.isNull(startTime) || Objects.isNull(endTime) || !startTime.before(endTime)) {
             return 0L;
@@ -788,6 +834,9 @@ public final class ShiftCapacityResolverUtil {
         return (endTime.getTime() - startTime.getTime()) / 1000L;
     }
 
+    /**
+     * 取两个时间中的较晚值。
+     */
     private static Date later(Date left, Date right) {
         if (left == null) {
             return right;
@@ -798,6 +847,9 @@ public final class ShiftCapacityResolverUtil {
         return left.after(right) ? left : right;
     }
 
+    /**
+     * 取两个时间中的较早值。
+     */
     private static Date earlier(Date left, Date right) {
         if (left == null) {
             return right;

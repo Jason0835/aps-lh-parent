@@ -77,9 +77,9 @@ class MachineStateInitRegressionTest {
 
         MdmDevicePlanShut repair = new MdmDevicePlanShut();
         repair.setMachineCode("M1");
-        repair.setMachineStopType("05");
-        repair.setBeginDate(dateTime(2026, 4, 12, 10, 0));
-        repair.setEndDate(dateTime(2026, 4, 12, 18, 0));
+        repair.setMachineStopType("06");
+        repair.setBeginDate(dateTime(2026, 4, 13, 10, 0));
+        repair.setEndDate(dateTime(2026, 4, 13, 18, 0));
         context.setDevicePlanShutList(Collections.singletonList(repair));
 
         LhScheduleResult previous = new LhScheduleResult();
@@ -101,13 +101,13 @@ class MachineStateInitRegressionTest {
         assertTrue(machine.isHasMaintenancePlan());
         assertTrue(machine.isHasRepairPlan());
         assertNotNull(machine.getMaintenancePlanTime());
-        assertEquals(dateTime(2026, 4, 12, 10, 0), machine.getRepairPlanTime());
+        assertEquals(dateTime(2026, 4, 13, 10, 0), machine.getRepairPlanTime());
         assertEquals(dateTime(2026, 4, 11, 20, 0), machine.getEstimatedEndTime());
         MachineCleaningWindowDTO firstCleaningWindow = machine.getCleaningWindowList().get(0);
         assertEquals("02", firstCleaningWindow.getCleanType());
         assertEquals("R", firstCleaningWindow.getLeftRightMould());
         assertEquals(dateTime(2026, 4, 12, 7, 30), firstCleaningWindow.getCleanStartTime());
-        assertEquals(dateTime(2026, 4, 12, 17, 30), firstCleaningWindow.getCleanEndTime());
+        assertEquals(dateTime(2026, 4, 12, 19, 30), firstCleaningWindow.getCleanEndTime());
         assertEquals(dateTime(2026, 4, 12, 17, 30), firstCleaningWindow.getReadyTime());
 
         MachineCleaningWindowDTO secondCleaningWindow = machine.getCleaningWindowList().get(1);

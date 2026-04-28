@@ -173,8 +173,8 @@ public class DataInitHandler extends AbsScheduleStepHandler {
                         dto.setStopType(planShut.getMachineStopType());
                     }
                     MachineStopTypeEnum stopTypeEnum = MachineStopTypeEnum.getByCode(planShut.getMachineStopType());
-                    if (stopTypeEnum == MachineStopTypeEnum.PLANNED_REPAIR
-                            || stopTypeEnum == MachineStopTypeEnum.TEMPORARY_FAULT) {
+                    // 计划性维修仅保留停机窗口，避免在初始化阶段直接抬高机台准备就绪时间。
+                    if (stopTypeEnum == MachineStopTypeEnum.TEMPORARY_FAULT) {
                         dto.setHasRepairPlan(true);
                         dto.setRepairPlanTime(earlier(dto.getRepairPlanTime(), planShut.getBeginDate()));
                     }

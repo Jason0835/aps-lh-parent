@@ -200,28 +200,46 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @return 已完成量
      */
     private int calculateFinishedQty(LhScheduleContext context, FactoryMonthPlanProductionFinalResult plan) {
-        // 优先使用基础数据阶段按物料汇总好的月累计完成量（截至目标排产日期）。
+        // 严格使用基础数据阶段按物料汇总好的月累计完成量（截至窗口T-1，含当天）。
         String materialCode = plan.getMaterialCode();
         if (StringUtils.isNotEmpty(materialCode)) {
             Integer monthFinishedQty = context.getMaterialMonthFinishedQtyMap().get(materialCode);
-            if (monthFinishedQty != null) {
+            if (Objects.nonNull(monthFinishedQty)) {
                 return Math.max(monthFinishedQty, 0);
             }
-            Integer dayFinishedQty = context.getMaterialDayFinishedQtyMap().get(
-                    buildMaterialDayKey(materialCode, resolvePreviousScheduleDate(context)));
-            if (Objects.nonNull(dayFinishedQty)) {
-                return Math.max(dayFinishedQty, 0);
-            }
-        }
+            if (canFallbackToPreviousFinishedQty(context)) {
+                Integer dayFinishedQty = context.getMaterialDayFinishedQtyMap().get(
+                        buildMaterialDayKey(materialCode, resolvePreviousScheduleDate(context)));
+                if (Objects.nonNull(dayFinishedQty)) {
+                    return Math.max(dayFinishedQty, 0);
+                }
 
-        // 兜底：从前日排程结果按班次完成量字段汇总。
-        int finishedQty = 0;
-        for (LhScheduleResult result : context.getPreviousScheduleResultList()) {
-            if (StringUtils.isNotEmpty(materialCode) && materialCode.equals(result.getMaterialCode())) {
-                finishedQty += resolveShiftFinishedQty(result, context);
+                int finishedQty = 0;
+                for (LhScheduleResult result : context.getPreviousScheduleResultList()) {
+                    if (materialCode.equals(result.getMaterialCode())) {
+                        finishedQty += resolveShiftFinishedQty(result, context);
+                    }
+                }
+                return finishedQty;
             }
         }
-        return finishedQty;
+        return 0;
+    }
+
+    /**
+     * 仅当前一日基线与窗口T-1一致时，才允许回退使用前一日完成量/前一日排程结果。
+     *
+     * @param context 排程上下文
+     * @return true-允许回退
+     */
+    private boolean canFallbackToPreviousFinishedQty(LhScheduleContext context) {
+        if (Objects.isNull(context.getScheduleDate())) {
+            return false;
+        }
+        Date previousScheduleDate = resolvePreviousScheduleDate(context);
+        Date windowPreviousDate = LhScheduleTimeUtil.clearTime(LhScheduleTimeUtil.addDays(context.getScheduleDate(), -1));
+        return Objects.nonNull(previousScheduleDate)
+                && previousScheduleDate.equals(windowPreviousDate);
     }
 
     /**

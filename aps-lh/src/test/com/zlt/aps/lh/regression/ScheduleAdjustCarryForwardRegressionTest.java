@@ -78,6 +78,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         context.setPreviousScheduleResultList(Collections.singletonList(previous));
 
         context.getMaterialDayFinishedQtyMap().put("MAT-1_2026-04-12", 60);
+        context.getMaterialMonthFinishedQtyMap().put("MAT-1", 60);
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 
@@ -161,6 +162,63 @@ class ScheduleAdjustCarryForwardRegressionTest {
         assertEquals(120, sku.getSurplusQty());
         assertEquals(100, sku.getWindowPlanQty());
         assertEquals(100, sku.getTargetScheduleQty().intValue());
+    }
+
+    @Test
+    void doHandle_shouldNotFallbackToPreviousDayFinishedQtyWhenMonthAccumulatedMissing() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 20));
+        context.setScheduleTargetDate(date(2026, 4, 22));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-T1");
+        plan.setMaterialDesc("MAT-T1-DESC");
+        plan.setStructureName("S-T1");
+        plan.setSpecifications("SPEC-T1");
+        plan.setTotalQty(140);
+        plan.setDay20(22);
+        plan.setDay21(22);
+        plan.setDay22(30);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        // 仅有目标日前一日完成量；月累计（截至窗口T-1）缺失时不应回退使用此值参与余量计算。
+        context.getMaterialDayFinishedQtyMap().put("MAT-T1_2026-04-21", 66);
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-T1").get(0);
+        assertEquals(140, sku.getSurplusQty());
+    }
+
+    @Test
+    void doHandle_shouldFallbackToPreviousDayFinishedQtyWhenPreviousBaselineMatchesWindowTMinusOne() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 22));
+        context.setScheduleTargetDate(date(2026, 4, 22));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-SAFE");
+        plan.setMaterialDesc("MAT-SAFE-DESC");
+        plan.setStructureName("S-SAFE");
+        plan.setSpecifications("SPEC-SAFE");
+        plan.setTotalQty(140);
+        plan.setDay22(30);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        context.getMaterialDayFinishedQtyMap().put("MAT-SAFE_2026-04-21", 66);
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-SAFE").get(0);
+        assertEquals(74, sku.getSurplusQty());
     }
 
     @Test

@@ -168,6 +168,82 @@ class ResultValidationHandlerLeftRightMouldRegressionTest {
     }
 
     @Test
+    void generateMouldChangePlan_shouldStoreMorningShiftCodeForShiftIndex() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.setInitialMachineScheduleMap(new LinkedHashMap<>());
+
+        LhScheduleResult result = buildChangeResult("K2024", "MAT-MORNING", "早班物料",
+                dateTime(2026, 4, 17, 7, 0), dateTime(2026, 4, 17, 14, 0));
+        Date mouldChangeStartTime = dateTime(2026, 4, 17, 6, 0);
+        ReflectionTestUtils.setField(result, "mouldChangeStartTime", mouldChangeStartTime);
+        context.getScheduleResultList().add(result);
+
+        ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
+
+        assertEquals(1, context.getMouldChangePlanList().size());
+        assertEquals("02", context.getMouldChangePlanList().get(0).getClassIndex());
+    }
+
+    @Test
+    void generateMouldChangePlan_shouldStoreAfternoonShiftCodeForShiftIndex() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.setInitialMachineScheduleMap(new LinkedHashMap<>());
+
+        LhScheduleResult result = buildChangeResult("K2025", "MAT-AFTERNOON", "中班物料",
+                dateTime(2026, 4, 17, 15, 0), dateTime(2026, 4, 17, 22, 0));
+        Date mouldChangeStartTime = dateTime(2026, 4, 17, 14, 0);
+        ReflectionTestUtils.setField(result, "mouldChangeStartTime", mouldChangeStartTime);
+        context.getScheduleResultList().add(result);
+
+        ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
+
+        assertEquals(1, context.getMouldChangePlanList().size());
+        assertEquals("03", context.getMouldChangePlanList().get(0).getClassIndex());
+    }
+
+    @Test
+    void generateMouldChangePlan_shouldStoreNightShiftCodeAcrossDays() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.setInitialMachineScheduleMap(new LinkedHashMap<>());
+
+        LhScheduleResult result = buildChangeResult("K2026", "MAT-NIGHT", "夜班物料",
+                dateTime(2026, 4, 18, 1, 0), dateTime(2026, 4, 18, 6, 0));
+        Date mouldChangeStartTime = dateTime(2026, 4, 17, 22, 0);
+        ReflectionTestUtils.setField(result, "mouldChangeStartTime", mouldChangeStartTime);
+        context.getScheduleResultList().add(result);
+
+        ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
+
+        assertEquals(1, context.getMouldChangePlanList().size());
+        assertEquals("01", context.getMouldChangePlanList().get(0).getClassIndex());
+    }
+
+    @Test
+    void generateMouldChangePlan_shouldKeepClassIndexEmptyWhenTimeOutsideShiftWindow() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        context.setMachineScheduleMap(new LinkedHashMap<>());
+        context.setInitialMachineScheduleMap(new LinkedHashMap<>());
+
+        LhScheduleResult result = buildChangeResult("K2027", "MAT-UNKNOWN", "窗口外物料",
+                dateTime(2026, 4, 20, 7, 0), dateTime(2026, 4, 20, 14, 0));
+        Date mouldChangeStartTime = dateTime(2026, 4, 20, 6, 0);
+        ReflectionTestUtils.setField(result, "mouldChangeStartTime", mouldChangeStartTime);
+        context.getScheduleResultList().add(result);
+
+        ReflectionTestUtils.invokeMethod(handler, "generateMouldChangePlan", context);
+
+        assertEquals(1, context.getMouldChangePlanList().size());
+        assertEquals(null, context.getMouldChangePlanList().get(0).getClassIndex());
+    }
+
+    @Test
     void generateMouldChangePlan_shouldKeepInheritedPlanAndOnlyAppendNewPlan() {
         ResultValidationHandler handler = new ResultValidationHandler();
         LhScheduleContext context = newContext();

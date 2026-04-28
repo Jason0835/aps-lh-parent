@@ -5,6 +5,8 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
+import com.zlt.aps.lh.api.enums.ShiftEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.component.IncrSerialGenerator;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -167,6 +169,7 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             Date plannedMouldChangeStartTime = resolvePlannedMouldChangeStartTime(result);
             plan.setPlanDate(plannedMouldChangeStartTime);
             plan.setPlanOrder(planOrder++);
+            plan.setClassIndex(resolvePlanShiftCode(context, plannedMouldChangeStartTime));
             plan.setLhMachineCode(result.getLhMachineCode());
             plan.setLhMachineName(result.getLhMachineName());
             plan.setLeftRightMould(LeftRightMouldUtil.resolveLeftRightMould(
@@ -377,6 +380,31 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
             return result.getMouldChangeStartTime();
         }
         return state != null ? state.getEstimatedEndTime() : null;
+    }
+
+    /**
+     * 根据模具交替开始时间解析模具交替计划班别编码。
+     *
+     * @param context 排程上下文
+     * @param plannedMouldChangeStartTime 模具交替开始时间
+     * @return 班别编码，未命中班次时返回null
+     */
+    private String resolvePlanShiftCode(LhScheduleContext context, Date plannedMouldChangeStartTime) {
+        if (context == null || plannedMouldChangeStartTime == null || context.getScheduleTargetDate() == null) {
+            return null;
+        }
+        int shiftIndex = LhScheduleTimeUtil.getShiftIndex(
+                context, context.getScheduleTargetDate(), plannedMouldChangeStartTime);
+        if (shiftIndex <= 0) {
+            return null;
+        }
+        LhShiftConfigVO shift = LhScheduleTimeUtil.getShiftByIndex(
+                context, context.getScheduleTargetDate(), shiftIndex);
+        if (shift == null) {
+            return null;
+        }
+        ShiftEnum shiftEnum = shift.resolveShiftTypeEnum();
+        return shiftEnum != null ? shiftEnum.getCode() : null;
     }
 
     private RollingMachineState buildInitialState(LhScheduleContext context, String machineCode) {

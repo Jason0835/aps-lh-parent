@@ -16,7 +16,7 @@ import com.zlt.aps.lh.mapper.FactoryMonthPlanProductionFinalResultMapper;
 import com.zlt.aps.lh.mapper.LhDayFinishQtyMapper;
 import com.zlt.aps.lh.mapper.LhMachineInfoMapper;
 import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
-import com.zlt.aps.lh.mapper.LhMouldChangePlanMapper;
+import com.zlt.aps.lh.mapper.LhMouldChangePlanEntityMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
@@ -86,7 +86,7 @@ class ScheduleDataWindowRegressionTest {
     @Mock
     private LhMouldCleanPlanMapper lhMouldCleanPlanMapper;
     @Mock
-    private LhMouldChangePlanMapper lhMouldChangePlanMapper;
+    private LhMouldChangePlanEntityMapper lhMouldChangePlanMapper;
     @Mock
     private MdmMonthSurplusMapper monthSurplusMapper;
     @Mock

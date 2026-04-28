@@ -2,7 +2,7 @@
 <!DOCTYPE mapper
         PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
-<mapper namespace="com.zlt.aps.lh.mapper.LhMouldChangePlanMapper">
+<mapper namespace="com.zlt.aps.lh.mapper.LhMouldChangePlanEntityMapper">
 
     <insert id="insertBatch">
         INSERT INTO T_LH_MOULD_CHANGE_PLAN (

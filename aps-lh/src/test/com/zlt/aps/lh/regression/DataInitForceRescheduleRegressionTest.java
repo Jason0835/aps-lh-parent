@@ -77,12 +77,12 @@ class DataInitForceRescheduleRegressionTest {
     }
 
     @Test
-    void handle_shouldApplyRollingHandoffWhenForceRescheduleMissing() {
+    void handle_shouldSkipRollingHandoffWhenForceRescheduleMissing() {
         LhScheduleContext context = buildContext(null);
 
         handler.handle(context);
 
-        verify(rollingScheduleHandoffService).apply(context);
+        verify(rollingScheduleHandoffService, never()).apply(any());
     }
 
     private LhScheduleContext buildContext(String forceReschedule) {

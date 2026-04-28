@@ -298,6 +298,7 @@ class ScheduleDataWindowRegressionTest {
         context.setFactoryCode("FC01");
         context.setScheduleTargetDate(target);
         context.setScheduleDate(scheduleDate);
+        context.getLhParamsMap().put(LhScheduleParamConstant.FORCE_RESCHEDULE, "0");
 
         lhBaseDataService.loadAllBaseData(context);
 
@@ -343,6 +344,7 @@ class ScheduleDataWindowRegressionTest {
         context.setFactoryCode("FC01");
         context.setScheduleTargetDate(target);
         context.setScheduleDate(scheduleDate);
+        context.getLhParamsMap().put(LhScheduleParamConstant.FORCE_RESCHEDULE, "0");
 
         lhBaseDataService.loadAllBaseData(context);
 

@@ -198,8 +198,8 @@ public final class LhScheduleConstant {
     public static final int ENABLE_FULL_CAPACITY_SCHEDULING = 1;
     /** 满排模式是否按余量命中收尾规则2默认值（0-关闭，1-开启） */
     public static final int ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE = 1;
-    /** 是否强制重排默认值（0-否，1-是） */
-    public static final int FORCE_RESCHEDULE = 0;
+    /** 是否强制重排默认值（0-否，1-是，默认启用强制重排） */
+    public static final int FORCE_RESCHEDULE = 1;
     /** 是否强制重排启用值（1-是） */
     public static final int FORCE_RESCHEDULE_ENABLED = 1;
     /** MES在机信息往前追溯天数默认值（运行期以硫化参数 MACHINE_ONLINE_LOOKBACK_DAYS 为准） */

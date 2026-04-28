@@ -710,6 +710,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
     private static LhScheduleConfig createConfig(String fullCapacityMode) {
         Map<String, String> paramMap = new HashMap<>(4);
         paramMap.put(LhScheduleParamConstant.ENABLE_FULL_CAPACITY_SCHEDULING, fullCapacityMode);
+        paramMap.put(LhScheduleParamConstant.FORCE_RESCHEDULE, "0");
         return new LhScheduleConfig(paramMap);
     }
 

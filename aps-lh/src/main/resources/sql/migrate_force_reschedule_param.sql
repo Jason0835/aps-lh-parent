@@ -1,6 +1,6 @@
 -- ============================================
 -- FORCE_RESCHEDULE 迁移脚本
--- 目标：为现有工厂补齐“是否强制重排”参数，默认值为 0
+-- 目标：为现有工厂补齐“是否强制重排”参数，默认值为 1
 -- ============================================
 
 INSERT INTO T_LH_PARAMS (
@@ -17,7 +17,7 @@ INSERT INTO T_LH_PARAMS (
 )
 SELECT t.FACTORY_CODE,
        'FORCE_RESCHEDULE',
-       '0',
+       '1',
        '是否强制重排',
        '0-否，走滚动衔接；1-是，窗口内全部重排',
        'system',
@@ -39,7 +39,7 @@ LEFT JOIN T_LH_PARAMS p
 WHERE p.ID IS NULL;
 
 UPDATE T_LH_PARAMS
-SET PARAM_VALUE = '0',
+SET PARAM_VALUE = '1',
     PARAM_NAME = '是否强制重排',
     REMARK = '0-否，走滚动衔接；1-是，窗口内全部重排',
     UPDATE_BY = 'system',

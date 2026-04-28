@@ -38,7 +38,7 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 ('116', 'SCHEDULE_DAYS', '3', '排程天数', '排程计划覆盖天数'),
 ('116', 'ENABLE_FULL_CAPACITY_SCHEDULING', '1', '是否按产能满排', '0-按需求排产，1-按产能满排'),
 ('116', 'ENABLE_ENDING_BY_SURPLUS_IN_FULL_MODE', '1', '满排按余量触发收尾规则2', '0-关闭，1-开启；开启后满排模式按余量与窗口产能比较判收尾'),
-('116', 'FORCE_RESCHEDULE', '0', '是否强制重排', '0-否，走滚动衔接；1-是，窗口内全部重排'),
+('116', 'FORCE_RESCHEDULE', '1', '是否强制重排', '0-否，走滚动衔接；1-是，窗口内全部重排'),
 ('116', 'MACHINE_ONLINE_LOOKBACK_DAYS', '90', '往前追溯天数', 'MES在机信息从T-1开始向前回溯的最大天数'),
 ('116', 'ENDING_DETECT_DAYS', '3', '收尾判定天数', '触发收尾判定的天数'),
 ('116', 'ENDING_TIME_TOLERANCE_MINUTES', '20', '机台收尾时间容差', '单位：分钟'),

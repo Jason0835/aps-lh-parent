@@ -121,8 +121,8 @@ class ShiftCapacityResolverUtilTest {
         Date completionTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
                 null, cleaningWindowList, "K1514", shiftStart, shiftEnd, 12, 12);
 
-        assertEquals(12, shiftQty, "干冰清洗落在班次内时，满班 18 应按损失 6 条扣减为 12");
-        assertEquals(shiftEnd, completionTime, "干冰清洗导致班次满量压缩后，12 条应在班末完工");
+        assertEquals(11, shiftQty, "干冰清洗落在班次内时，应按剩余 5/8 有效时间折算班产");
+        assertEquals(shiftEnd, completionTime, "干冰清洗导致班次满量压缩后，11 条应在班末完工");
     }
 
     @Test
@@ -194,7 +194,27 @@ class ShiftCapacityResolverUtilTest {
         int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
                 null, cleaningWindowList, "K1514", shiftStart, shiftEnd, 18, 1600, 1, 8 * 3600L, 6, 3);
 
-        assertEquals(14, shiftQty, "干冰仅重叠 2 小时时，应按 3 小时基准扣减 4 条而不是整次 6 条");
+        assertEquals(13, shiftQty, "干冰仅重叠 2 小时时，应按剩余有效生产时间折算班产");
+    }
+
+    @Test
+    void dryIceCleaningWithinShift_shouldReduceDoubleMouldShiftQtyByRemainingTimeRatio() {
+        Date shiftStart = dateTime(2026, 4, 22, 14, 0);
+        Date shiftEnd = dateTime(2026, 4, 22, 22, 0);
+        List<MachineCleaningWindowDTO> cleaningWindowList = Arrays.asList(
+                buildCleaningWindow("01",
+                        dateTime(2026, 4, 22, 15, 0, 0),
+                        dateTime(2026, 4, 22, 18, 0, 0),
+                        dateTime(2026, 4, 22, 18, 0, 0))
+        );
+
+        int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                null, cleaningWindowList, "K1110", shiftStart, shiftEnd, 22, 2160, 2, 8 * 3600L, 6, 3);
+        Date completionTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
+                null, cleaningWindowList, "K1110", shiftStart, shiftEnd, 12, 12);
+
+        assertEquals(12, shiftQty, "双模机台命中 3 小时干冰时，应按剩余 5/8 时间折算到 12");
+        assertEquals(shiftEnd, completionTime, "按剩余时间折算后的 12 条应在班末完工");
     }
 
     private LhShiftConfigVO findMorningShift(Date scheduleDate) {

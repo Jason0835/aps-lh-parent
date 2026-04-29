@@ -42,9 +42,9 @@ class CleaningPlanScheduleImpactRegressionTest {
                 context, result, shifts, shiftStartTime, 18, 1600, 1, 18, machine.getCleaningWindowList());
         ReflectionTestUtils.invokeMethod(strategy, "refreshResultSummary", context, result);
 
-        assertEquals(6, remainingQty.intValue(), "单班排产时，干冰清洗扣量后仍应保留未排数量");
-        assertEquals(12, result.getDailyPlanQty(), "新增排产班次计划量应扣减干冰清洗损失");
-        assertEquals(12, result.getClass1PlanQty());
+        assertEquals(7, remainingQty.intValue(), "单班排产时，干冰清洗按剩余时间折算后仍应保留未排数量");
+        assertEquals(11, result.getDailyPlanQty(), "新增排产班次计划量应按剩余有效时间折算");
+        assertEquals(11, result.getClass1PlanQty());
         assertEquals(dateTime(2026, 4, 21, 14, 0, 0), result.getSpecEndTime());
         assertEquals(result.getSpecEndTime(), result.getTdaySpecEndTime());
     }
@@ -62,10 +62,10 @@ class CleaningPlanScheduleImpactRegressionTest {
         List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
         ReflectionTestUtils.invokeMethod(strategy, "redistributeShiftQty", context, result, shifts, 18);
 
-        assertEquals(12, result.getDailyPlanQty(), "续作重分配班次计划量应扣减干冰清洗损失");
-        assertEquals(12, result.getClass1PlanQty());
+        assertEquals(11, result.getDailyPlanQty(), "续作重分配班次计划量应按剩余有效时间折算");
+        assertEquals(11, result.getClass1PlanQty());
         assertNotNull(result.getSpecEndTime());
-        assertEquals(dateTime(2026, 4, 21, 14, 0, 0), result.getSpecEndTime());
+        assertEquals(dateTime(2026, 4, 21, 13, 53, 20), result.getSpecEndTime());
         assertEquals(result.getSpecEndTime(), result.getTdaySpecEndTime());
     }
 
@@ -87,10 +87,10 @@ class CleaningPlanScheduleImpactRegressionTest {
 
         strategy.allocateShiftPlanQty(context);
 
-        assertEquals(12, result.getDailyPlanQty(), "换活字块结果重新分配班次时也应扣减干冰清洗损失");
-        assertEquals(12, result.getClass1PlanQty());
+        assertEquals(11, result.getDailyPlanQty(), "换活字块结果重新分配班次时也应按剩余有效时间折算");
+        assertEquals(11, result.getClass1PlanQty());
         assertNotNull(result.getSpecEndTime());
-        assertEquals(dateTime(2026, 4, 21, 14, 0, 0), result.getSpecEndTime());
+        assertEquals(dateTime(2026, 4, 21, 13, 53, 20), result.getSpecEndTime());
         assertEquals(result.getSpecEndTime(), result.getTdaySpecEndTime());
     }
 

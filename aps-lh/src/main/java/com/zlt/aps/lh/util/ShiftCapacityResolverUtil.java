@@ -349,8 +349,8 @@ public final class ShiftCapacityResolverUtil {
 
     /**
      * 计算扣减停机与清洗后的班次最大计划量。
-     * <p>先按设备停机扣出“停机后的最大产能”，再减去清洗损失量。</p>
-     * <p>之所以分两步，是因为干冰和喷砂的扣量口径不同：干冰按固定损失数折算，喷砂按时间占比折算。</p>
+     * <p>先按设备停机与干冰清洗扣出“剩余有效生产时间”，再减去喷砂清洗损失量。</p>
+     * <p>之所以分两步，是因为当前业务口径不同：干冰按剩余有效时间折算班产，喷砂按清洗重叠时长折算扣量。</p>
      *
      * @param devicePlanShutList 设备停机计划
      * @param cleaningWindowList 清洗时间窗口
@@ -377,16 +377,20 @@ public final class ShiftCapacityResolverUtil {
                                                        int dryIceDurationHours) {
         long stopAdjustedSeconds = resolveNetAvailableSeconds(
                 devicePlanShutList, machineCode, windowStartTime, windowEndTime);
+        List<Date[]> stopIntervals = collectMergedPlannedStopIntervals(
+                devicePlanShutList, machineCode, windowStartTime, windowEndTime);
+        long dryIceAdjustedSeconds = resolveDryIceAdjustedAvailableSeconds(
+                cleaningWindowList, stopIntervals, windowStartTime, windowEndTime, stopAdjustedSeconds);
         int stopAdjustedQty = resolveShiftCapacity(
-                shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds, stopAdjustedSeconds);
+                shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds, dryIceAdjustedSeconds);
         if (stopAdjustedQty <= 0) {
             return 0;
         }
         int cleaningLossQty = resolveCleaningLossQty(
-                devicePlanShutList, cleaningWindowList, machineCode, windowStartTime, windowEndTime,
-                shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds, dryIceLossQty, dryIceDurationHours);
+                cleaningWindowList, stopIntervals, windowStartTime, windowEndTime,
+                shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds);
         int finalQty = Math.max(stopAdjustedQty - cleaningLossQty, 0);
-        boolean shouldNormalizeResidual = (shiftDurationSeconds > 0 && stopAdjustedSeconds < shiftDurationSeconds)
+        boolean shouldNormalizeResidual = (shiftDurationSeconds > 0 && dryIceAdjustedSeconds < shiftDurationSeconds)
                 || cleaningLossQty > 0;
         return normalizeQtyToMouldMultiple(finalQty, mouldQty, shouldNormalizeResidual);
     }
@@ -608,61 +612,44 @@ public final class ShiftCapacityResolverUtil {
         return resolveIntervalDurationSeconds(downtimeIntervals);
     }
 
-    private static int resolveCleaningLossQty(List<MdmDevicePlanShut> devicePlanShutList,
-                                              List<MachineCleaningWindowDTO> cleaningWindowList,
-                                              String machineCode,
+    private static int resolveCleaningLossQty(List<MachineCleaningWindowDTO> cleaningWindowList,
+                                              List<Date[]> stopIntervals,
                                               Date windowStartTime,
                                               Date windowEndTime,
                                               int shiftCapacity,
                                               int lhTimeSeconds,
                                               int mouldQty,
-                                              long shiftDurationSeconds,
-                                              int dryIceLossQty,
-                                              int dryIceDurationHours) {
+                                              long shiftDurationSeconds) {
         if (CollectionUtils.isEmpty(cleaningWindowList)
                 || Objects.isNull(windowStartTime)
                 || Objects.isNull(windowEndTime)
                 || !windowStartTime.before(windowEndTime)) {
             return 0;
         }
-        // 先收集停机区间，后面计算清洗损失时要扣掉“清洗与停机重叠”的部分，避免双重扣量。
-        List<Date[]> stopIntervals = collectMergedPlannedStopIntervals(
-                devicePlanShutList, machineCode, windowStartTime, windowEndTime);
         int cleaningLossQty = 0;
-        cleaningLossQty += resolveDryIceLossQty(
-                cleaningWindowList, stopIntervals, windowStartTime, windowEndTime, dryIceLossQty, dryIceDurationHours);
         cleaningLossQty += resolveSandBlastLossQty(
                 cleaningWindowList, stopIntervals, windowStartTime, windowEndTime,
                 shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds);
         return cleaningLossQty;
     }
 
-    private static int resolveDryIceLossQty(List<MachineCleaningWindowDTO> cleaningWindowList,
-                                            List<Date[]> stopIntervals,
-                                            Date windowStartTime,
-                                            Date windowEndTime,
-                                            int dryIceLossQty,
-                                            int dryIceDurationHours) {
-        int totalLossQty = 0;
-        long dryIceDurationSeconds = (long) Math.max(dryIceDurationHours, 0) * SECONDS_PER_HOUR;
-        if (dryIceLossQty <= 0 || dryIceDurationSeconds <= 0) {
-            return totalLossQty;
+    private static long resolveDryIceAdjustedAvailableSeconds(List<MachineCleaningWindowDTO> cleaningWindowList,
+                                                              List<Date[]> stopIntervals,
+                                                              Date windowStartTime,
+                                                              Date windowEndTime,
+                                                              long availableSeconds) {
+        if (availableSeconds <= 0 || CollectionUtils.isEmpty(cleaningWindowList)) {
+            return Math.max(availableSeconds, 0L);
         }
-        // 干冰按“标准清洗总损失量 × 实际重叠时长占比”折算，不直接复用班产。
+        long dryIceOverlapSeconds = 0L;
         List<Date[]> dryIceIntervals = collectMergedCleaningIntervals(
                 cleaningWindowList, CleaningTypeEnum.DRY_ICE.getCode(), windowStartTime, windowEndTime);
         for (Date[] dryIceInterval : dryIceIntervals) {
             long effectiveOverlapSeconds = resolveEffectiveCleaningOverlapSeconds(
                     dryIceInterval, stopIntervals, windowStartTime, windowEndTime);
-            if (effectiveOverlapSeconds <= 0) {
-                continue;
-            }
-            totalLossQty += BigDecimal.valueOf(dryIceLossQty)
-                    .multiply(BigDecimal.valueOf(effectiveOverlapSeconds))
-                    .divide(BigDecimal.valueOf(dryIceDurationSeconds), 0, RoundingMode.DOWN)
-                    .intValue();
+            dryIceOverlapSeconds += Math.max(effectiveOverlapSeconds, 0L);
         }
-        return totalLossQty;
+        return Math.max(availableSeconds - dryIceOverlapSeconds, 0L);
     }
 
     private static int resolveSandBlastLossQty(List<MachineCleaningWindowDTO> cleaningWindowList,

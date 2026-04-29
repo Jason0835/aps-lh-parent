@@ -1203,11 +1203,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
         int refinedTargetQty = getTargetScheduleQtyResolver().refineTargetQtyByMachineCapacity(
                 context, sku, machine, switchStartTime, startTime, shifts);
+        List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>(MachineCleaningOverlapUtil.excludeOverlapWindows(
+                machine.getCleaningWindowList(), switchStartTime, startTime));
 
         // 按班次分配计划量
         int remaining = refinedTargetQty;
         distributeToShifts(context, result, shifts, startTime,
-                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining);
+                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining, cleaningWindowList);
 
         refreshResultSummary(context, result, shifts);
         result.setRealScheduleDate(context.getScheduleDate());
@@ -1228,11 +1230,16 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                    int shiftCapacity,
                                    int lhTimeSeconds,
                                    int mouldQty,
-                                   int remaining) {
+                                   int remaining,
+                                   List<MachineCleaningWindowDTO> cleaningWindowList) {
         if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0) {
             return remaining;
         }
         Map<Integer, ShiftRuntimeState> stateMap = context.getShiftRuntimeStateMap();
+        int dryIceLossQty = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
+        int dryIceDurationHours = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
 
         boolean started = false;
         for (LhShiftConfigVO shift : shifts) {
@@ -1252,18 +1259,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            long netAvailableSeconds = ShiftCapacityResolverUtil.resolveNetAvailableSeconds(
-                    context.getDevicePlanShutList(), result.getLhMachineCode(), effectiveStart, shift.getShiftEndDateTime());
-            if (netAvailableSeconds <= 0) {
-                continue;
-            }
-
-            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    result.getLhMachineCode(),
+                    effectiveStart,
+                    shift.getShiftEndDateTime(),
                     shiftCapacity,
                     lhTimeSeconds,
                     mouldQty,
                     ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
-                    netAvailableSeconds);
+                    dryIceLossQty,
+                    dryIceDurationHours);
             if (shiftMaxQty <= 0) {
                 continue;
             }
@@ -1273,7 +1280,15 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
-            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shift.getShiftEndDateTime());
+            Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    result.getLhMachineCode(),
+                    effectiveStart,
+                    shift.getShiftEndDateTime(),
+                    shiftQty,
+                    shiftMaxQty);
+            setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shiftPlanEndTime);
             remaining -= shiftQty;
             startTime = null;
 

@@ -254,7 +254,7 @@ class NewSpecProductionStrategyRegressionTest {
     }
 
     @Test
-    void scheduleNewSpecs_shouldDelaySandBlastOverlapUntilCleaningEndTime() throws Exception {
+    void scheduleNewSpecs_shouldIgnoreSandBlastDelayAndOnlyKeepMouldChangeDuration() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, false);
 
@@ -296,20 +296,20 @@ class NewSpecProductionStrategyRegressionTest {
 
         assertEquals(1, context.getScheduleResultList().size(), "重叠场景应正常生成新增换模结果");
         LhScheduleResult result = context.getScheduleResultList().get(0);
-        assertEquals(dateTime(2026, 4, 22, 18, 0), result.getMouldChangeStartTime(),
-                "喷砂与换模重叠时，应顺延到喷砂完整12小时结束后再开始换模");
+        assertEquals(dateTime(2026, 4, 22, 6, 0), result.getMouldChangeStartTime(),
+                "喷砂与换模重叠时，不应再顺延到喷砂结束后才开始换模");
         int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
-        assertEquals(3, firstPlannedShiftIndex, "喷砂重叠顺延后，首个排产班次应落到夜班");
-        assertEquals(dateTime(2026, 4, 23, 2, 0), ShiftFieldUtil.getShiftStartTime(result, firstPlannedShiftIndex),
-                "换模8小时结束后，新增排产应从顺延后的实际开产时刻开始");
-        assertEquals(4, ShiftFieldUtil.getShiftPlanQty(result, firstPlannedShiftIndex).intValue(),
-                "顺延后的首个夜班只应保留剩余4小时对应的产量");
+        assertEquals(2, firstPlannedShiftIndex, "喷砂重叠但不再顺延时，首个排产班次应仍落在当日中班");
+        assertEquals(dateTime(2026, 4, 22, 14, 0), ShiftFieldUtil.getShiftStartTime(result, firstPlannedShiftIndex),
+                "新增排产应只保留换模8小时后的实际开产时刻");
+        assertEquals(8, ShiftFieldUtil.getShiftPlanQty(result, firstPlannedShiftIndex).intValue(),
+                "不再计入喷砂清洗时间后，首个完整中班应保留整班产量");
         assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, firstPlannedShiftIndex),
-                "喷砂顺延后，首个排产班次仍应保留模具清洗+换模原因分析");
+                "喷砂重叠但不再顺延时，首个排产班次仍应保留模具清洗+换模原因分析");
     }
 
     @Test
-    void scheduleNewSpecs_shouldKeepCleaningAnalysisAfterNoMouldChangeDelay() throws Exception {
+    void scheduleNewSpecs_shouldIgnoreSandBlastAndStillRespectNoMouldChangeWindow() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, false);
 
@@ -348,12 +348,12 @@ class NewSpecProductionStrategyRegressionTest {
 
         assertEquals(1, context.getScheduleResultList().size(), "喷砂后进入禁止换模时段时，新增排产仍应正常生成结果");
         LhScheduleResult result = context.getScheduleResultList().get(0);
-        assertEquals(dateTime(2026, 4, 23, 6, 0), result.getMouldChangeStartTime(),
-                "喷砂结束时刻落入禁止换模时段时，应继续顺延到次日早班再换模");
+        assertEquals(dateTime(2026, 4, 22, 8, 0), result.getMouldChangeStartTime(),
+                "喷砂与换模重叠时，不应先等待喷砂结束再判断禁止换模时段");
         int firstPlannedShiftIndex = resolveFirstPlannedShiftIndex(result);
         assertTrue(firstPlannedShiftIndex > 0, "顺延后应仍存在首个有效排产班次");
         assertEquals("模具清洗+换模", ShiftFieldUtil.getShiftAnalysis(result, firstPlannedShiftIndex),
-                "喷砂后又被禁止换模继续顺延时，首个排产班次仍应保留模具清洗+换模分析");
+                "喷砂重叠但不再顺延时，首个排产班次仍应保留模具清洗+换模分析");
     }
 
     @Test

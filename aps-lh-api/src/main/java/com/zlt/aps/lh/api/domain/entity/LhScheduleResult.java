@@ -743,9 +743,11 @@ public class LhScheduleResult extends BaseEntity implements Serializable {
     private Integer isDelete;
 
     /**
-     * 真实换模开始时间，仅用于本次排程运行期生成换模计划，不落库。
+     * 真实换模开始时间，用于本次排程运行期生成换模计划
      */
-    @TableField(exist = false)
+    @Excel(name = "ui.data.column.lhScheduleResult.mouldChangeStartTime")
+    @ApiModelProperty(value = "换模开始时间", name = "mouldChangeStartTime")
+    @TableField(value = "MOULD_CHANGE_START_TIME")
     private Date mouldChangeStartTime;
 
     /**

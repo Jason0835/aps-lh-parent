@@ -115,9 +115,13 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             machineTriggerSourceMap.put(machineCode, TYPE_BLOCK_TRIGGER_FALLBACK);
         }
         traceEndingMachineOrder(context, candidateMachines);
+        log.info("换活字块候选机台准备完成, 收尾机台: {}, 兜底机台: {}, 候选机台: {}, 待排新增SKU: {}",
+                endingMachines.size(), fallbackMachines.size(), candidateMachines.size(),
+                context.getNewSpecSkuList().size());
 
         Map<String, Boolean> strictPriorityOneMachineMap = new HashMap<>(Math.max(16, candidateMachines.size() * 2));
         Map<String, Boolean> completedMachineMap = new HashMap<>(Math.max(16, candidateMachines.size() * 2));
+        int typeBlockScheduledCount = 0;
         while (!CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
             List<MachineScheduleDTO> activeMachines = new ArrayList<>(candidateMachines.size());
             for (MachineScheduleDTO machine : candidateMachines) {
@@ -136,6 +140,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 activeMachines.add(machine);
             }
             if (CollectionUtils.isEmpty(activeMachines)) {
+                log.warn("换活字块无可继续尝试机台, 待排新增SKU: {}, 已完成机台: {}",
+                        context.getNewSpecSkuList().size(), completedMachineMap.size());
                 break;
             }
             activeMachines.sort((leftMachine, rightMachine) -> {
@@ -177,6 +183,9 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 String matchedLayer = !CollectionUtils.isEmpty(priorityOneCandidates) ? "第一层"
                         : (!CollectionUtils.isEmpty(priorityTwoCandidates) ? "第二层" : "未命中");
                 if (typeBlockSku == null) {
+                    log.debug("换活字块未匹配到SKU, 机台: {}, 触发来源: {}, 第一层候选: {}, 第二层候选: {}",
+                            machineCode, machineTriggerSourceMap.get(machineCode),
+                            priorityOneCandidates.size(), priorityTwoCandidates.size());
                     traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
                             null, matchedLayer, false, null, machineTriggerSourceMap.get(machineCode));
                     completedMachineMap.put(machineCode, true);
@@ -189,10 +198,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                         typeBlockSku, matchedLayer, success, typeBlockStartTime,
                         machineTriggerSourceMap.get(machineCode));
                 if (!success) {
+                    log.warn("换活字块排产失败, 机台: {}, materialCode: {}, 结构: {}, 开始时间: {}, 匹配层级: {}",
+                            machineCode, typeBlockSku.getMaterialCode(), typeBlockSku.getStructureName(),
+                            LhScheduleTimeUtil.formatDateTime(typeBlockStartTime), matchedLayer);
                     completedMachineMap.put(machineCode, true);
                     continue;
                 }
                 scheduledInCurrentRound = true;
+                typeBlockScheduledCount++;
                 if (CollectionUtils.isEmpty(priorityOneCandidates)) {
                     completedMachineMap.put(machineCode, true);
                 } else {
@@ -205,9 +218,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 break;
             }
             if (!scheduledInCurrentRound) {
+                log.warn("本轮换活字块未产生排程结果, 候选机台: {}, 待排新增SKU: {}",
+                        activeMachines.size(), context.getNewSpecSkuList().size());
                 break;
             }
         }
+        log.info("换活字块衔接排产结束, 新增结果数: {}, 剩余新增SKU: {}, 当前排程结果数: {}",
+                typeBlockScheduledCount, context.getNewSpecSkuList().size(),
+                context.getScheduleResultList().size());
     }
 
     private int resolveTypeBlockTriggerOrder(String triggerSource) {
@@ -230,6 +248,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             String machineCode = sku.getContinuousMachineCode();
             MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
             if (machine == null) {
+                log.warn("续作SKU未匹配到机台状态，跳过续作排产, materialCode: {}, 续作机台: {}, 目标量: {}",
+                        sku.getMaterialCode(), machineCode, sku.resolveTargetScheduleQty());
                 continue;
             }
 
@@ -263,8 +283,18 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                     machine.setEstimatedEndTime(actualCompletionTime);
                     traceContinuousEndingUpdate(context, machine, sku, result, actualCompletionTime);
                 }
+                log.debug("续作SKU排产完成, materialCode: {}, 机台: {}, 开始时间: {}, 日计划量: {}, 是否收尾: {}",
+                        sku.getMaterialCode(), machineCode,
+                        LhScheduleTimeUtil.formatDateTime(startTime), result.getDailyPlanQty(), isEnding);
+            } else {
+                log.warn("续作SKU未生成有效排程结果, materialCode: {}, 机台: {}, 开始时间: {}, 目标量: {}",
+                        sku.getMaterialCode(), machineCode,
+                        LhScheduleTimeUtil.formatDateTime(startTime), sku.resolveTargetScheduleQty());
             }
         }
+        log.info("续作收尾判定结束, 续作SKU: {}, 当前排程结果数: {}, 待新增SKU: {}",
+                context.getContinuousSkuList().size(), context.getScheduleResultList().size(),
+                context.getNewSpecSkuList().size());
     }
 
     /**

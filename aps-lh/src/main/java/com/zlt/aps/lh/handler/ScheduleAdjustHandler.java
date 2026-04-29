@@ -64,6 +64,10 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
     @Override
     protected void doHandle(LhScheduleContext context) {
+        log.info("排程调整与SKU归集开始, 工厂: {}, 目标日: {}, T日: {}, 月计划记录数: {}, 前批次结果数: {}",
+                context.getFactoryCode(), LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()),
+                LhScheduleTimeUtil.formatDate(context.getScheduleDate()),
+                context.getMonthPlanList().size(), context.getPreviousScheduleResultList().size());
         // S4.3.1 前日排程欠/超产量调整
         adjustPreviousSchedule(context);
 
@@ -93,6 +97,8 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
     private void adjustPreviousSchedule(LhScheduleContext context) {
         List<LhScheduleResult> previousScheduleList = context.getPreviousScheduleResultList();
         if (previousScheduleList == null || previousScheduleList.isEmpty()) {
+            log.warn("前日排程结果为空，跳过欠产/超产传导, 工厂: {}, T日: {}",
+                    context.getFactoryCode(), LhScheduleTimeUtil.formatDate(context.getScheduleDate()));
             return;
         }
         Date previousScheduleDate = resolvePreviousScheduleDate(context);
@@ -147,6 +153,8 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
             // 产品结构为空，跳过
             if (StringUtils.isEmpty(plan.getStructureName())) {
+                log.warn("月计划产品结构为空，跳过SKU归集, materialCode: {}, 计划量: {}, 月计划版本: {}",
+                        plan.getMaterialCode(), plan.getTotalQty(), plan.getMonthPlanVersion());
                 continue;
             }
 
@@ -288,12 +296,18 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
             dto.setShiftCapacity(capacity.getClassCapacity() != null ? capacity.getClassCapacity() : 0);
         } else {
             // 无产能数据时使用默认值
+            log.warn("SKU硫化产能缺失，使用默认硫化时间继续计算, materialCode: {}, specCode: {}, structureName: {}",
+                    plan.getMaterialCode(), plan.getSpecifications(), plan.getStructureName());
             dto.setLhTimeSeconds(3600);
         }
 
         // 填充日硫化产能
         fillDailyCapacity(dto, capacity);
         dto.setTargetScheduleQty(getTargetScheduleQtyResolver().resolveInitialTargetQty(context, dto));
+        log.debug("SKU待排量计算完成, materialCode: {}, 结构: {}, 月计划: {}, 窗口计划: {}, 已完成: {}, 余量: {}, 待排: {}, 目标量: {}, 班产: {}",
+                dto.getMaterialCode(), dto.getStructureName(), dto.getMonthPlanQty(), dto.getWindowPlanQty(),
+                dto.getFinishedQty(), dto.getSurplusQty(), dto.getPendingQty(), dto.getTargetScheduleQty(),
+                dto.getShiftCapacity());
         if (context.isRollingScheduleHandoff() || inheritedPlanQty > 0) {
             log.info("滚动待排量拆解, 物料: {}, 窗口计划量: {}, 已继承量: {}, 欠产传导量: {}, 待排量: {}, 余量: {}, 目标量: {}",
                     dto.getMaterialCode(), windowPlanQty, inheritedPlanQty, carryForwardQty,

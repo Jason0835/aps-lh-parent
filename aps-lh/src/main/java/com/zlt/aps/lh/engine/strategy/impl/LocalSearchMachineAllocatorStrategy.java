@@ -68,8 +68,17 @@ public class LocalSearchMachineAllocatorStrategy {
                                                 ICapacityCalculateStrategy capacityCalculate) {
         // 基础输入不完整时直接放弃局部搜索，交给外层常规选机逻辑兜底
         if (CollectionUtils.isEmpty(windowSkuList) || CollectionUtils.isEmpty(currentCandidates) || CollectionUtils.isEmpty(shifts)) {
+            log.debug("局部搜索输入不足，跳过评估, SKU窗口: {}, 候选机台: {}, 班次: {}",
+                    CollectionUtils.isEmpty(windowSkuList) ? 0 : windowSkuList.size(),
+                    CollectionUtils.isEmpty(currentCandidates) ? 0 : currentCandidates.size(),
+                    CollectionUtils.isEmpty(shifts) ? 0 : shifts.size());
             return null;
         }
+        SkuScheduleDTO currentSku = windowSkuList.get(0);
+        log.info("局部搜索选机开始, 当前SKU: {}, 窗口SKU数: {}, 候选机台数: {}, 搜索深度: {}, 时间预算: {}ms",
+                currentSku.getMaterialCode(), windowSkuList.size(), currentCandidates.size(),
+                context.getScheduleConfig().getLocalSearchDepth(),
+                context.getScheduleConfig().getLocalSearchTimeBudgetMs());
         // 设置搜索时间预算，避免局部搜索阻塞主排程流程
         long deadlineMs = System.currentTimeMillis() + context.getScheduleConfig().getLocalSearchTimeBudgetMs();
         int[] bestFeasibleCountHolder = new int[]{-1};
@@ -85,15 +94,21 @@ public class LocalSearchMachineAllocatorStrategy {
 
         // DFS 只记录首台机台编码，这里回填对应机台对象给上层使用
         if (StringUtils.isEmpty(bestFirstMachineCodeHolder[0])) {
+            log.warn("局部搜索未找到可行首选机台, 当前SKU: {}, 窗口SKU数: {}, 候选机台数: {}, 最优可行数: {}, 最优评分: {}",
+                    currentSku.getMaterialCode(), windowSkuList.size(), currentCandidates.size(),
+                    bestFeasibleCountHolder[0], bestPenaltyHolder[0]);
             return null;
         }
         for (MachineScheduleDTO machine : currentCandidates) {
             if (machine != null && bestFirstMachineCodeHolder[0].equals(machine.getMachineCode())) {
-                log.debug("局部搜索选机完成, 首选机台: {}, 可行数: {}, 评分: {}",
-                        bestFirstMachineCodeHolder[0], bestFeasibleCountHolder[0], bestPenaltyHolder[0]);
+                log.info("局部搜索选机完成, 当前SKU: {}, 首选机台: {}, 可行数: {}, 评分: {}",
+                        currentSku.getMaterialCode(), bestFirstMachineCodeHolder[0],
+                        bestFeasibleCountHolder[0], bestPenaltyHolder[0]);
                 return machine;
             }
         }
+        log.warn("局部搜索首选机台未回填到当前候选列表, 当前SKU: {}, 首选机台: {}, 候选机台数: {}",
+                currentSku.getMaterialCode(), bestFirstMachineCodeHolder[0], currentCandidates.size());
         return null;
     }
 

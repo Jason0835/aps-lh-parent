@@ -79,6 +79,12 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         sortCandidates(context, candidates, sku);
         traceMachineCandidates(context, sku, candidates, trace);
 
+        if (CollectionUtils.isEmpty(candidates)) {
+            log.warn("SKU候选机台为空, materialCode: {}, 规格: {}, 寸口: {}, 机台总数: {}, 定点过滤: {}, 禁用过滤: {}, 寸口过滤: {}, 模具过滤: {}",
+                    sku.getMaterialCode(), sku.getSpecCode(), sku.getProSize(), trace.totalMachineCount,
+                    trace.allowedMachineFilteredCount, trace.disabledCount, trace.inchMismatchCount,
+                    trace.mouldConflictCount);
+        }
         log.debug("SKU: {} 匹配到 {} 台候选机台", sku.getMaterialCode(), candidates.size());
         return candidates;
     }

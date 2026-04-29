@@ -26,6 +26,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -60,9 +61,20 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
     @Override
     protected void doHandle(LhScheduleContext context) {
+        log.info("基础数据初始化开始, 工厂: {}, 目标日: {}, T日: {}, 月计划版本: {}",
+                context.getFactoryCode(),
+                LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()),
+                LhScheduleTimeUtil.formatDate(context.getScheduleDate()),
+                context.getMonthPlanVersion());
         // S4.2.1 解析班次配置（无表数据则用默认模板），并写入上下文
         try {
             lhShiftConfigService.resolveAndAttachScheduleShifts(context);
+            List<LhShiftConfigVO> scheduleWindowShifts = context.getScheduleWindowShifts();
+            log.info("班次窗口解析完成, 班次数: {}, 起始班次: {}, 结束班次: {}",
+                    scheduleWindowShifts.size(),
+                    CollectionUtils.isEmpty(scheduleWindowShifts) ? null : scheduleWindowShifts.get(0).getShiftName(),
+                    CollectionUtils.isEmpty(scheduleWindowShifts) ? null
+                            : scheduleWindowShifts.get(scheduleWindowShifts.size() - 1).getShiftName());
         } catch (IllegalArgumentException e) {
             log.error("班次配置非法: {}", e.getMessage());
             ScheduleDomainExceptionHelper.interrupt(context, ScheduleStepEnum.S4_2_DATA_INIT,
@@ -115,7 +127,11 @@ public class DataInitHandler extends AbsScheduleStepHandler {
      */
     private void loadBaseData(LhScheduleContext context) {
         baseDataService.loadAllBaseData(context);
-        log.info("基础数据加载完成");
+        log.info("基础数据加载完成, 月计划: {}, 机台: {}, SKU产能: {}, SKU模具关系: {}, MES在机: {}, 前批次结果: {}, 停机计划: {}, 清洗计划: {}",
+                context.getMonthPlanList().size(), context.getMachineInfoMap().size(),
+                context.getSkuLhCapacityMap().size(), context.getSkuMouldRelMap().size(),
+                context.getMachineOnlineInfoMap().size(), context.getPreviousScheduleResultList().size(),
+                context.getDevicePlanShutList().size(), context.getCleaningPlanList().size());
     }
 
     /**
@@ -155,6 +171,8 @@ public class DataInitHandler extends AbsScheduleStepHandler {
                 LhMachineOnlineInfo onlineInfo = context.getMachineOnlineInfoMap().get(machineCode);
                 dto.setCurrentMaterialCode(onlineInfo.getMaterialCode());
                 dto.setCurrentMaterialDesc(onlineInfo.getSpecDesc());
+                log.debug("机台MES在机信息匹配, 机台: {}, materialCode: {}, 规格描述: {}",
+                        machineCode, onlineInfo.getMaterialCode(), onlineInfo.getSpecDesc());
                 MdmMaterialInfo currentMaterial = context.getMaterialInfoMap().get(onlineInfo.getMaterialCode());
                 if (currentMaterial != null) {
                     dto.setCurrentMaterialDesc(currentMaterial.getMaterialDesc());
@@ -224,18 +242,26 @@ public class DataInitHandler extends AbsScheduleStepHandler {
             }
         }
         if (latestSpecEndTime != null) {
+            log.debug("机台初始结束时间取前批次规格结束时间, 机台: {}, 结束时间: {}",
+                    machineCode, LhScheduleTimeUtil.formatDateTime(latestSpecEndTime));
             return latestSpecEndTime;
         }
         if (context.getMachineOnlineInfoMap().containsKey(machineCode)) {
             List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
             if (!shifts.isEmpty() && shifts.get(0).getShiftStartDateTime() != null) {
+                log.debug("机台初始结束时间取窗口首班开始, 机台: {}, 原因: MES在机无前批次结束时间, 时间: {}",
+                        machineCode, LhScheduleTimeUtil.formatDateTime(shifts.get(0).getShiftStartDateTime()));
                 return shifts.get(0).getShiftStartDateTime();
             }
         }
         List<LhShiftConfigVO> shifts = context.getScheduleWindowShifts();
         if (!shifts.isEmpty() && shifts.get(0).getShiftStartDateTime() != null) {
+            log.debug("机台初始结束时间取窗口首班开始, 机台: {}, 时间: {}",
+                    machineCode, LhScheduleTimeUtil.formatDateTime(shifts.get(0).getShiftStartDateTime()));
             return shifts.get(0).getShiftStartDateTime();
         }
+        log.warn("机台初始结束时间未匹配班次窗口, 机台: {}, 使用T日: {}",
+                machineCode, LhScheduleTimeUtil.formatDate(context.getScheduleDate()));
         return context.getScheduleDate();
     }
 

@@ -3,7 +3,7 @@ package com.zlt.aps.lh.regression;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
-import com.zlt.aps.cx.api.domain.entity.CxMesStock;
+import com.zlt.aps.cx.api.domain.entity.CxStock;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -20,7 +20,7 @@ import com.zlt.aps.lh.mapper.LhMouldCleanPlanMapper;
 import com.zlt.aps.lh.mapper.LhMouldChangePlanEntityMapper;
 import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhSpecifyMachineMapper;
-import com.zlt.aps.lh.mapper.CxMesStockMapper;
+import com.zlt.aps.lh.mapper.CxStockMapper;
 import com.zlt.aps.lh.mapper.MdmDevMaintenancePlanMapper;
 import com.zlt.aps.lh.mapper.MdmDevicePlanShutMapper;
 import com.zlt.aps.lh.mapper.MdmCapsuleChuckMapper;
@@ -109,7 +109,7 @@ class ScheduleDataWindowRegressionTest {
     @Mock
     private LhScheduleResultMapper lhScheduleResultMapper;
     @Mock
-    private CxMesStockMapper cxMesStockMapper;
+    private CxStockMapper cxStockMapper;
 
     @InjectMocks
     private LhBaseDataServiceImpl lhBaseDataService;
@@ -334,16 +334,16 @@ class ScheduleDataWindowRegressionTest {
         planB.setEmbryoCode("EMB-B");
         when(monthPlanMapper.selectList(any())).thenReturn(Arrays.asList(planA, planB));
 
-        CxMesStock stockA1 = new CxMesStock();
+        CxStock stockA1 = new CxStock();
         stockA1.setEmbryoCode("EMB-A");
-        stockA1.setStockNum(BigDecimal.valueOf(40));
-        CxMesStock stockA2 = new CxMesStock();
+        stockA1.setStockNum(40);
+        CxStock stockA2 = new CxStock();
         stockA2.setEmbryoCode("EMB-A");
-        stockA2.setStockNum(BigDecimal.valueOf(12));
-        CxMesStock stockB = new CxMesStock();
+        stockA2.setStockNum(12);
+        CxStock stockB = new CxStock();
         stockB.setEmbryoCode("EMB-B");
-        stockB.setStockNum(BigDecimal.valueOf(9));
-        when(cxMesStockMapper.selectList(any())).thenReturn(Arrays.asList(stockA1, stockA2, stockB));
+        stockB.setStockNum(9);
+        when(cxStockMapper.selectList(any())).thenReturn(Arrays.asList(stockA1, stockA2, stockB));
 
         LhScheduleContext context = new LhScheduleContext();
         context.setFactoryCode("FC01");
@@ -354,7 +354,7 @@ class ScheduleDataWindowRegressionTest {
 
         assertEquals(52, context.getEmbryoRealtimeStockMap().get("EMB-A").intValue());
         assertEquals(9, context.getEmbryoRealtimeStockMap().get("EMB-B").intValue());
-        LambdaQueryWrapper<CxMesStock> wrapper = captureCxMesStockWrapper();
+        LambdaQueryWrapper<CxStock> wrapper = captureCxStockWrapper();
         assertQueryContainsExpectedDate(wrapper, scheduleDate, target);
         assertTrue(wrapper.getParamNameValuePairs().containsValue("FC01"));
         assertParamContainsEmbryoCodes(wrapper, "EMB-A", "EMB-B");
@@ -490,11 +490,11 @@ class ScheduleDataWindowRegressionTest {
      * @return 胎胚库存查询 wrapper
      */
     @SuppressWarnings("unchecked")
-    private LambdaQueryWrapper<CxMesStock> captureCxMesStockWrapper() {
-        initializeTableInfo(CxMesStock.class);
+    private LambdaQueryWrapper<CxStock> captureCxStockWrapper() {
+        initializeTableInfo(CxStock.class);
         ArgumentCaptor<LambdaQueryWrapper> captor = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
-        verify(cxMesStockMapper).selectList(captor.capture());
-        return (LambdaQueryWrapper<CxMesStock>) captor.getValue();
+        verify(cxStockMapper).selectList(captor.capture());
+        return (LambdaQueryWrapper<CxStock>) captor.getValue();
     }
 
     /**
@@ -503,7 +503,7 @@ class ScheduleDataWindowRegressionTest {
      * @param wrapper 查询条件
      * @param embryoCodes 胎胚编码
      */
-    private void assertParamContainsEmbryoCodes(LambdaQueryWrapper<CxMesStock> wrapper, String... embryoCodes) {
+    private void assertParamContainsEmbryoCodes(LambdaQueryWrapper<CxStock> wrapper, String... embryoCodes) {
         assertTrue(Arrays.stream(embryoCodes)
                 .allMatch(embryoCode -> wrapper.getParamNameValuePairs().containsValue(embryoCode)));
     }

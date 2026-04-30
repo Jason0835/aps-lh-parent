@@ -34,7 +34,8 @@ TABLE_NAMES = [
     "T_MDM_WORK_CALENDAR",
     "T_MP_MONTH_PLAN_PROD_FINAL",
     "T_MP_PROC_VERSION",
-    "T_MDM_MOULD_INFO"
+    "T_MDM_MOULD_INFO",
+    "T_CX_STOCK"
 ]
 
 # ====================== 导出文件配置 ======================

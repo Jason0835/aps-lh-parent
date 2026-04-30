@@ -1,7 +1,7 @@
 package com.zlt.aps.lh.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.zlt.aps.cx.api.domain.entity.CxMesStock;
+import com.zlt.aps.cx.api.domain.entity.CxStock;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -31,7 +31,7 @@ import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
 import com.zlt.aps.lh.mapper.MdmWorkCalendarMapper;
 import com.zlt.aps.lh.mapper.MpAdjustResultMapper;
-import com.zlt.aps.lh.mapper.CxMesStockMapper;
+import com.zlt.aps.lh.mapper.CxStockMapper;
 import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
@@ -148,7 +148,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     private LhMouldChangePlanEntityMapper lhMouldChangePlanMapper;
 
     @Resource
-    private CxMesStockMapper cxMesStockMapper;
+    private CxStockMapper cxStockMapper;
 
     @Override
     public void loadAllBaseData(LhScheduleContext context) {
@@ -477,12 +477,12 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
             log.debug("胎胚实时库存加载完成, 数量: {}", stockMap.size());
             return;
         }
-        List<CxMesStock> stockList = cxMesStockMapper.selectList(new LambdaQueryWrapper<CxMesStock>()
-                .eq(CxMesStock::getFactoryCode, factoryCode)
-                .eq(CxMesStock::getStockDate, stockDate)
-                .in(CxMesStock::getEmbryoCode, embryoCodeList));
+        List<CxStock> stockList = cxStockMapper.selectList(new LambdaQueryWrapper<CxStock>()
+                .eq(CxStock::getFactoryCode, factoryCode)
+                .eq(CxStock::getStockDate, stockDate)
+                .in(CxStock::getEmbryoCode, embryoCodeList));
         if (stockList != null) {
-            for (CxMesStock stock : stockList) {
+            for (CxStock stock : stockList) {
                 if (StringUtils.isNotEmpty(stock.getEmbryoCode())) {
                     stockMap.merge(stock.getEmbryoCode(), resolveStockNum(stock.getStockNum()), Integer::sum);
                 }
@@ -777,8 +777,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      * @param stockNum 胎胚库存
      * @return 整数件数
      */
-    private int resolveStockNum(BigDecimal stockNum) {
-        return Objects.nonNull(stockNum) ? stockNum.intValue() : 0;
+    private int resolveStockNum(Integer stockNum) {
+        return Objects.nonNull(stockNum) ? stockNum : 0;
     }
 
     /**

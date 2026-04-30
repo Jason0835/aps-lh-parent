@@ -184,6 +184,90 @@ public class ContinuousProductionStrategyTest {
         Assertions.assertSame(inheritedResult, context.getScheduleResultList().get(0));
     }
 
+    @Test
+    public void adjustEmbryoStock_shouldResetIsEndWhenFinalPlanQtyLessThanMaxDemand() throws Exception {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(toDate(2026, 4, 25, 0, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        LhScheduleResult result = new LhScheduleResult();
+        result.setScheduleType("01");
+        result.setMaterialCode("MAT-CHECK");
+        result.setEmbryoCode("EMB-1");
+        result.setDailyPlanQty(88);
+        result.setMouldSurplusQty(80);
+        result.setEmbryoStock(140);
+        result.setIsEnd("1");
+        context.getScheduleResultList().add(result);
+
+        strategy.adjustEmbryoStock(context);
+
+        assertEquals("0", context.getScheduleResultList().get(0).getIsEnd(),
+                "续作结果最终计划量小于max(硫化余量,胎胚库存)时，应回写为正常");
+    }
+
+    @Test
+    public void scheduleReduceMould_shouldRecheckIsEndAfterPlanQtyReduced() {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(toDate(2026, 4, 25, 0, 0, 0));
+        context.setScheduleTargetDate(toDate(2026, 4, 27, 0, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.setMachineScheduleMap(new LinkedHashMap<String, MachineScheduleDTO>());
+
+        MachineScheduleDTO machine1 = new MachineScheduleDTO();
+        machine1.setMachineCode("M1");
+        machine1.setCapsuleUsageCount(1);
+        context.getMachineScheduleMap().put("M1", machine1);
+        MachineScheduleDTO machine2 = new MachineScheduleDTO();
+        machine2.setMachineCode("M2");
+        machine2.setCapsuleUsageCount(2);
+        context.getMachineScheduleMap().put("M2", machine2);
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("MAT-REDUCE");
+        sku.setTargetScheduleQty(80);
+        context.setContinuousSkuList(Collections.singletonList(sku));
+
+        LhScheduleResult result1 = new LhScheduleResult();
+        result1.setScheduleType("01");
+        result1.setIsTypeBlock("0");
+        result1.setMaterialCode("MAT-REDUCE");
+        result1.setLhMachineCode("M1");
+        result1.setEmbryoCode("EMB-1");
+        result1.setMouldSurplusQty(100);
+        result1.setEmbryoStock(120);
+        result1.setIsEnd("1");
+        ShiftFieldUtil.setShiftPlanQty(result1, 1, 60, null, null);
+        ShiftFieldUtil.syncDailyPlanQty(result1);
+
+        LhScheduleResult result2 = new LhScheduleResult();
+        result2.setScheduleType("01");
+        result2.setIsTypeBlock("0");
+        result2.setMaterialCode("MAT-REDUCE");
+        result2.setLhMachineCode("M2");
+        result2.setEmbryoCode("EMB-1");
+        result2.setMouldSurplusQty(100);
+        result2.setEmbryoStock(120);
+        result2.setIsEnd("1");
+        ShiftFieldUtil.setShiftPlanQty(result2, 1, 60, null, null);
+        ShiftFieldUtil.syncDailyPlanQty(result2);
+
+        context.getScheduleResultList().add(result1);
+        context.getScheduleResultList().add(result2);
+
+        strategy.scheduleReduceMould(context);
+
+        assertEquals(2, context.getScheduleResultList().size());
+        assertEquals("0", context.getScheduleResultList().get(0).getIsEnd(),
+                "降模后计划量低于max(硫化余量,胎胚库存)时，应回写为正常");
+        assertEquals("0", context.getScheduleResultList().get(1).getIsEnd(),
+                "降模后计划量低于max(硫化余量,胎胚库存)时，应回写为正常");
+    }
+
     /**
      * 构建滚动排程上下文。
      *

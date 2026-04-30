@@ -85,9 +85,9 @@ class ScheduleAdjustCarryForwardRegressionTest {
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S1").get(0);
         assertEquals(20, context.getCarryForwardQtyMap().get("MAT-1").intValue());
         assertEquals(100, sku.getWindowPlanQty());
-        assertEquals(120, sku.getPendingQty());
         assertEquals(940, sku.getSurplusQty());
-        assertEquals(120, sku.getTargetScheduleQty().intValue());
+        assertEquals(960, sku.getPendingQty());
+        assertEquals(960, sku.getTargetScheduleQty().intValue());
     }
 
     @Test
@@ -129,7 +129,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
         SkuScheduleDTO sku = context.getStructureSkuMap().get("SM2").get(0);
         assertEquals(20, context.getCarryForwardQtyMap().get("MAT-MULTI").intValue());
         assertEquals(30, sku.getWindowPlanQty());
-        assertEquals(50, sku.getPendingQty());
+        assertEquals(220, sku.getPendingQty());
     }
 
     @Test
@@ -161,7 +161,69 @@ class ScheduleAdjustCarryForwardRegressionTest {
         SkuScheduleDTO sku = context.getStructureSkuMap().get("SM").get(0);
         assertEquals(120, sku.getSurplusQty());
         assertEquals(100, sku.getWindowPlanQty());
-        assertEquals(100, sku.getTargetScheduleQty().intValue());
+        assertEquals(120, sku.getTargetScheduleQty().intValue());
+    }
+
+    @Test
+    void doHandle_shouldUseLargerQtyBetweenSurplusAndEmbryoStock() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.getMaterialMonthFinishedQtyMap().put("MAT-STOCK-HIGH", 20);
+        context.getEmbryoRealtimeStockMap().put("EMB-HIGH", 120);
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-STOCK-HIGH");
+        plan.setMaterialDesc("MAT-STOCK-HIGH-DESC");
+        plan.setStructureName("S-STOCK-HIGH");
+        plan.setSpecifications("SPEC-STOCK-HIGH");
+        plan.setEmbryoCode("EMB-HIGH");
+        plan.setTotalQty(100);
+        plan.setDay11(30);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-STOCK-HIGH").get(0);
+        assertEquals(80, sku.getSurplusQty());
+        assertEquals(120, sku.getEmbryoStock());
+        assertEquals(120, sku.getPendingQty());
+        assertEquals(120, sku.getTargetScheduleQty().intValue());
+    }
+
+    @Test
+    void doHandle_shouldKeepSurplusWhenEmbryoStockIsLower() {
+        ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleConfig(createConfig("0"));
+        context.setScheduleDate(date(2026, 4, 11));
+        context.setScheduleTargetDate(date(2026, 4, 13));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.getMaterialMonthFinishedQtyMap().put("MAT-STOCK-LOW", 30);
+        context.getEmbryoRealtimeStockMap().put("EMB-LOW", 80);
+
+        FactoryMonthPlanProductionFinalResult plan = new FactoryMonthPlanProductionFinalResult();
+        plan.setMaterialCode("MAT-STOCK-LOW");
+        plan.setMaterialDesc("MAT-STOCK-LOW-DESC");
+        plan.setStructureName("S-STOCK-LOW");
+        plan.setSpecifications("SPEC-STOCK-LOW");
+        plan.setEmbryoCode("EMB-LOW");
+        plan.setTotalQty(150);
+        plan.setDay11(30);
+        context.setMonthPlanList(Collections.singletonList(plan));
+
+        ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
+
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S-STOCK-LOW").get(0);
+        assertEquals(120, sku.getSurplusQty());
+        assertEquals(80, sku.getEmbryoStock());
+        assertEquals(120, sku.getPendingQty());
+        assertEquals(120, sku.getTargetScheduleQty().intValue());
     }
 
     @Test
@@ -277,8 +339,8 @@ class ScheduleAdjustCarryForwardRegressionTest {
 
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S3").get(0);
         assertEquals(0, sku.getWindowPlanQty());
-        assertEquals(30, sku.getPendingQty());
-        assertEquals(30, sku.getTargetScheduleQty().intValue());
+        assertEquals(230, sku.getPendingQty());
+        assertEquals(230, sku.getTargetScheduleQty().intValue());
         assertEquals(0, context.getUnscheduledResultList().size());
     }
 
@@ -361,7 +423,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
     }
 
     @Test
-    void doHandle_skipsSkuWhenWindowPlanQtyZeroAndNoCarryForwardEvenIfSurplusPositive() {
+    void doHandle_keepsSkuWhenOnlySurplusNeedsScheduling() {
         ReflectionTestUtils.setField(handler, "endingJudgmentStrategy", new DefaultEndingJudgmentStrategy());
 
         LhScheduleContext context = new LhScheduleContext();
@@ -380,10 +442,11 @@ class ScheduleAdjustCarryForwardRegressionTest {
 
         ReflectionTestUtils.invokeMethod(handler, "doHandle", context);
 
-        assertEquals(0, context.getStructureSkuMap().size());
-        assertEquals(1, context.getUnscheduledResultList().size());
-        assertEquals("物料：MAT-4 没有排产目标量，不进行排产",
-                context.getUnscheduledResultList().get(0).getUnscheduledReason());
+        SkuScheduleDTO sku = context.getStructureSkuMap().get("S4").get(0);
+        assertEquals(0, sku.getWindowPlanQty());
+        assertEquals(300, sku.getPendingQty());
+        assertEquals(300, sku.getTargetScheduleQty().intValue());
+        assertEquals(0, context.getUnscheduledResultList().size());
     }
 
     @Test
@@ -413,7 +476,7 @@ class ScheduleAdjustCarryForwardRegressionTest {
 
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S-FULL").get(0);
         assertEquals(0, sku.getWindowPlanQty());
-        assertEquals(0, sku.getPendingQty());
+        assertEquals(300, sku.getPendingQty());
         assertEquals(128, sku.getTargetScheduleQty().intValue());
         assertEquals(0, context.getUnscheduledResultList().size());
     }
@@ -444,8 +507,8 @@ class ScheduleAdjustCarryForwardRegressionTest {
 
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S-ROLL").get(0);
         assertEquals(110, sku.getWindowPlanQty());
-        assertEquals(30, sku.getPendingQty());
-        assertEquals(30, sku.getTargetScheduleQty().intValue());
+        assertEquals(220, sku.getPendingQty());
+        assertEquals(220, sku.getTargetScheduleQty().intValue());
     }
 
     @Test
@@ -484,8 +547,8 @@ class ScheduleAdjustCarryForwardRegressionTest {
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S-ROLL-DUP").get(0);
         assertNull(context.getCarryForwardQtyMap().get("MAT-ROLL-DUP"));
         assertEquals(120, sku.getWindowPlanQty());
-        assertEquals(60, sku.getPendingQty());
-        assertEquals(60, sku.getTargetScheduleQty().intValue());
+        assertEquals(200, sku.getPendingQty());
+        assertEquals(200, sku.getTargetScheduleQty().intValue());
     }
 
     @Test
@@ -523,8 +586,8 @@ class ScheduleAdjustCarryForwardRegressionTest {
         SkuScheduleDTO sku = context.getStructureSkuMap().get("S-FORCE").get(0);
         assertEquals(30, context.getCarryForwardQtyMap().get("MAT-FORCE").intValue());
         assertEquals(120, sku.getWindowPlanQty());
-        assertEquals(150, sku.getPendingQty());
-        assertEquals(150, sku.getTargetScheduleQty().intValue());
+        assertEquals(280, sku.getPendingQty());
+        assertEquals(280, sku.getTargetScheduleQty().intValue());
     }
 
     @Test

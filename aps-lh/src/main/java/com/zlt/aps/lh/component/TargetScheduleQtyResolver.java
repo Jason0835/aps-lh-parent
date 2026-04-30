@@ -40,17 +40,17 @@ public class TargetScheduleQtyResolver {
         if (Objects.isNull(sku)) {
             return 0;
         }
-        int surplusQty = Math.max(0, sku.getSurplusQty());
-        if (surplusQty <= 0) {
+        int pendingQty = Math.max(0, sku.getPendingQty());
+        if (pendingQty <= 0) {
             return 0;
         }
         int upperLimitQty;
         if (isFullCapacityMode(context)) {
             upperLimitQty = resolveTheoreticalWindowCapacity(context, sku);
         } else {
-            upperLimitQty = Math.max(0, sku.getPendingQty());
+            upperLimitQty = pendingQty;
         }
-        return Math.max(0, Math.min(surplusQty, upperLimitQty));
+        return Math.max(0, Math.min(pendingQty, upperLimitQty));
     }
 
     /**

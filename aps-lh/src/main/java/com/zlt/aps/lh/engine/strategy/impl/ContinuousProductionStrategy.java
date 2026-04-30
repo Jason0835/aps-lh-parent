@@ -455,6 +455,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 adjustResultByEmbryoStock(context, result, embryoStockMap, shifts);
             }
         }
+        refreshContinuousEndingFlagByResult(context);
     }
 
     @Override
@@ -507,6 +508,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         }
         // S4.4 收口：零计划续作结果语义统一，并按最终结果同步机台状态。
         finalizeZeroPlanContinuousResults(context);
+        // 降模会再次改变最终计划量，收口后再统一复核一次收尾标记，确保落库口径一致。
+        refreshContinuousEndingFlagByResult(context);
         syncMachineStateAfterContinuousAdjust(context);
         // 续作阶段全部处理完成后，再按剩余新增待排SKU统一收口结构视图，供S4.5排序使用。
         context.rebuildStructureSkuMapFromPending(context.getNewSpecSkuList());
@@ -1165,6 +1168,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setSpecCode(sku.getSpecCode());
         result.setSpecDesc(sku.getSpecDesc());
         result.setEmbryoCode(sku.getEmbryoCode());
+        result.setEmbryoStock(sku.getEmbryoStock());
         result.setMainMaterialDesc(sku.getMainMaterialDesc());
         result.setStructureName(sku.getStructureName());
         result.setScheduleDate(context.getScheduleTargetDate());
@@ -1505,6 +1509,47 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             redistributeShiftQty(context, result, shifts, stock);
             embryoStockMap.put(embryoCode, 0);
         }
+    }
+
+    /**
+     * 基于最终计划量复核续作结果收尾标记。
+     * <p>口径：当日计划量 >= max(硫化余量, 胎胚库存)时记为收尾，否则记为正常。</p>
+     *
+     * @param context 排程上下文
+     */
+    private void refreshContinuousEndingFlagByResult(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return;
+        }
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            refreshContinuousEndingFlagByResult(result);
+        }
+    }
+
+    /**
+     * 基于结果行“最终计划量 vs max(硫化余量, 胎胚库存)”复核续作收尾标记。
+     *
+     * @param result 排程结果
+     */
+    private void refreshContinuousEndingFlagByResult(LhScheduleResult result) {
+        if (!isContinuousPhaseResult(result)) {
+            return;
+        }
+        int finalPlanQty = result.getDailyPlanQty() != null ? result.getDailyPlanQty() : 0;
+        int endingDemandQty = resolveEndingDemandQty(result);
+        result.setIsEnd(finalPlanQty >= endingDemandQty && endingDemandQty > 0 ? "1" : "0");
+    }
+
+    /**
+     * 计算结果行收尾比较量。
+     *
+     * @param result 排程结果
+     * @return max(硫化余量, 胎胚库存)
+     */
+    private int resolveEndingDemandQty(LhScheduleResult result) {
+        int surplusQty = result.getMouldSurplusQty() != null ? result.getMouldSurplusQty() : 0;
+        int embryoStock = result.getEmbryoStock() != null ? result.getEmbryoStock() : 0;
+        return Math.max(Math.max(surplusQty, 0), Math.max(embryoStock, 0));
     }
 
     /**

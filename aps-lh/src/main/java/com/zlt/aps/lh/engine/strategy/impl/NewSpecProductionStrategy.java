@@ -506,6 +506,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setSpecCode(sku.getSpecCode());
         result.setSpecDesc(sku.getSpecDesc());
         result.setEmbryoCode(sku.getEmbryoCode());
+        result.setEmbryoStock(sku.getEmbryoStock());
         result.setMainMaterialDesc(sku.getMainMaterialDesc());
         result.setStructureName(sku.getStructureName());
         result.setScheduleDate(context.getScheduleTargetDate());
@@ -545,8 +546,6 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty, cleaningWindowList);
         refreshResultSummary(context, result);
         applyCleaningMouldChangeAnalysis(context, result);
-        // 新增结果先按实际排产量复核收尾标记，后续若再被库存裁剪会在 adjustEmbryoStock 收口阶段二次复核。
-        refreshEndingFlagByResult(result);
         return result;
     }
 
@@ -611,7 +610,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
     /**
      * 基于最终计划量复核新增结果收尾标记。
-     * <p>口径：仅新增结果生效；当日计划量 >= 硫化余量时记为收尾，否则记为正常。</p>
+     * <p>口径：仅新增结果生效；当日计划量 >= max(硫化余量, 胎胚库存)时记为收尾，否则记为正常。</p>
      *
      * @param context 排程上下文
      */
@@ -625,7 +624,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 基于结果行“最终计划量 vs 硫化余量”复核收尾标记。
+     * 基于结果行“最终计划量 vs max(硫化余量, 胎胚库存)”复核收尾标记。
      *
      * @param result 排程结果
      */
@@ -633,12 +632,21 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         if (result == null || !NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType())) {
             return;
         }
-        Integer surplusQty = result.getMouldSurplusQty();
-        if (surplusQty == null || surplusQty <= 0) {
-            return;
-        }
         int finalPlanQty = result.getDailyPlanQty() != null ? result.getDailyPlanQty() : 0;
-        result.setIsEnd(finalPlanQty >= surplusQty ? "1" : "0");
+        int endingDemandQty = resolveEndingDemandQty(result);
+        result.setIsEnd(finalPlanQty >= endingDemandQty && endingDemandQty > 0 ? "1" : "0");
+    }
+
+    /**
+     * 计算结果行收尾比较量。
+     *
+     * @param result 排程结果
+     * @return max(硫化余量, 胎胚库存)
+     */
+    private int resolveEndingDemandQty(LhScheduleResult result) {
+        int surplusQty = result.getMouldSurplusQty() != null ? result.getMouldSurplusQty() : 0;
+        int embryoStock = result.getEmbryoStock() != null ? result.getEmbryoStock() : 0;
+        return Math.max(Math.max(surplusQty, 0), Math.max(embryoStock, 0));
     }
 
     /**

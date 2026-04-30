@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.zlt.aps.cx.api.domain.entity.CxMesStock;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -30,6 +31,7 @@ import com.zlt.aps.lh.mapper.MdmSkuLhCapacityMapper;
 import com.zlt.aps.lh.mapper.MdmSkuMouldRelMapper;
 import com.zlt.aps.lh.mapper.MdmWorkCalendarMapper;
 import com.zlt.aps.lh.mapper.MpAdjustResultMapper;
+import com.zlt.aps.lh.mapper.CxMesStockMapper;
 import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
@@ -145,6 +147,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     @Resource
     private LhMouldChangePlanEntityMapper lhMouldChangePlanMapper;
 
+    @Resource
+    private CxMesStockMapper cxMesStockMapper;
+
     @Override
     public void loadAllBaseData(LhScheduleContext context) {
         String factoryCode = context.getFactoryCode();
@@ -172,64 +177,67 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 2. 加载月生产计划
         loadMonthPlan(context, factoryCode, yearMonth);
 
-        // 3. 加载周程滚动调整结果
+        // 3. 加载胎胚实时库存
+        loadEmbryoRealtimeStock(context, factoryCode, startDate);
+
+        // 4. 加载周程滚动调整结果
         loadAdjustResult(context, factoryCode, year, month);
 
-        // 4. 加载工作日历
+        // 5. 加载工作日历
         loadWorkCalendar(context, factoryCode, startDate, endDate);
 
-        // 5. 加载SKU日硫化产能
+        // 6. 加载SKU日硫化产能
         loadSkuLhCapacity(context, factoryCode);
 
-        // 6. 加载设备停机计划
+        // 7. 加载设备停机计划
         loadDevicePlanShut(context, factoryCode, startDate, endDate);
 
-        // 7. 加载SKU与模具关系
+        // 8. 加载SKU与模具关系
         loadSkuMouldRel(context, factoryCode);
 
-        // 8. 加载模具台账
+        // 9. 加载模具台账
         loadModelInfo(context, factoryCode);
 
-        // 9. 加载硫化机台信息
+        // 10. 加载硫化机台信息
         loadMachineInfo(context, factoryCode);
 
-        // 10. 加载模具清洗计划
+        // 11. 加载模具清洗计划
         loadCleaningPlan(context, factoryCode, startDate, endDate);
 
-        // 11. 加载月底计划余量
+        // 12. 加载月底计划余量
         loadMonthSurplus(context, factoryCode, year, month);
 
-        // 12. 加载前日物料日完成量（用于前日欠/超产差值修正,滚动模式取目标日前一日；强制重排取T-1）
+        // 13. 加载前日物料日完成量（用于前日欠/超产差值修正,滚动模式取目标日前一日；强制重排取T-1）
         Date previousDataDate = resolvePreviousDataDate(context, targetDate);
         loadDayFinishQty(context, factoryCode, previousDataDate);
 
-        // 13. 加载月累计完成量（截至排产T-1日（包含），按目标日所在月份统计）
+        // 14. 加载月累计完成量（截至排产T-1日（包含），按目标日所在月份统计）
         loadMaterialMonthFinishedQty(context, factoryCode, LhScheduleTimeUtil.addDays(scheduleDate, -1));
 
-        // 14. 加载物料信息
+        // 15. 加载物料信息
         loadMaterialInfo(context, factoryCode);
 
-        // 14.1 加载胶囊卡盘分组
+        // 15.1 加载胶囊卡盘分组
         loadCapsuleChuck(context, factoryCode);
 
-        // 15. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
+        // 16. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
         int machineOnlineLookbackDays = context.getParamIntValue(
                 LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS,
                 LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS);
         loadMachineOnlineInfo(context, factoryCode, startDate, machineOnlineLookbackDays);
 
-        // 16. 加载硫化定点机台
+        // 17. 加载硫化定点机台
         loadSpecifyMachine(context, factoryCode);
 
-        // 17. 加载硫化机胶囊已使用次数
+        // 18. 加载硫化机胶囊已使用次数
         loadCapsuleUsage(context, factoryCode);
 
-        // 18. 加载设备保养计划
+        // 19. 加载设备保养计划
         loadMaintenancePlan(context, factoryCode);
 
-        // 19. 加载前日硫化排程结果
+        // 20. 加载前日硫化排程结果
         loadPreviousScheduleResults(context, factoryCode, targetDate);
-        // 20. 加载前日模具交替计划，供滚动衔接继承
+        // 21. 加载前日模具交替计划，供滚动衔接继承
         loadPreviousMouldChangePlans(context, factoryCode, targetDate);
 
         log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}",
@@ -448,6 +456,40 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                         .eq(MdmWorkCalendar::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         context.setWorkCalendarList(workCalendarList != null ? workCalendarList : context.getWorkCalendarList());
         log.debug("工作日历加载完成, 数量: {}", context.getWorkCalendarList().size());
+    }
+
+    /**
+     * 加载胎胚实时库存，按胎胚编码汇总库存数量。
+     *
+     * @param context 排程上下文
+     * @param factoryCode 分厂编号
+     * @param stockDate 库存日期
+     */
+    private void loadEmbryoRealtimeStock(LhScheduleContext context, String factoryCode, Date stockDate) {
+        List<String> embryoCodeList = context.getMonthPlanList().stream()
+                .map(FactoryMonthPlanProductionFinalResult::getEmbryoCode)
+                .filter(StringUtils::isNotEmpty)
+                .distinct()
+                .collect(java.util.stream.Collectors.toList());
+        Map<String, Integer> stockMap = new HashMap<>(Math.max(16, embryoCodeList.size()));
+        if (CollectionUtils.isEmpty(embryoCodeList)) {
+            context.setEmbryoRealtimeStockMap(stockMap);
+            log.debug("胎胚实时库存加载完成, 数量: {}", stockMap.size());
+            return;
+        }
+        List<CxMesStock> stockList = cxMesStockMapper.selectList(new LambdaQueryWrapper<CxMesStock>()
+                .eq(CxMesStock::getFactoryCode, factoryCode)
+                .eq(CxMesStock::getStockDate, stockDate)
+                .in(CxMesStock::getEmbryoCode, embryoCodeList));
+        if (stockList != null) {
+            for (CxMesStock stock : stockList) {
+                if (StringUtils.isNotEmpty(stock.getEmbryoCode())) {
+                    stockMap.merge(stock.getEmbryoCode(), resolveStockNum(stock.getStockNum()), Integer::sum);
+                }
+            }
+        }
+        context.setEmbryoRealtimeStockMap(stockMap);
+        log.debug("胎胚实时库存加载完成, 数量: {}", stockMap.size());
     }
 
     /**
@@ -727,6 +769,16 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      */
     private int resolveFinishQtyValue(BigDecimal finishQty) {
         return Objects.nonNull(finishQty) ? finishQty.intValue() : 0;
+    }
+
+    /**
+     * 将胎胚库存数量安全转换为整数件数。
+     *
+     * @param stockNum 胎胚库存
+     * @return 整数件数
+     */
+    private int resolveStockNum(BigDecimal stockNum) {
+        return Objects.nonNull(stockNum) ? stockNum.intValue() : 0;
     }
 
     /**

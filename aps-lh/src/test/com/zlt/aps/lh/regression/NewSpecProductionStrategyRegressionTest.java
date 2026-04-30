@@ -529,7 +529,7 @@ class NewSpecProductionStrategyRegressionTest {
     }
 
     @Test
-    void adjustEmbryoStock_shouldResetIsEndWhenFinalPlanQtyLessThanSurplus() throws Exception {
+    void adjustEmbryoStock_shouldResetIsEndWhenFinalPlanQtyLessThanMaxDemand() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, true);
 
@@ -538,18 +538,19 @@ class NewSpecProductionStrategyRegressionTest {
         result.setScheduleType("02");
         result.setMaterialCode("MAT-ENDING-CHECK");
         result.setDailyPlanQty(88);
-        result.setMouldSurplusQty(140);
+        result.setMouldSurplusQty(80);
+        result.setEmbryoStock(140);
         result.setIsEnd("1");
         context.getScheduleResultList().add(result);
 
         strategy.adjustEmbryoStock(context);
 
         assertEquals("0", context.getScheduleResultList().get(0).getIsEnd(),
-                "新增结果最终计划量小于硫化余量时，应回写为正常");
+                "新增结果最终计划量小于max(硫化余量,胎胚库存)时，应回写为正常");
     }
 
     @Test
-    void adjustEmbryoStock_shouldKeepIsEndWhenFinalPlanQtyReachSurplus() throws Exception {
+    void adjustEmbryoStock_shouldKeepIsEndWhenFinalPlanQtyReachMaxDemand() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, false);
 
@@ -558,14 +559,15 @@ class NewSpecProductionStrategyRegressionTest {
         result.setScheduleType("02");
         result.setMaterialCode("MAT-ENDING-CHECK");
         result.setDailyPlanQty(140);
-        result.setMouldSurplusQty(140);
+        result.setMouldSurplusQty(80);
+        result.setEmbryoStock(140);
         result.setIsEnd("0");
         context.getScheduleResultList().add(result);
 
         strategy.adjustEmbryoStock(context);
 
         assertEquals("1", context.getScheduleResultList().get(0).getIsEnd(),
-                "新增结果最终计划量达到硫化余量时，应回写为收尾");
+                "新增结果最终计划量达到max(硫化余量,胎胚库存)时，应回写为收尾");
     }
 
     @Test
@@ -807,9 +809,9 @@ class NewSpecProductionStrategyRegressionTest {
         context.getNewSpecSkuList().add(secondSku);
         context.getNewSpecSkuList().add(thirdSku);
 
-        MachineScheduleDTO k2025 = buildMachine("K2025", dateTime(2026, 4, 20, 6, 0));
-        MachineScheduleDTO k2026 = buildMachine("K2026", dateTime(2026, 4, 20, 6, 0));
-        MachineScheduleDTO k2027 = buildMachine("K2027", dateTime(2026, 4, 20, 6, 0));
+        MachineScheduleDTO k2025 = buildMachine("K2025", dateTime(2026, 4, 17, 6, 0));
+        MachineScheduleDTO k2026 = buildMachine("K2026", dateTime(2026, 4, 17, 6, 0));
+        MachineScheduleDTO k2027 = buildMachine("K2027", dateTime(2026, 4, 17, 6, 0));
         context.getMachineScheduleMap().put(k2025.getMachineCode(), k2025);
         context.getMachineScheduleMap().put(k2026.getMachineCode(), k2026);
         context.getMachineScheduleMap().put(k2027.getMachineCode(), k2027);
@@ -862,9 +864,9 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals("3302002530", context.getScheduleResultList().get(0).getMaterialCode());
         assertEquals("K2025", context.getScheduleResultList().get(0).getLhMachineCode());
         assertEquals("3302001038", context.getScheduleResultList().get(1).getMaterialCode());
-        assertEquals("K2026", context.getScheduleResultList().get(1).getLhMachineCode());
+        assertEquals("K2025", context.getScheduleResultList().get(1).getLhMachineCode());
         assertEquals("3302000245", context.getScheduleResultList().get(2).getMaterialCode());
-        assertEquals("K2027", context.getScheduleResultList().get(2).getLhMachineCode());
+        assertEquals("K2025", context.getScheduleResultList().get(2).getLhMachineCode());
     }
 
     @Test
@@ -979,6 +981,7 @@ class NewSpecProductionStrategyRegressionTest {
         sku.setProSize("R17.5");
         sku.setPattern(pattern);
         sku.setMainPattern(pattern);
+        sku.setShiftCapacity(1);
         sku.setPendingQty(1);
         sku.setDailyPlanQty(1);
         sku.setTargetScheduleQty(1);

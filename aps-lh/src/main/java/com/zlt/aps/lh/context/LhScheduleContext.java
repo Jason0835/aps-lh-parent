@@ -91,6 +91,8 @@ public class LhScheduleContext {
     private List<LhMouldCleanPlan> cleaningPlanList = new ArrayList<>();
     /** 月底计划余量Map, key=materialCode */
     private Map<String, MdmMonthSurplus> monthSurplusMap = new HashMap<>();
+    /** 胎胚实时库存Map, key=embryoCode */
+    private Map<String, Integer> embryoRealtimeStockMap = new HashMap<>();
     /** 日完成量Map（按物料+完成日期聚合）, key=materialCode_finishDate(yyyy-MM-dd) */
     private Map<String, Integer> materialDayFinishedQtyMap = new HashMap<>();
     /** 月累计完成量Map（截至目标排产日期含当天）, key=materialCode */

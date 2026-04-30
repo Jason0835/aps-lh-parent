@@ -283,8 +283,10 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         int inheritedPlanQty = Math.max(0, context.getInheritedPlanQtyMap().getOrDefault(plan.getMaterialCode(), 0));
         dto.setWindowPlanQty(windowPlanQty);
         dto.setSurplusQty(surplus.getSurplusQty());
-        // 待排量 = (窗口计划量 - 已继承量) + 欠产传导量
-        dto.setPendingQty(Math.max(0, windowPlanQty - inheritedPlanQty) + carryForwardQty);
+        dto.setEmbryoStock(context.getEmbryoRealtimeStockMap().getOrDefault(plan.getEmbryoCode(), -1));
+        // 待排量以“余量/库存取大”为基线，再叠加滚动继承扣减与欠产传导，避免重复排产。
+        int basePendingQty = Math.max(surplus.getSurplusQty(), Math.max(0, dto.getEmbryoStock()));
+        dto.setPendingQty(Math.max(0, basePendingQty - inheritedPlanQty) + carryForwardQty);
         dto.setDailyPlanQty(plan.getDayVulcanizationQty() != null ? plan.getDayVulcanizationQty() : 0);
 
         // 产能信息（从SKU日硫化产能Map获取）

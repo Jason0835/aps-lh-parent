@@ -166,7 +166,6 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         cal.setTime(targetDate);
         int year = cal.get(Calendar.YEAR);
         int month = cal.get(Calendar.MONTH) + 1;
-        int yearMonth = year * 100 + month;
 
         // 1. 加载定稿排产版本
         loadFinalProductionVersion(context, factoryCode, year, month);
@@ -175,7 +174,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         }
 
         // 2. 加载月生产计划
-        loadMonthPlan(context, factoryCode, yearMonth);
+        loadMonthPlan(context, factoryCode, year, month);
 
         // 3. 加载胎胚实时库存
         loadEmbryoRealtimeStock(context, factoryCode, startDate);
@@ -383,12 +382,14 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      *
      * @param context     排程上下文
      * @param factoryCode 分厂编号
-     * @param yearMonth   年月（如202603）
+     * @param year        年份（yyyy）
+     * @param month       月份（m）
      */
-    private void loadMonthPlan(LhScheduleContext context, String factoryCode, int yearMonth) {
+    private void loadMonthPlan(LhScheduleContext context, String factoryCode, int year, int month) {
         LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult> wrapper = new LambdaQueryWrapper<FactoryMonthPlanProductionFinalResult>()
                 .eq(FactoryMonthPlanProductionFinalResult::getFactoryCode, factoryCode)
-                .eq(FactoryMonthPlanProductionFinalResult::getYearMonth, yearMonth)
+                .eq(FactoryMonthPlanProductionFinalResult::getYear, year)
+                .eq(FactoryMonthPlanProductionFinalResult::getMonth, month)
                 .eq(FactoryMonthPlanProductionFinalResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode());
         String productionVersion = context.getProductionVersion();
         if (StringUtils.isNotEmpty(productionVersion)) {

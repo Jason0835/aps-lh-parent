@@ -1168,7 +1168,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setSpecCode(sku.getSpecCode());
         result.setSpecDesc(sku.getSpecDesc());
         result.setEmbryoCode(sku.getEmbryoCode());
-        result.setEmbryoStock(sku.getEmbryoStock());
+        // 落库口径：库存未知(-1)按0落库，但排程过程仍保留-1语义用于跳过库存裁剪。
+        result.setEmbryoStock(Math.max(sku.getEmbryoStock(), 0));
         result.setMainMaterialDesc(sku.getMainMaterialDesc());
         result.setStructureName(sku.getStructureName());
         result.setScheduleDate(context.getScheduleTargetDate());

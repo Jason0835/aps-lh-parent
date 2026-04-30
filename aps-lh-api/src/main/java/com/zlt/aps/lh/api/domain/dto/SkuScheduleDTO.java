@@ -105,7 +105,7 @@ public class SkuScheduleDTO {
 
     // ========== 胎胚相关 ==========
     /** 胎胚库存 */
-    private int embryoStock = 0;
+    private int embryoStock = -1;
     /** 胎胚可供硫化时长(小时) */
     private double embryoSupplyHours;
 

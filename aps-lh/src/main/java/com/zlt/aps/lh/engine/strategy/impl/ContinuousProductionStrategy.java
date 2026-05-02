@@ -6,6 +6,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.api.domain.dto.MachineMaintenanceWindowDTO;
 import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
@@ -21,6 +22,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.service.impl.LhMaintenanceScheduleService;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
@@ -77,6 +79,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     private IEndingJudgmentStrategy endingJudgmentStrategy;
     @Resource
     private TargetScheduleQtyResolver targetScheduleQtyResolver;
+    @Resource
+    private LhMaintenanceScheduleService maintenanceScheduleService;
 
     @Override
     public String getStrategyType() {
@@ -191,6 +195,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                     completedMachineMap.put(machineCode, true);
                     continue;
                 }
+                getMaintenanceScheduleService().tryAttachMaintenanceAfterFirstEnding(
+                        context, machine, machine.getEstimatedEndTime());
                 Date typeBlockStartTime = calcTypeBlockStartTime(context, machine);
                 boolean success = appendFollowUpResult(
                         context, machine, typeBlockSku, typeBlockStartTime, shifts, true);
@@ -708,6 +714,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         }
         Date switchStartTime = resolveAllowedSwitchStartTime(
                 context, machine.getMachineCode(), machine.getEstimatedEndTime());
+        switchStartTime = getMaintenanceScheduleService().delaySwitchStartByMaintenance(
+                machine, switchStartTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
         // 换活字块：允许切换时间 + 换活字块总耗时
         return LhScheduleTimeUtil.addHours(switchStartTime,
                 LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
@@ -1203,11 +1211,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 context, sku, machine, switchStartTime, startTime, shifts);
         List<MachineCleaningWindowDTO> cleaningWindowList = new ArrayList<>(MachineCleaningOverlapUtil.excludeOverlapWindows(
                 machine.getCleaningWindowList(), switchStartTime, startTime));
+        List<MachineMaintenanceWindowDTO> maintenanceWindowList = resolveMachineMaintenanceWindowList(
+                context, machine.getMachineCode());
 
         // 按班次分配计划量
         int remaining = refinedTargetQty;
         distributeToShifts(context, result, shifts, startTime,
-                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining, cleaningWindowList);
+                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, remaining, cleaningWindowList,
+                maintenanceWindowList);
 
         refreshResultSummary(context, result, shifts);
         result.setRealScheduleDate(context.getScheduleDate());
@@ -1229,7 +1240,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                                    int lhTimeSeconds,
                                    int mouldQty,
                                    int remaining,
-                                   List<MachineCleaningWindowDTO> cleaningWindowList) {
+                                   List<MachineCleaningWindowDTO> cleaningWindowList,
+                                   List<MachineMaintenanceWindowDTO> maintenanceWindowList) {
         if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0) {
             return remaining;
         }
@@ -1260,6 +1272,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
                     context.getDevicePlanShutList(),
                     cleaningWindowList,
+                    maintenanceWindowList,
                     result.getLhMachineCode(),
                     effectiveStart,
                     shift.getShiftEndDateTime(),
@@ -1281,6 +1294,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
                     context.getDevicePlanShutList(),
                     cleaningWindowList,
+                    maintenanceWindowList,
                     result.getLhMachineCode(),
                     effectiveStart,
                     shift.getShiftEndDateTime(),
@@ -1394,6 +1408,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         Date cursorStartTime = resolveRedistributeStartTime(result, shifts);
         List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
                 context, result, resolveFirstPlannedShiftStartTime(result));
+        List<MachineMaintenanceWindowDTO> maintenanceWindowList = resolveMachineMaintenanceWindowList(
+                context, result.getLhMachineCode());
         int dryIceLossQty = context.getParamIntValue(
                 LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
         int dryIceDurationHours = context.getParamIntValue(
@@ -1416,6 +1432,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
                     context.getDevicePlanShutList(),
                     cleaningWindowList,
+                    maintenanceWindowList,
                     result.getLhMachineCode(),
                     effectiveStartTime,
                     shift.getShiftEndDateTime(),
@@ -1438,6 +1455,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
                     context.getDevicePlanShutList(),
                     cleaningWindowList,
+                    maintenanceWindowList,
                     result.getLhMachineCode(),
                     effectiveStartTime,
                     shift.getShiftEndDateTime(),
@@ -2001,6 +2019,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             Date actualCompletionTime = null;
             List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
                     context, result, resolveFirstPlannedShiftStartTime(result));
+            List<MachineMaintenanceWindowDTO> maintenanceWindowList = resolveMachineMaintenanceWindowList(
+                    context, result.getLhMachineCode());
             for (int shiftIndex = 1; shiftIndex <= 8; shiftIndex++) {
                 Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
                 Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shiftIndex);
@@ -2012,6 +2032,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
                 Date shiftCompletionTime = ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
                         context.getDevicePlanShutList(),
                         cleaningWindowList,
+                        maintenanceWindowList,
                         result.getLhMachineCode(),
                         shiftStartTime,
                         secondsNeeded);
@@ -2114,6 +2135,14 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             return new ArrayList<>();
         }
         return machine.getCleaningWindowList();
+    }
+
+    private List<MachineMaintenanceWindowDTO> resolveMachineMaintenanceWindowList(LhScheduleContext context, String machineCode) {
+        MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
+        if (machine == null || CollectionUtils.isEmpty(machine.getMaintenanceWindowList())) {
+            return new ArrayList<>();
+        }
+        return machine.getMaintenanceWindowList();
     }
 
     /**
@@ -2353,5 +2382,11 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         return targetScheduleQtyResolver != null
                 ? targetScheduleQtyResolver
                 : new TargetScheduleQtyResolver();
+    }
+
+    private LhMaintenanceScheduleService getMaintenanceScheduleService() {
+        return maintenanceScheduleService != null
+                ? maintenanceScheduleService
+                : new LhMaintenanceScheduleService();
     }
 }

@@ -76,6 +76,16 @@ public final class LhScheduleParamConstant {
     public static final String MAINTENANCE_START_HOUR = "MAINTENANCE_START_HOUR";
     /** 保养预警天数 */
     public static final String MAINTENANCE_WARNING_DAYS = "MAINTENANCE_WARNING_DAYS";
+    /** 每日最大保养台数 */
+    public static final String MAINTENANCE_DAILY_LIMIT = "MAINTENANCE_DAILY_LIMIT";
+    /** 是否允许周日安排保养 */
+    public static final String ALLOW_MAINTENANCE_ON_SUNDAY = "ALLOW_MAINTENANCE_ON_SUNDAY";
+    /** 节假日前N天不排保养 */
+    public static final String MAINTENANCE_HOLIDAY_BLOCK_DAYS = "MAINTENANCE_HOLIDAY_BLOCK_DAYS";
+    /** 长期在机提前检查天数 */
+    public static final String MAINTENANCE_FORCE_CHECK_DAYS = "MAINTENANCE_FORCE_CHECK_DAYS";
+    /** 是否允许盘点日安排保养 */
+    public static final String ALLOW_MAINTENANCE_ON_INVENTORY_DAY = "ALLOW_MAINTENANCE_ON_INVENTORY_DAY";
     /** 胶囊预热时间（小时） */
     public static final String CAPSULE_PREHEAT_HOURS = "CAPSULE_PREHEAT_HOURS";
     /** 排程天数 */

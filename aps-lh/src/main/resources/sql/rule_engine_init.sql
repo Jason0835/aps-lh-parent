@@ -63,6 +63,11 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 ('116', 'MAINTENANCE_DURATION_HOURS', '7', '保养耗时', '单位：小时'),
 ('116', 'MAINTENANCE_START_HOUR', '8', '保养开始小时', '固定从 8:00 开始'),
 ('116', 'MAINTENANCE_WARNING_DAYS', '30', '保养预警天数', '提前 30 天预警'),
+('116', 'MAINTENANCE_DAILY_LIMIT', '1', '每日最大保养台数', '每天最多安排 1 台硫化机保养'),
+('116', 'ALLOW_MAINTENANCE_ON_SUNDAY', '0', '是否允许周日保养', '0-不允许，1-允许'),
+('116', 'MAINTENANCE_HOLIDAY_BLOCK_DAYS', '2', '节假日前禁排保养天数', '节假日前 N 天不排保养'),
+('116', 'MAINTENANCE_FORCE_CHECK_DAYS', '3', '长期在机提前检查天数', '到期前 N 天检查长期在机'),
+('116', 'ALLOW_MAINTENANCE_ON_INVENTORY_DAY', '0', '是否允许盘点日保养', '0-不允许，1-允许'),
 ('116', 'CAPSULE_PREHEAT_HOURS', '2.5', '胶囊预热时间', '单位：小时'),
 
 -- ======================== 停机超时阈值 ========================

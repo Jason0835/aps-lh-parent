@@ -123,6 +123,18 @@ public class LhScheduleConfigResolver {
                 LhScheduleConstant.MAINTENANCE_DURATION_HOURS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MAINTENANCE_START_HOUR,
                 LhScheduleConstant.MAINTENANCE_START_HOUR);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MAINTENANCE_WARNING_DAYS,
+                LhScheduleConstant.MAINTENANCE_WARNING_DAYS);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MAINTENANCE_DAILY_LIMIT,
+                LhScheduleConstant.MAINTENANCE_DAILY_LIMIT, 1);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.ALLOW_MAINTENANCE_ON_SUNDAY,
+                LhScheduleConstant.ALLOW_MAINTENANCE_ON_SUNDAY);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MAINTENANCE_HOLIDAY_BLOCK_DAYS,
+                LhScheduleConstant.MAINTENANCE_HOLIDAY_BLOCK_DAYS, 0);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MAINTENANCE_FORCE_CHECK_DAYS,
+                LhScheduleConstant.MAINTENANCE_FORCE_CHECK_DAYS, 0);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.ALLOW_MAINTENANCE_ON_INVENTORY_DAY,
+                LhScheduleConstant.ALLOW_MAINTENANCE_ON_INVENTORY_DAY);
         putDoubleValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.CAPSULE_PREHEAT_HOURS,
                 LhScheduleConstant.CAPSULE_PREHEAT_HOURS.doubleValue());
 

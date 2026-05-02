@@ -211,6 +211,35 @@ public class LhScheduleConfig {
         return getParamIntValue(LhScheduleParamConstant.MAINTENANCE_START_HOUR, LhScheduleConstant.MAINTENANCE_START_HOUR);
     }
 
+    public int getMaintenanceWarningDays() {
+        return getParamIntValue(LhScheduleParamConstant.MAINTENANCE_WARNING_DAYS, LhScheduleConstant.MAINTENANCE_WARNING_DAYS);
+    }
+
+    public int getMaintenanceDailyLimit() {
+        return Math.max(1, getParamIntValue(LhScheduleParamConstant.MAINTENANCE_DAILY_LIMIT,
+                LhScheduleConstant.MAINTENANCE_DAILY_LIMIT));
+    }
+
+    public boolean isMaintenanceOnSundayAllowed() {
+        return getParamIntValue(LhScheduleParamConstant.ALLOW_MAINTENANCE_ON_SUNDAY,
+                LhScheduleConstant.ALLOW_MAINTENANCE_ON_SUNDAY) == 1;
+    }
+
+    public int getMaintenanceHolidayBlockDays() {
+        return Math.max(0, getParamIntValue(LhScheduleParamConstant.MAINTENANCE_HOLIDAY_BLOCK_DAYS,
+                LhScheduleConstant.MAINTENANCE_HOLIDAY_BLOCK_DAYS));
+    }
+
+    public int getMaintenanceForceCheckDays() {
+        return Math.max(0, getParamIntValue(LhScheduleParamConstant.MAINTENANCE_FORCE_CHECK_DAYS,
+                LhScheduleConstant.MAINTENANCE_FORCE_CHECK_DAYS));
+    }
+
+    public boolean isMaintenanceOnInventoryDayAllowed() {
+        return getParamIntValue(LhScheduleParamConstant.ALLOW_MAINTENANCE_ON_INVENTORY_DAY,
+                LhScheduleConstant.ALLOW_MAINTENANCE_ON_INVENTORY_DAY) == 1;
+    }
+
     public double getCapsulePreheatHours() {
         return getParamDoubleValue(LhScheduleParamConstant.CAPSULE_PREHEAT_HOURS,
                 LhScheduleConstant.CAPSULE_PREHEAT_HOURS.doubleValue());

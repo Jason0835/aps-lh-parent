@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.util;
 
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.api.domain.dto.MachineMaintenanceWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.enums.CleaningTypeEnum;
@@ -335,6 +336,27 @@ public final class ShiftCapacityResolverUtil {
                                                    String machineCode,
                                                    Date windowStartTime,
                                                    Date windowEndTime) {
+        return resolveNetProductiveSeconds(devicePlanShutList, cleaningWindowList, null, machineCode,
+                windowStartTime, windowEndTime);
+    }
+
+    /**
+     * 计算机台在指定时间窗内扣减计划停机、清洗和保养后的净生产秒数。
+     *
+     * @param devicePlanShutList 设备停机计划
+     * @param cleaningWindowList 清洗时间窗口
+     * @param maintenanceWindowList 保养时间窗口
+     * @param machineCode 机台编号
+     * @param windowStartTime 时间窗开始时间
+     * @param windowEndTime 时间窗结束时间
+     * @return 净生产秒数
+     */
+    public static long resolveNetProductiveSeconds(List<MdmDevicePlanShut> devicePlanShutList,
+                                                   List<MachineCleaningWindowDTO> cleaningWindowList,
+                                                   List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                                   String machineCode,
+                                                   Date windowStartTime,
+                                                   Date windowEndTime) {
         if (Objects.isNull(windowStartTime) || Objects.isNull(windowEndTime) || !windowStartTime.before(windowEndTime)) {
             return 0L;
         }
@@ -343,7 +365,7 @@ public final class ShiftCapacityResolverUtil {
             return 0L;
         }
         long downtimeSeconds = resolveDowntimeOverlapSeconds(
-                devicePlanShutList, cleaningWindowList, machineCode, windowStartTime, windowEndTime);
+                devicePlanShutList, cleaningWindowList, maintenanceWindowList, machineCode, windowStartTime, windowEndTime);
         return Math.max(availableSeconds - downtimeSeconds, 0L);
     }
 
@@ -375,14 +397,50 @@ public final class ShiftCapacityResolverUtil {
                                                        long shiftDurationSeconds,
                                                        int dryIceLossQty,
                                                        int dryIceDurationHours) {
+        return resolveShiftCapacityWithDowntime(devicePlanShutList, cleaningWindowList, null, machineCode,
+                windowStartTime, windowEndTime, shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds,
+                dryIceLossQty, dryIceDurationHours);
+    }
+
+    /**
+     * 计算扣减停机、清洗与保养后的班次最大计划量。
+     *
+     * @param devicePlanShutList 设备停机计划
+     * @param cleaningWindowList 清洗时间窗口
+     * @param maintenanceWindowList 保养时间窗口
+     * @param machineCode 机台编号
+     * @param windowStartTime 时间窗开始时间
+     * @param windowEndTime 时间窗结束时间
+     * @param shiftCapacity 班产
+     * @param lhTimeSeconds 硫化时长（秒）
+     * @param mouldQty 模台数
+     * @param shiftDurationSeconds 班次总时长（秒）
+     * @param dryIceLossQty 干冰清洗损失数量
+     * @param dryIceDurationHours 干冰标准清洗时长（小时）
+     * @return 扣减后的班次最大计划量
+     */
+    public static int resolveShiftCapacityWithDowntime(List<MdmDevicePlanShut> devicePlanShutList,
+                                                       List<MachineCleaningWindowDTO> cleaningWindowList,
+                                                       List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                                       String machineCode,
+                                                       Date windowStartTime,
+                                                       Date windowEndTime,
+                                                       int shiftCapacity,
+                                                       int lhTimeSeconds,
+                                                       int mouldQty,
+                                                       long shiftDurationSeconds,
+                                                       int dryIceLossQty,
+                                                       int dryIceDurationHours) {
         long stopAdjustedSeconds = resolveNetAvailableSeconds(
                 devicePlanShutList, machineCode, windowStartTime, windowEndTime);
         List<Date[]> stopIntervals = collectMergedPlannedStopIntervals(
                 devicePlanShutList, machineCode, windowStartTime, windowEndTime);
         long dryIceAdjustedSeconds = resolveDryIceAdjustedAvailableSeconds(
                 cleaningWindowList, stopIntervals, windowStartTime, windowEndTime, stopAdjustedSeconds);
+        long maintenanceAdjustedSeconds = resolveMaintenanceAdjustedAvailableSeconds(
+                maintenanceWindowList, stopIntervals, windowStartTime, windowEndTime, dryIceAdjustedSeconds);
         int stopAdjustedQty = resolveShiftCapacity(
-                shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds, dryIceAdjustedSeconds);
+                shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds, maintenanceAdjustedSeconds);
         if (stopAdjustedQty <= 0) {
             return 0;
         }
@@ -390,7 +448,7 @@ public final class ShiftCapacityResolverUtil {
                 cleaningWindowList, stopIntervals, windowStartTime, windowEndTime,
                 shiftCapacity, lhTimeSeconds, mouldQty, shiftDurationSeconds);
         int finalQty = Math.max(stopAdjustedQty - cleaningLossQty, 0);
-        boolean shouldNormalizeResidual = (shiftDurationSeconds > 0 && dryIceAdjustedSeconds < shiftDurationSeconds)
+        boolean shouldNormalizeResidual = (shiftDurationSeconds > 0 && maintenanceAdjustedSeconds < shiftDurationSeconds)
                 || cleaningLossQty > 0;
         return normalizeQtyToMouldMultiple(finalQty, mouldQty, shouldNormalizeResidual);
     }
@@ -449,11 +507,36 @@ public final class ShiftCapacityResolverUtil {
                                                Date shiftEndTime,
                                                int allocationQty,
                                                int shiftMaxQty) {
+        return resolveShiftPlanEndTime(devicePlanShutList, cleaningWindowList, null, machineCode,
+                effectiveStartTime, shiftEndTime, allocationQty, shiftMaxQty);
+    }
+
+    /**
+     * 计算班次内当前计划量对应的实际结束时间。
+     *
+     * @param devicePlanShutList 设备停机计划
+     * @param cleaningWindowList 清洗时间窗口
+     * @param maintenanceWindowList 保养时间窗口
+     * @param machineCode 机台编号
+     * @param effectiveStartTime 班次实际开产时间
+     * @param shiftEndTime 班次结束时间
+     * @param allocationQty 当前班次分配量
+     * @param shiftMaxQty 当前班次最大可排量
+     * @return 实际结束时间
+     */
+    public static Date resolveShiftPlanEndTime(List<MdmDevicePlanShut> devicePlanShutList,
+                                               List<MachineCleaningWindowDTO> cleaningWindowList,
+                                               List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                               String machineCode,
+                                               Date effectiveStartTime,
+                                               Date shiftEndTime,
+                                               int allocationQty,
+                                               int shiftMaxQty) {
         if (Objects.isNull(effectiveStartTime) || Objects.isNull(shiftEndTime) || allocationQty <= 0 || shiftMaxQty <= 0) {
             return effectiveStartTime;
         }
         long netProductiveSeconds = resolveNetProductiveSeconds(
-                devicePlanShutList, cleaningWindowList, machineCode, effectiveStartTime, shiftEndTime);
+                devicePlanShutList, cleaningWindowList, maintenanceWindowList, machineCode, effectiveStartTime, shiftEndTime);
         if (netProductiveSeconds <= 0) {
             return effectiveStartTime;
         }
@@ -462,7 +545,8 @@ public final class ShiftCapacityResolverUtil {
                 .divide(BigDecimal.valueOf(shiftMaxQty), 0, RoundingMode.UP)
                 .longValue();
         return resolveCompletionTimeWithDowntimes(
-                devicePlanShutList, cleaningWindowList, machineCode, effectiveStartTime, requiredProductiveSeconds);
+                devicePlanShutList, cleaningWindowList, maintenanceWindowList, machineCode, effectiveStartTime,
+                requiredProductiveSeconds);
     }
 
     /**
@@ -553,6 +637,27 @@ public final class ShiftCapacityResolverUtil {
                                                           String machineCode,
                                                           Date productionStartTime,
                                                           long productionSeconds) {
+        return resolveCompletionTimeWithDowntimes(devicePlanShutList, cleaningWindowList, null, machineCode,
+                productionStartTime, productionSeconds);
+    }
+
+    /**
+     * 推导考虑停机、清洗与保养空档后的完工时间。
+     *
+     * @param devicePlanShutList 设备停机计划
+     * @param cleaningWindowList 清洗时间窗口
+     * @param maintenanceWindowList 保养时间窗口
+     * @param machineCode 机台编号
+     * @param productionStartTime 生产开始时间
+     * @param productionSeconds 纯生产所需秒数
+     * @return 完工时间
+     */
+    public static Date resolveCompletionTimeWithDowntimes(List<MdmDevicePlanShut> devicePlanShutList,
+                                                          List<MachineCleaningWindowDTO> cleaningWindowList,
+                                                          List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                                          String machineCode,
+                                                          Date productionStartTime,
+                                                          long productionSeconds) {
         if (Objects.isNull(productionStartTime)) {
             return null;
         }
@@ -560,7 +665,7 @@ public final class ShiftCapacityResolverUtil {
             return productionStartTime;
         }
         List<Date[]> downtimeIntervals = collectMergedDowntimeIntervals(
-                devicePlanShutList, cleaningWindowList, machineCode, productionStartTime, null);
+                devicePlanShutList, cleaningWindowList, maintenanceWindowList, machineCode, productionStartTime, null);
         if (downtimeIntervals.isEmpty()) {
             return new Date(productionStartTime.getTime() + productionSeconds * 1000L);
         }
@@ -607,8 +712,29 @@ public final class ShiftCapacityResolverUtil {
                                                      String machineCode,
                                                      Date windowStartTime,
                                                      Date windowEndTime) {
+        return resolveDowntimeOverlapSeconds(devicePlanShutList, cleaningWindowList, null, machineCode,
+                windowStartTime, windowEndTime);
+    }
+
+    /**
+     * 计算指定时间窗内的停机、清洗与保养重叠秒数。
+     *
+     * @param devicePlanShutList 设备停机计划
+     * @param cleaningWindowList 清洗时间窗口
+     * @param maintenanceWindowList 保养时间窗口
+     * @param machineCode 机台编号
+     * @param windowStartTime 时间窗开始时间
+     * @param windowEndTime 时间窗结束时间
+     * @return 重叠秒数
+     */
+    public static long resolveDowntimeOverlapSeconds(List<MdmDevicePlanShut> devicePlanShutList,
+                                                     List<MachineCleaningWindowDTO> cleaningWindowList,
+                                                     List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                                     String machineCode,
+                                                     Date windowStartTime,
+                                                     Date windowEndTime) {
         List<Date[]> downtimeIntervals = collectMergedDowntimeIntervals(
-                devicePlanShutList, cleaningWindowList, machineCode, windowStartTime, windowEndTime);
+                devicePlanShutList, cleaningWindowList, maintenanceWindowList, machineCode, windowStartTime, windowEndTime);
         return resolveIntervalDurationSeconds(downtimeIntervals);
     }
 
@@ -650,6 +776,25 @@ public final class ShiftCapacityResolverUtil {
             dryIceOverlapSeconds += Math.max(effectiveOverlapSeconds, 0L);
         }
         return Math.max(availableSeconds - dryIceOverlapSeconds, 0L);
+    }
+
+    private static long resolveMaintenanceAdjustedAvailableSeconds(List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                                                   List<Date[]> stopIntervals,
+                                                                   Date windowStartTime,
+                                                                   Date windowEndTime,
+                                                                   long availableSeconds) {
+        if (availableSeconds <= 0 || CollectionUtils.isEmpty(maintenanceWindowList)) {
+            return Math.max(availableSeconds, 0L);
+        }
+        long maintenanceOverlapSeconds = 0L;
+        List<Date[]> maintenanceIntervals = collectMergedMaintenanceIntervals(
+                maintenanceWindowList, windowStartTime, windowEndTime);
+        for (Date[] maintenanceInterval : maintenanceIntervals) {
+            long effectiveOverlapSeconds = resolveEffectiveCleaningOverlapSeconds(
+                    maintenanceInterval, stopIntervals, windowStartTime, windowEndTime);
+            maintenanceOverlapSeconds += Math.max(effectiveOverlapSeconds, 0L);
+        }
+        return Math.max(availableSeconds - maintenanceOverlapSeconds, 0L);
     }
 
     private static int resolveSandBlastLossQty(List<MachineCleaningWindowDTO> cleaningWindowList,
@@ -701,11 +846,26 @@ public final class ShiftCapacityResolverUtil {
                                                                String machineCode,
                                                                Date windowStartTime,
                                                                Date windowEndTime) {
+        return collectMergedDowntimeIntervals(devicePlanShutList, cleaningWindowList, null, machineCode,
+                windowStartTime, windowEndTime);
+    }
+
+    /**
+     * 收集并合并“停机 + 清洗 + 保养”的所有不可生产区间。
+     */
+    private static List<Date[]> collectMergedDowntimeIntervals(List<MdmDevicePlanShut> devicePlanShutList,
+                                                               List<MachineCleaningWindowDTO> cleaningWindowList,
+                                                               List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                                               String machineCode,
+                                                               Date windowStartTime,
+                                                               Date windowEndTime) {
         List<Date[]> downtimeIntervals = new ArrayList<>();
         downtimeIntervals.addAll(collectMergedPlannedStopIntervals(
                 devicePlanShutList, machineCode, windowStartTime, windowEndTime));
         downtimeIntervals.addAll(collectMergedCleaningIntervals(
                 cleaningWindowList, null, windowStartTime, windowEndTime));
+        downtimeIntervals.addAll(collectMergedMaintenanceIntervals(
+                maintenanceWindowList, windowStartTime, windowEndTime));
         return mergeIntervals(downtimeIntervals);
     }
 
@@ -774,6 +934,34 @@ public final class ShiftCapacityResolverUtil {
             }
         }
         return mergeIntervals(cleaningIntervals);
+    }
+
+    /**
+     * 收集并合并指定时间窗内的保养区间。
+     */
+    private static List<Date[]> collectMergedMaintenanceIntervals(List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                                                  Date windowStartTime,
+                                                                  Date windowEndTime) {
+        List<Date[]> maintenanceIntervals = new ArrayList<>();
+        if (CollectionUtils.isEmpty(maintenanceWindowList) || Objects.isNull(windowStartTime)) {
+            return maintenanceIntervals;
+        }
+        for (MachineMaintenanceWindowDTO maintenanceWindow : maintenanceWindowList) {
+            if (Objects.isNull(maintenanceWindow)
+                    || Objects.isNull(maintenanceWindow.getMaintenanceStartTime())
+                    || Objects.isNull(maintenanceWindow.getMaintenanceEndTime())
+                    || !maintenanceWindow.getMaintenanceStartTime().before(maintenanceWindow.getMaintenanceEndTime())) {
+                continue;
+            }
+            Date overlapStartTime = later(maintenanceWindow.getMaintenanceStartTime(), windowStartTime);
+            Date overlapEndTime = windowEndTime == null
+                    ? maintenanceWindow.getMaintenanceEndTime()
+                    : earlier(maintenanceWindow.getMaintenanceEndTime(), windowEndTime);
+            if (overlapStartTime.before(overlapEndTime)) {
+                maintenanceIntervals.add(new Date[]{overlapStartTime, overlapEndTime});
+            }
+        }
+        return mergeIntervals(maintenanceIntervals);
     }
 
     /**

@@ -4,11 +4,11 @@ import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhMouldCleanPlan;
+import com.zlt.aps.lh.api.domain.entity.LhPrecisionPlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.handler.DataInitHandler;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
-import com.zlt.aps.mp.api.domain.entity.MdmDevMaintenancePlan;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
@@ -70,9 +70,9 @@ class MachineStateInitRegressionTest {
         sandBlast.setCleanTime(dateTime(2026, 4, 12, 7, 30));
         context.setCleaningPlanList(java.util.Arrays.asList(dryIce, sandBlast));
 
-        MdmDevMaintenancePlan maintenancePlan = new MdmDevMaintenancePlan();
-        maintenancePlan.setDevCode("M1");
-        maintenancePlan.setOperTime("2026-04-12 09:00:00");
+        LhPrecisionPlan maintenancePlan = new LhPrecisionPlan();
+        maintenancePlan.setMachineCode("M1");
+        maintenancePlan.setPlanDate(date(2026, 4, 12));
         context.getMaintenancePlanMap().put("M1", maintenancePlan);
 
         MdmDevicePlanShut repair = new MdmDevicePlanShut();
@@ -98,9 +98,8 @@ class MachineStateInitRegressionTest {
         assertTrue(machine.isHasSandBlastCleaning());
         assertEquals(dateTime(2026, 4, 12, 7, 30), machine.getCleaningPlanTime());
         assertEquals(2, machine.getCleaningWindowList().size());
-        assertTrue(machine.isHasMaintenancePlan());
+        assertTrue(!machine.isHasMaintenancePlan());
         assertTrue(machine.isHasRepairPlan());
-        assertNotNull(machine.getMaintenancePlanTime());
         assertEquals(dateTime(2026, 4, 13, 10, 0), machine.getRepairPlanTime());
         assertEquals(dateTime(2026, 4, 11, 20, 0), machine.getEstimatedEndTime());
         MachineCleaningWindowDTO firstCleaningWindow = machine.getCleaningWindowList().get(0);

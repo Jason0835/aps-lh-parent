@@ -6,6 +6,7 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.api.domain.dto.MachineMaintenanceWindowDTO;
 import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.context.LhScheduleConfig;
@@ -23,6 +24,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.service.impl.LhMaintenanceScheduleService;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
@@ -71,6 +73,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     private LocalSearchMachineAllocatorStrategy localSearchMachineAllocator;
     @Resource
     private TargetScheduleQtyResolver targetScheduleQtyResolver;
+    @Resource
+    private LhMaintenanceScheduleService maintenanceScheduleService;
 
     @Override
     public String getStrategyType() {
@@ -203,6 +207,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 // 3. 计算机台可开工时间（考虑机台当前预计完工和能力策略约束）
                 Date endingTime = candidateMachine.getEstimatedEndTime() != null
                         ? candidateMachine.getEstimatedEndTime() : resolveDefaultMachineEndTime(context, shifts);
+                getMaintenanceScheduleService().tryAttachLongOnlineMaintenance(context, candidateMachine);
+                getMaintenanceScheduleService().tryAttachMaintenanceAfterFirstEnding(context, candidateMachine, endingTime);
                 Date machineReadyTime = capacityCalculate.calculateStartTime(context,
                         machineCode, endingTime);
 
@@ -543,8 +549,11 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         int pendingQty = sku.resolveTargetScheduleQty();
         List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
                 context, result.getLhMachineCode(), mouldChangeStartTime, startTime);
+        List<MachineMaintenanceWindowDTO> maintenanceWindowList = resolveMachineMaintenanceWindowList(
+                context, result.getLhMachineCode());
         distributeToShifts(context, result, shifts, startTime,
-                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty, cleaningWindowList);
+                sku.getShiftCapacity(), sku.getLhTimeSeconds(), mouldQty, pendingQty, cleaningWindowList,
+                maintenanceWindowList);
         refreshResultSummary(context, result);
         applyCleaningMouldChangeAnalysis(context, result);
         return result;
@@ -663,7 +672,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                    int lhTimeSeconds,
                                    int mouldQty,
                                    int remaining,
-                                   List<MachineCleaningWindowDTO> cleaningWindowList) {
+                                   List<MachineCleaningWindowDTO> cleaningWindowList,
+                                   List<MachineMaintenanceWindowDTO> maintenanceWindowList) {
         if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0 || startTime == null) {
             return remaining;
         }
@@ -694,6 +704,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
                     context.getDevicePlanShutList(),
                     cleaningWindowList,
+                    maintenanceWindowList,
                     result.getLhMachineCode(),
                     effectiveStart,
                     shift.getShiftEndDateTime(),
@@ -713,6 +724,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 Date shiftPlanEndTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
                         context.getDevicePlanShutList(),
                         cleaningWindowList,
+                        maintenanceWindowList,
                         result.getLhMachineCode(),
                         effectiveStart,
                         shift.getShiftEndDateTime(),
@@ -851,6 +863,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             return ShiftCapacityResolverUtil.resolveCompletionTimeWithDowntimes(
                     context.getDevicePlanShutList(),
                     cleaningWindowList,
+                    resolveMachineMaintenanceWindowList(context, result.getLhMachineCode()),
                     result.getLhMachineCode(),
                     shiftStart,
                     secondsNeeded);
@@ -881,6 +894,14 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             return new ArrayList<>();
         }
         return machine.getCleaningWindowList();
+    }
+
+    private List<MachineMaintenanceWindowDTO> resolveMachineMaintenanceWindowList(LhScheduleContext context, String machineCode) {
+        MachineScheduleDTO machine = context.getMachineScheduleMap().get(machineCode);
+        if (machine == null || CollectionUtils.isEmpty(machine.getMaintenanceWindowList())) {
+            return new ArrayList<>();
+        }
+        return machine.getMaintenanceWindowList();
     }
 
     /**
@@ -921,6 +942,12 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         return targetScheduleQtyResolver != null
                 ? targetScheduleQtyResolver
                 : new TargetScheduleQtyResolver();
+    }
+
+    private LhMaintenanceScheduleService getMaintenanceScheduleService() {
+        return maintenanceScheduleService != null
+                ? maintenanceScheduleService
+                : new LhMaintenanceScheduleService();
     }
 
     private void updateMachineState(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku, LhScheduleResult result) {

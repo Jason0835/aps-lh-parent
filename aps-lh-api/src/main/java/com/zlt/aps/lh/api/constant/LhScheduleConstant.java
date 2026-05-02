@@ -142,6 +142,21 @@ public final class LhScheduleConstant {
     /** 保养预警天数 */
     public static final int MAINTENANCE_WARNING_DAYS = 30;
 
+    /** 每日最大保养台数 */
+    public static final int MAINTENANCE_DAILY_LIMIT = 1;
+
+    /** 是否允许周日安排保养 */
+    public static final int ALLOW_MAINTENANCE_ON_SUNDAY = 0;
+
+    /** 节假日前N天不排保养 */
+    public static final int MAINTENANCE_HOLIDAY_BLOCK_DAYS = 2;
+
+    /** 长期在机提前检查天数 */
+    public static final int MAINTENANCE_FORCE_CHECK_DAYS = 3;
+
+    /** 是否允许盘点日安排保养 */
+    public static final int ALLOW_MAINTENANCE_ON_INVENTORY_DAY = 0;
+
     /** 胶囊预热时间（小时） */
     public static final BigDecimal CAPSULE_PREHEAT_HOURS = new BigDecimal("2.5");
 

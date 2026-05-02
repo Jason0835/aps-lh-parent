@@ -17,6 +17,7 @@ import com.zlt.aps.lh.exception.ScheduleDomainExceptionHelper;
 import com.zlt.aps.lh.exception.ScheduleErrorCode;
 import com.zlt.aps.lh.service.ILhBaseDataService;
 import com.zlt.aps.lh.service.ILhShiftConfigService;
+import com.zlt.aps.lh.service.impl.LhMaintenanceScheduleService;
 import com.zlt.aps.lh.service.impl.RollingScheduleHandoffService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
@@ -58,6 +59,9 @@ public class DataInitHandler extends AbsScheduleStepHandler {
 
     @Resource
     private RollingScheduleHandoffService rollingScheduleHandoffService;
+
+    @Resource
+    private LhMaintenanceScheduleService maintenanceScheduleService;
 
     @Override
     protected void doHandle(LhScheduleContext context) {
@@ -112,6 +116,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
                 return;
             }
         }
+        attachLongOnlineMaintenanceWindows(context);
 
         log.info("基础数据初始化完成, 机台数量: {}, 月计划SKU数: {}",
                 context.getMachineInfoMap().size(), context.getMonthPlanList().size());
@@ -199,15 +204,7 @@ public class DataInitHandler extends AbsScheduleStepHandler {
                 }
             }
 
-            // 初始化保养计划
-            if (context.getMaintenancePlanMap().containsKey(machineCode)) {
-                Date maintenanceTime = LhScheduleTimeUtil.parseFlexibleDateTime(
-                        context.getMaintenancePlanMap().get(machineCode).getOperTime());
-                if (maintenanceTime != null) {
-                    dto.setHasMaintenancePlan(true);
-                    dto.setMaintenancePlanTime(maintenanceTime);
-                }
-            }
+            // 初始化仅保留精度保养计划基础数据，实际保养窗口在排程触发点动态挂载。
 
             // 初始化清洗计划
             attachCleaningPlanInfo(context, machineCode, dto);
@@ -229,6 +226,21 @@ public class DataInitHandler extends AbsScheduleStepHandler {
         context.setMachineScheduleMap(machineScheduleMap);
         context.setInitialMachineScheduleMap(copyMachineStateMap(machineScheduleMap));
         log.info("机台排程状态对象封装完成, 机台数量: {}", machineScheduleMap.size());
+    }
+
+    /**
+     * 挂载长期在机强制下机保养窗口。
+     *
+     * @param context 排程上下文
+     */
+    private void attachLongOnlineMaintenanceWindows(LhScheduleContext context) {
+        int scheduledCount = 0;
+        for (MachineScheduleDTO machine : context.getMachineScheduleMap().values()) {
+            if (maintenanceScheduleService.tryAttachLongOnlineMaintenance(context, machine)) {
+                scheduledCount++;
+            }
+        }
+        log.info("长期在机保养检查完成, 已安排保养机台数: {}", scheduledCount);
     }
 
     private Date resolveInitialEstimatedEndTime(LhScheduleContext context, String machineCode) {

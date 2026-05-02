@@ -1,6 +1,7 @@
 package com.zlt.aps.lh.util;
 
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.api.domain.dto.MachineMaintenanceWindowDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
@@ -217,6 +218,25 @@ class ShiftCapacityResolverUtilTest {
         assertEquals(shiftEnd, completionTime, "按剩余时间折算后的 12 条应在班末完工");
     }
 
+    @Test
+    void maintenanceWindowWithinShift_shouldReduceShiftQtyAndDelayCompletion() {
+        Date shiftStart = dateTime(2026, 4, 22, 14, 0);
+        Date shiftEnd = dateTime(2026, 4, 22, 22, 0);
+        List<MachineMaintenanceWindowDTO> maintenanceWindowList = Arrays.asList(
+                buildMaintenanceWindow("K1110",
+                        dateTime(2026, 4, 22, 14, 0, 0),
+                        dateTime(2026, 4, 22, 15, 0, 0))
+        );
+
+        int shiftQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                null, null, maintenanceWindowList, "K1110", shiftStart, shiftEnd, 22, 2160, 2, 8 * 3600L, 6, 3);
+        Date completionTime = ShiftCapacityResolverUtil.resolveShiftPlanEndTime(
+                null, null, maintenanceWindowList, "K1110", shiftStart, shiftEnd, 18, 18);
+
+        assertEquals(18, shiftQty, "保养占用中班 1 小时后，应按剩余 7/8 时间折算班产并收敛到双模偶数");
+        assertEquals(shiftEnd, completionTime, "保养窗口应进入时间轴，生产完工需跳过保养占用时段");
+    }
+
     private LhShiftConfigVO findMorningShift(Date scheduleDate) {
         LhScheduleContext context = new LhScheduleContext();
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate);
@@ -283,5 +303,13 @@ class ShiftCapacityResolverUtilTest {
         cleaningWindow.setCleanEndTime(cleanEndTime);
         cleaningWindow.setReadyTime(readyTime);
         return cleaningWindow;
+    }
+
+    private static MachineMaintenanceWindowDTO buildMaintenanceWindow(String machineCode, Date startTime, Date endTime) {
+        MachineMaintenanceWindowDTO maintenanceWindow = new MachineMaintenanceWindowDTO();
+        maintenanceWindow.setMachineCode(machineCode);
+        maintenanceWindow.setMaintenanceStartTime(startTime);
+        maintenanceWindow.setMaintenanceEndTime(endTime);
+        return maintenanceWindow;
     }
 }

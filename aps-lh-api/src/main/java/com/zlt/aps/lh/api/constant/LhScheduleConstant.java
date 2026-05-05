@@ -201,6 +201,9 @@ public final class LhScheduleConstant {
     /** 停机超时阈值（小时） */
     public static final int MACHINE_STOP_TIMEOUT_HOURS = 24;
 
+    /** 硫化定点机台规则开关默认值（0-关闭，1-开启） */
+    public static final int ENABLE_SPECIFY_MACHINE_RULE = 0;
+
     /** 模具清洗提前天数 */
     public static final int MOULD_CLEANING_ADVANCE_DAYS = 2;
 

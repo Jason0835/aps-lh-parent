@@ -3,11 +3,11 @@ package com.zlt.aps.lh.engine.strategy.impl;
 import com.zlt.aps.lh.api.constant.LhScheduleConstant;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine;
-import com.zlt.aps.lh.api.enums.JobTypeEnum;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.LhSpecifyMachineUtil;
 import com.zlt.aps.lh.util.MachineStatusUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
@@ -67,20 +67,18 @@ public class DefaultTrialProductionStrategy implements ITrialProductionStrategy 
         if (StringUtils.isEmpty(trialSku.getMaterialCode())) {
             return null;
         }
-        List<LhSpecifyMachine> specifyList =
-                context.getSpecifyMachineMap().get(trialSku.getMaterialCode());
+        List<LhSpecifyMachine> specifyList = LhSpecifyMachineUtil.listLimitSpecifyMachinesByMaterialCode(
+                context, trialSku.getMaterialCode());
         if (CollectionUtils.isEmpty(specifyList)) {
             return null;
         }
-        // 优先取"限制作业"(0)的机台
+        // 按限制作业机台顺序选择第一台启用机台
         for (LhSpecifyMachine specify : specifyList) {
-            if (StringUtils.equals(JobTypeEnum.RESTRICTED.getCode(), specify.getJobType())) {
-                com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO machine =
-                        context.getMachineScheduleMap().get(specify.getMachineCode());
-                if (machine != null && MachineStatusUtil.isEnabled(machine.getStatus())) {
-                    log.debug("试制量试机台匹配, SKU: {}, 机台: {}", trialSku.getMaterialCode(), specify.getMachineCode());
-                    return specify.getMachineCode();
-                }
+            com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO machine =
+                    context.getMachineScheduleMap().get(specify.getMachineCode());
+            if (machine != null && MachineStatusUtil.isEnabled(machine.getStatus())) {
+                log.debug("试制量试机台匹配, SKU: {}, 机台: {}", trialSku.getMaterialCode(), specify.getMachineCode());
+                return specify.getMachineCode();
             }
         }
         return null;

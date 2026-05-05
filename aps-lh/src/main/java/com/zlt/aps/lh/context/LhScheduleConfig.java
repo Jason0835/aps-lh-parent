@@ -331,6 +331,16 @@ public class LhScheduleConfig {
         return getParamIntValue(LhScheduleParamConstant.MACHINE_STOP_TIMEOUT_HOURS, LhScheduleConstant.MACHINE_STOP_TIMEOUT_HOURS);
     }
 
+    /**
+     * 判断是否启用硫化定点机台规则。
+     *
+     * @return true-启用；false-关闭
+     */
+    public boolean isSpecifyMachineRuleEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.ENABLE_SPECIFY_MACHINE_RULE,
+                LhScheduleConstant.ENABLE_SPECIFY_MACHINE_RULE) == 1;
+    }
+
     public int getMouldCleaningAdvanceDays() {
         return Math.max(0, getParamIntValue(LhScheduleParamConstant.MOULD_CLEANING_ADVANCE_DAYS,
                 LhScheduleConstant.MOULD_CLEANING_ADVANCE_DAYS));

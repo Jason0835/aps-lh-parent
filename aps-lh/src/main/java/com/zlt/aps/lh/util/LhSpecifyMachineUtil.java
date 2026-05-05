@@ -145,7 +145,7 @@ public final class LhSpecifyMachineUtil {
      */
     private static List<LhSpecifyMachine> listSpecifyMachinesByMaterialCode(LhScheduleContext context,
                                                                             String materialCode) {
-        if (Objects.isNull(context) || StringUtils.isEmpty(materialCode)
+        if (!isSpecifyMachineRuleEnabled(context) || Objects.isNull(context) || StringUtils.isEmpty(materialCode)
                 || CollectionUtils.isEmpty(context.getSpecifyMachineMap())) {
             return new ArrayList<>(0);
         }
@@ -164,7 +164,8 @@ public final class LhSpecifyMachineUtil {
     private static List<LhSpecifyMachine> filterAllSpecifyMachines(LhScheduleContext context,
                                                                    String jobType,
                                                                    String machineCode) {
-        if (Objects.isNull(context) || CollectionUtils.isEmpty(context.getSpecifyMachineMap())) {
+        if (!isSpecifyMachineRuleEnabled(context) || Objects.isNull(context)
+                || CollectionUtils.isEmpty(context.getSpecifyMachineMap())) {
             return new ArrayList<>(0);
         }
         List<LhSpecifyMachine> resultList = new ArrayList<>(8);
@@ -200,5 +201,16 @@ public final class LhSpecifyMachineUtil {
             resultList.add(specifyMachine);
         }
         return resultList;
+    }
+
+    /**
+     * 判断硫化定点机台规则是否启用。
+     *
+     * @param context 排程上下文
+     * @return true-启用；false-关闭
+     */
+    private static boolean isSpecifyMachineRuleEnabled(LhScheduleContext context) {
+        return Objects.nonNull(context) && Objects.nonNull(context.getScheduleConfig())
+                && context.getScheduleConfig().isSpecifyMachineRuleEnabled();
     }
 }

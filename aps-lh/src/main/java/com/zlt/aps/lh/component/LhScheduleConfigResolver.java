@@ -184,6 +184,8 @@ public class LhScheduleConfigResolver {
                 LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS, 1);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MACHINE_STOP_TIMEOUT_HOURS,
                 LhScheduleConstant.MACHINE_STOP_TIMEOUT_HOURS);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.ENABLE_SPECIFY_MACHINE_RULE,
+                LhScheduleConstant.ENABLE_SPECIFY_MACHINE_RULE);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.MOULD_CLEANING_ADVANCE_DAYS,
                 LhScheduleConstant.MOULD_CLEANING_ADVANCE_DAYS, 0);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.ENABLE_LOCAL_SEARCH,

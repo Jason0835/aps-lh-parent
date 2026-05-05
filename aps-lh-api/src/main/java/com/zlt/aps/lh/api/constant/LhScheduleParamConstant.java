@@ -124,6 +124,8 @@ public final class LhScheduleParamConstant {
     public static final String MACHINE_ONLINE_LOOKBACK_DAYS = "MACHINE_ONLINE_LOOKBACK_DAYS";
     /** 停机超时阈值（小时） */
     public static final String MACHINE_STOP_TIMEOUT_HOURS = "MACHINE_STOP_TIMEOUT_HOURS";
+    /** 硫化定点机台规则开关（0-关闭，1-开启） */
+    public static final String ENABLE_SPECIFY_MACHINE_RULE = "ENABLE_SPECIFY_MACHINE_RULE";
     /** 模具清洗提前天数 */
     public static final String MOULD_CLEANING_ADVANCE_DAYS = "MOULD_CLEANING_ADVANCE_DAYS";
     /** 胶囊预警次数 */

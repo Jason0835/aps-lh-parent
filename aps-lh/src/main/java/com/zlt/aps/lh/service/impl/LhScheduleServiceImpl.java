@@ -148,12 +148,13 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
         int offsetDays = Math.max(0, scheduleDays - 1);
         // 引擎使用 T 日 = 目标日 − (连续排程日历跨度 − 1)
         context.setScheduleDate(LhScheduleTimeUtil.addDays(target, -offsetDays));
-        log.info("排程上下文构建完成, 工厂: {}, 工厂名称: {}, 目标日: {}, T日: {}, 排程天数: {}, 强制重排: {}, 局部搜索: {}",
+        log.info("排程上下文构建完成, 工厂: {}, 工厂名称: {}, 目标日: {}, T日: {}, 排程天数: {}, 强制重排: {}, 局部搜索: {}, 定点机台规则: {}",
                 context.getFactoryCode(), context.getFactoryDisplayName(),
                 LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()),
                 LhScheduleTimeUtil.formatDate(context.getScheduleDate()), scheduleDays,
                 context.getScheduleConfig().isForceRescheduleEnabled(),
-                context.getScheduleConfig().isLocalSearchEnabled());
+                context.getScheduleConfig().isLocalSearchEnabled(),
+                context.getScheduleConfig().isSpecifyMachineRuleEnabled());
         return context;
     }
 }

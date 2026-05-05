@@ -120,6 +120,7 @@ class ContinuousProductionTypeBlockRegressionTest {
     @Test
     void scheduleTypeBlockChange_shouldPrioritizeLimitSpecifySkuAfterEnding() {
         LhScheduleContext context = newContext();
+        enableSpecifyMachineRule(context);
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
         context.getNewSpecSkuList().add(buildNewSku("MAT-PRIORITY", "EMB-9", "STRUCT-B", "SPEC-B", "PAT-A", 4));
@@ -152,6 +153,7 @@ class ContinuousProductionTypeBlockRegressionTest {
     @Test
     void scheduleContinuousEnding_shouldSqueezeLastWorkDayForLimitSpecifySku() {
         LhScheduleContext context = newContext();
+        enableSpecifyMachineRule(context);
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 80));
         context.getNewSpecSkuList().add(buildNewSku("MAT-SPECIFY", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 8));
@@ -181,8 +183,36 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
+    void scheduleContinuousEnding_shouldNotSqueezeWhenSpecifyMachineRuleDisabled() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 80));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-SPECIFY", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 8));
+        context.getSpecifyMachineMap().put("MAT-SPECIFY", Arrays.asList(
+                specifyMachine("MAT-SPECIFY", "M1", JobTypeEnum.RESTRICTED.getCode())));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-SPECIFY", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
+
+        strategy.scheduleContinuousEnding(context);
+
+        LhScheduleResult continuousResult = context.getScheduleResultList().get(0);
+        assertNotNull(ShiftFieldUtil.getShiftStartTime(continuousResult, 6),
+                "关闭开关后不应为定点物料挤出最后业务日夜班");
+        assertNotNull(ShiftFieldUtil.getShiftStartTime(continuousResult, 7),
+                "关闭开关后不应为定点物料挤出最后业务日早班");
+        assertNotNull(ShiftFieldUtil.getShiftStartTime(continuousResult, 8),
+                "关闭开关后不应为定点物料挤出最后业务日中班");
+        assertTrue(context.getSpecifyMachineReservedMaterialMap().isEmpty(), "关闭开关后不应写入定点预留物料");
+        assertTrue(context.getSpecifyMachineReservedSwitchStartTimeMap().isEmpty(), "关闭开关后不应写入定点预留时间");
+    }
+
+    @Test
     void scheduleContinuousEnding_shouldNotSqueezeWhenSpecifySkuCannotUseReservedMachine() {
         LhScheduleContext context = newContext();
+        enableSpecifyMachineRule(context);
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 80));
         context.getNewSpecSkuList().add(buildNewSku("MAT-SPECIFY", "EMB-9", "STRUCT-B", "SPEC-B", "PAT-B", 8));
@@ -211,6 +241,7 @@ class ContinuousProductionTypeBlockRegressionTest {
     @Test
     void scheduleTypeBlockChange_shouldReserveMachineForSpecifySkuRequiringNewSpecMouldChange() {
         LhScheduleContext context = newContext();
+        enableSpecifyMachineRule(context);
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
         context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 4));
@@ -1097,6 +1128,12 @@ class ContinuousProductionTypeBlockRegressionTest {
         paramMap.put(LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG, "1");
         context.setScheduleConfig(new LhScheduleConfig(paramMap));
         return context;
+    }
+
+    private void enableSpecifyMachineRule(LhScheduleContext context) {
+        Map<String, String> paramMap = new HashMap<>(1);
+        paramMap.put(LhScheduleParamConstant.ENABLE_SPECIFY_MACHINE_RULE, "1");
+        context.setScheduleConfig(new LhScheduleConfig(paramMap));
     }
 
     private LhScheduleConfig createConfig(int typeBlockHours, int inspectionHours) {

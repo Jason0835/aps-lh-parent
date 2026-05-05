@@ -35,6 +35,7 @@ class DefaultMachineMatchStrategyRegressionTest {
     void matchMachines_shouldUseSpecifySpecCodeAsMaterialCodeForLimitPriority() {
         DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
         LhScheduleContext context = buildContext();
+        enableSpecifyMachineRule(context);
 
         MachineScheduleDTO normalMachine = machine("M-NORMAL", dateTime(2026, 4, 21, 8, 0),
                 "SPEC-A", "22.5", "MAT-NORMAL");
@@ -58,6 +59,7 @@ class DefaultMachineMatchStrategyRegressionTest {
     void matchMachines_shouldFallbackToNormalMachineWhenLimitMachineUnavailable() {
         DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
         LhScheduleContext context = buildContext();
+        enableSpecifyMachineRule(context);
 
         MachineScheduleDTO disabledSpecifyMachine = machine("M-SPECIFY", dateTime(2026, 4, 21, 7, 0),
                 "SPEC-A", "22.5", "MAT-SPECIFY");
@@ -79,6 +81,7 @@ class DefaultMachineMatchStrategyRegressionTest {
     void matchMachines_shouldExcludeNotAllowedMachineByMaterialCode() {
         DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
         LhScheduleContext context = buildContext();
+        enableSpecifyMachineRule(context);
 
         MachineScheduleDTO forbiddenMachine = machine("M-FORBIDDEN", dateTime(2026, 4, 21, 7, 0),
                 "SPEC-A", "22.5", "MAT-FORBIDDEN");
@@ -93,6 +96,46 @@ class DefaultMachineMatchStrategyRegressionTest {
 
         assertEquals(1, candidates.size(), "不可作业机台必须按物料编码定点关系排除");
         assertEquals("M-NORMAL", candidates.get(0).getMachineCode());
+    }
+
+    @Test
+    void matchMachines_shouldIgnoreLimitSpecifyPriorityWhenRuleDisabled() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO normalMachine = machine("M-NORMAL", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-NORMAL");
+        MachineScheduleDTO specifyMachine = machine("M-SPECIFY", dateTime(2026, 4, 21, 8, 30),
+                "SPEC-X", "22.5", "MAT-SPECIFY");
+        context.getMachineScheduleMap().put(normalMachine.getMachineCode(), normalMachine);
+        context.getMachineScheduleMap().put(specifyMachine.getMachineCode(), specifyMachine);
+        context.getSpecifyMachineMap().put("MAT-001", Collections.singletonList(
+                specifyMachine("MAT-001", "M-SPECIFY", JobTypeEnum.RESTRICTED.getCode())));
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku("MAT-001", "SPEC-A", "22.5"));
+
+        assertEquals(2, candidates.size(), "关闭开关后定点机台不应提升优先级");
+        assertEquals("M-NORMAL", candidates.get(0).getMachineCode());
+    }
+
+    @Test
+    void matchMachines_shouldIgnoreNotAllowedMachineWhenRuleDisabled() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO forbiddenMachine = machine("M-FORBIDDEN", dateTime(2026, 4, 21, 7, 0),
+                "SPEC-A", "22.5", "MAT-FORBIDDEN");
+        MachineScheduleDTO normalMachine = machine("M-NORMAL", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-NORMAL");
+        context.getMachineScheduleMap().put(forbiddenMachine.getMachineCode(), forbiddenMachine);
+        context.getMachineScheduleMap().put(normalMachine.getMachineCode(), normalMachine);
+        context.getSpecifyMachineMap().put("MAT-001", Collections.singletonList(
+                specifyMachine("MAT-001", "M-FORBIDDEN", JobTypeEnum.NOT_ALLOWED.getCode())));
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku("MAT-001", "SPEC-A", "22.5"));
+
+        assertEquals(2, candidates.size(), "关闭开关后不可作业配置不应过滤候选机台");
+        assertEquals("M-FORBIDDEN", candidates.get(0).getMachineCode());
     }
 
     @Test
@@ -415,6 +458,12 @@ class DefaultMachineMatchStrategyRegressionTest {
         context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
                 LhScheduleParamConstant.ENABLE_PRIORITY_TRACE_LOG, "1")));
         return context;
+    }
+
+    private void enableSpecifyMachineRule(LhScheduleContext context) {
+        Map<String, String> paramMap = new HashMap<>(1);
+        paramMap.put(LhScheduleParamConstant.ENABLE_SPECIFY_MACHINE_RULE, "1");
+        context.setScheduleConfig(new LhScheduleConfig(paramMap));
     }
 
     private MachineScheduleDTO machine(String machineCode, Date estimatedEndTime, String previousSpecCode,

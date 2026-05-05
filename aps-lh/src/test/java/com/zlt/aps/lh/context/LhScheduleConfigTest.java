@@ -34,4 +34,27 @@ public class LhScheduleConfigTest {
         Assertions.assertEquals(4, config.getSandBlastAdvanceDays());
         Assertions.assertEquals(5, config.getMouldCleaningAdvanceDays());
     }
+
+    /**
+     * 用例说明：未配置硫化定点机台规则开关时默认关闭。
+     */
+    @Test
+    public void shouldDisableSpecifyMachineRuleByDefault() {
+        LhScheduleConfig config = new LhScheduleConfig(new HashMap<String, String>(0));
+
+        Assertions.assertFalse(config.isSpecifyMachineRuleEnabled());
+    }
+
+    /**
+     * 用例说明：硫化定点机台规则开关配置为1时启用。
+     */
+    @Test
+    public void shouldEnableSpecifyMachineRuleWhenConfiguredOne() {
+        Map<String, String> paramMap = new HashMap<>(1);
+        paramMap.put(LhScheduleParamConstant.ENABLE_SPECIFY_MACHINE_RULE, "1");
+
+        LhScheduleConfig config = new LhScheduleConfig(paramMap);
+
+        Assertions.assertTrue(config.isSpecifyMachineRuleEnabled());
+    }
 }

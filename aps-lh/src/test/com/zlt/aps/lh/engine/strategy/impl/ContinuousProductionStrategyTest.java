@@ -209,6 +209,27 @@ public class ContinuousProductionStrategyTest {
     }
 
     @Test
+    public void adjustEmbryoStock_shouldConsumeAllocatedStockByMaterialCode() {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(toDate(2026, 4, 25, 0, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.setContinuousSkuList(Arrays.asList(
+                buildSku("MAT-SHARE-A", "EMB-SAME", 50),
+                buildSku("MAT-SHARE-B", "EMB-SAME", 100)));
+        context.getScheduleResultList().add(buildContinuousResult("MAT-SHARE-A", "EMB-SAME", 80));
+        context.getScheduleResultList().add(buildContinuousResult("MAT-SHARE-B", "EMB-SAME", 80));
+
+        strategy.adjustEmbryoStock(context);
+
+        assertEquals(50, context.getScheduleResultList().get(0).getDailyPlanQty().intValue(),
+                "同胎胚不同SKU应按各自分摊库存裁剪");
+        assertEquals(80, context.getScheduleResultList().get(1).getDailyPlanQty().intValue(),
+                "同胎胚不同SKU不应被前一个SKU按胎胚编号扣减库存");
+    }
+
+    @Test
     public void scheduleReduceMould_shouldRecheckIsEndAfterPlanQtyReduced() {
         ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
 
@@ -377,6 +398,45 @@ public class ContinuousProductionStrategyTest {
         SkuScheduleDTO sku = new SkuScheduleDTO();
         sku.setMaterialCode(materialCode);
         return sku;
+    }
+
+    /**
+     * 构建带分摊库存的SKU。
+     *
+     * @param materialCode 物料编码
+     * @param embryoCode 胎胚编码
+     * @param embryoStock 分摊胎胚库存
+     * @return SKU
+     */
+    private SkuScheduleDTO buildSku(String materialCode, String embryoCode, int embryoStock) {
+        SkuScheduleDTO sku = sku(materialCode);
+        sku.setEmbryoCode(embryoCode);
+        sku.setEmbryoStock(embryoStock);
+        return sku;
+    }
+
+    /**
+     * 构建续作排程结果。
+     *
+     * @param materialCode 物料编码
+     * @param embryoCode 胎胚编码
+     * @param planQty 计划量
+     * @return 续作排程结果
+     */
+    private LhScheduleResult buildContinuousResult(String materialCode, String embryoCode, int planQty) {
+        LhScheduleResult result = new LhScheduleResult();
+        result.setScheduleType("01");
+        result.setMaterialCode(materialCode);
+        result.setEmbryoCode(embryoCode);
+        result.setMouldSurplusQty(0);
+        result.setEmbryoStock(planQty);
+        result.setLhTime(3600);
+        result.setMouldQty(1);
+        result.setSingleMouldShiftQty(100);
+        result.setIsEnd("0");
+        ShiftFieldUtil.setShiftPlanQty(result, 1, planQty, null, null);
+        ShiftFieldUtil.syncDailyPlanQty(result);
+        return result;
     }
 
     /**

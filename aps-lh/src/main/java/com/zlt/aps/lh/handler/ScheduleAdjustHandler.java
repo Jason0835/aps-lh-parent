@@ -156,11 +156,12 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
         // 按结构归集SKU（key=结构名称，value=该结构下的SKU排程DTO列表）
         Map<String, List<SkuScheduleDTO>> structureSkuMap = new LinkedHashMap<>();
+        Map<String, Integer> embryoStandardCapacitySumMap = buildEmbryoStandardCapacitySumMap(context);
 
         for (FactoryMonthPlanProductionFinalResult plan : monthPlanList) {
             // 计算硫化余量
             SurplusCalculation surplus = calculateSurplusQty(context, plan);
-            SkuScheduleDTO dto = buildSkuScheduleDTO(context, plan, surplus);
+            SkuScheduleDTO dto = buildSkuScheduleDTO(context, plan, surplus, embryoStandardCapacitySumMap);
 
             // 产品结构为空，跳过
             if (StringUtils.isEmpty(plan.getStructureName())) {
@@ -267,11 +268,13 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
      * @param context    排程上下文
      * @param plan       月生产计划记录
      * @param surplus 硫化余量
+     * @param embryoStandardCapacitySumMap 同胎胚标准产能汇总Map
      * @return SKU排程DTO
      */
     private SkuScheduleDTO buildSkuScheduleDTO(LhScheduleContext context,
                                                FactoryMonthPlanProductionFinalResult plan,
-                                               SurplusCalculation surplus) {
+                                               SurplusCalculation surplus,
+                                               Map<String, Integer> embryoStandardCapacitySumMap) {
         SkuScheduleDTO dto = new SkuScheduleDTO();
         dto.setMaterialCode(plan.getMaterialCode());
         dto.setMaterialDesc(plan.getMaterialDesc());
@@ -294,7 +297,7 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         int inheritedPlanQty = Math.max(0, context.getInheritedPlanQtyMap().getOrDefault(plan.getMaterialCode(), 0));
         dto.setWindowPlanQty(windowPlanQty);
         dto.setSurplusQty(surplus.getSurplusQty());
-        dto.setEmbryoStock(context.getEmbryoRealtimeStockMap().getOrDefault(plan.getEmbryoCode(), -1));
+        dto.setEmbryoStock(resolveAllocatedEmbryoStock(context, plan, embryoStandardCapacitySumMap));
         // 待排量以“余量/库存取大”为基线，再叠加滚动继承扣减与欠产传导，避免重复排产。
         int basePendingQty = Math.max(surplus.getSurplusQty(), Math.max(0, dto.getEmbryoStock()));
         if (context.isStopProductionMode()) {
@@ -356,6 +359,55 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         dto.setSkuTag(SkuTagEnum.NORMAL.getCode());
 
         return dto;
+    }
+
+    /**
+     * 构建同胎胚标准产能汇总Map。
+     *
+     * @param context 排程上下文
+     * @return 同胎胚标准产能汇总Map，key=胎胚编号
+     */
+    private Map<String, Integer> buildEmbryoStandardCapacitySumMap(LhScheduleContext context) {
+        Map<String, Integer> embryoStandardCapacitySumMap = new LinkedHashMap<>();
+        for (FactoryMonthPlanProductionFinalResult plan : context.getMonthPlanList()) {
+            if (StringUtils.isEmpty(plan.getEmbryoCode())) {
+                continue;
+            }
+            MdmSkuLhCapacity capacity = context.getSkuLhCapacityMap().get(plan.getMaterialCode());
+            if (Objects.nonNull(capacity)
+                    && Objects.nonNull(capacity.getStandardCapacity())
+                    && capacity.getStandardCapacity() > 0) {
+                embryoStandardCapacitySumMap.merge(plan.getEmbryoCode(), capacity.getStandardCapacity(), Integer::sum);
+            }
+        }
+        return embryoStandardCapacitySumMap;
+    }
+
+    /**
+     * 解析SKU分摊后的胎胚库存。
+     *
+     * @param context 排程上下文
+     * @param plan 月计划
+     * @param embryoStandardCapacitySumMap 同胎胚标准产能汇总Map
+     * @return SKU分摊胎胚库存，-1表示库存未知
+     */
+    private int resolveAllocatedEmbryoStock(LhScheduleContext context,
+                                            FactoryMonthPlanProductionFinalResult plan,
+                                            Map<String, Integer> embryoStandardCapacitySumMap) {
+        if (StringUtils.isEmpty(plan.getEmbryoCode())
+                || !context.getEmbryoRealtimeStockMap().containsKey(plan.getEmbryoCode())) {
+            return -1;
+        }
+        MdmSkuLhCapacity capacity = context.getSkuLhCapacityMap().get(plan.getMaterialCode());
+        Integer embryoStock = context.getEmbryoRealtimeStockMap().get(plan.getEmbryoCode());
+        Integer embryoStandardCapacitySum = embryoStandardCapacitySumMap.get(plan.getEmbryoCode());
+        int allocatedStock = (int) (embryoStock.longValue() * capacity.getStandardCapacity()
+                / embryoStandardCapacitySum);
+        log.debug("同胎胚库存按标准产能分摊, materialCode: {}, embryoCode: {}, standardCapacity: {}, "
+                        + "embryoStandardCapacitySum: {}, embryoStock: {}, allocatedStock: {}",
+                plan.getMaterialCode(), plan.getEmbryoCode(), capacity.getStandardCapacity(),
+                embryoStandardCapacitySum, embryoStock, allocatedStock);
+        return allocatedStock;
     }
 
     /**

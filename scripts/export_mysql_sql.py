@@ -38,7 +38,8 @@ TABLE_NAMES = [
     "T_MDM_MOULD_INFO",
     "T_CX_STOCK",
     "T_MDM_MATERIAL_CONSUME_DETAIL",
-    "T_MDM_SPECIAL_MATERIAL_RECORD"
+    "T_MDM_SPECIAL_MATERIAL_RECORD",
+    "T_LH_PRECISION_PLAN"
 ]
 
 # ====================== 导出文件配置 ======================

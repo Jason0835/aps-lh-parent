@@ -52,6 +52,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -316,19 +317,19 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         log.info("续作排产 - 胎胚库存调整");
         List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
 
-        // 收尾SKU优先占用胎胚库存，普通SKU再按顺序扣减
-        Map<String, Integer> embryoStockMap = buildEmbryoStockMap(context);
+        // 收尾SKU优先占用分摊后的SKU库存，普通SKU再按顺序扣减。
+        Map<String, Integer> materialEmbryoStockMap = buildMaterialEmbryoStockMap(context);
 
         // 先处理收尾SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if ("1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(context, result, embryoStockMap, shifts);
+                adjustResultByEmbryoStock(context, result, materialEmbryoStockMap, shifts);
             }
         }
         // 再处理普通SKU
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if (!"1".equals(result.getIsEnd())) {
-                adjustResultByEmbryoStock(context, result, embryoStockMap, shifts);
+                adjustResultByEmbryoStock(context, result, materialEmbryoStockMap, shifts);
             }
         }
         refreshContinuousEndingFlagByResult(context);
@@ -1189,20 +1190,24 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 构建胎胚库存Map（基于context中现有的skuLhCapacityMap，用materialCode的embryoCode分组统计）
+     * 构建物料维度胎胚库存Map。
+     * <p>SKU库存已在归集阶段按同胎胚标准产能分摊，此处按物料编码扣减，避免同胎胚SKU互相占用。</p>
+     *
+     * @param context 排程上下文
+     * @return 物料维度胎胚库存Map，key=物料编码
      */
-    private Map<String, Integer> buildEmbryoStockMap(LhScheduleContext context) {
+    private Map<String, Integer> buildMaterialEmbryoStockMap(LhScheduleContext context) {
         Map<String, Integer> stockMap = new HashMap<>();
         for (SkuScheduleDTO sku : context.getContinuousSkuList()) {
-            if (sku.getEmbryoCode() != null && sku.getEmbryoStock() >= 0) {
-                stockMap.put(sku.getEmbryoCode(), sku.getEmbryoStock());
+            if (StringUtils.isNotEmpty(sku.getMaterialCode()) && sku.getEmbryoStock() >= 0) {
+                stockMap.put(sku.getMaterialCode(), sku.getEmbryoStock());
             }
         }
         for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
-            if (sku.getEmbryoCode() != null
+            if (StringUtils.isNotEmpty(sku.getMaterialCode())
                     && sku.getEmbryoStock() >= 0
-                    && !stockMap.containsKey(sku.getEmbryoCode())) {
-                stockMap.put(sku.getEmbryoCode(), sku.getEmbryoStock());
+                    && !stockMap.containsKey(sku.getMaterialCode())) {
+                stockMap.put(sku.getMaterialCode(), sku.getEmbryoStock());
             }
         }
         return stockMap;
@@ -1210,26 +1215,31 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
 
     /**
      * 根据胎胚库存调整排程结果的计划量
+     *
+     * @param context 排程上下文
+     * @param result 排程结果
+     * @param materialEmbryoStockMap 物料维度胎胚库存Map
+     * @param shifts 班次列表
      */
     private void adjustResultByEmbryoStock(LhScheduleContext context,
                                            LhScheduleResult result,
-                                           Map<String, Integer> embryoStockMap,
+                                           Map<String, Integer> materialEmbryoStockMap,
                                            List<LhShiftConfigVO> shifts) {
-        String embryoCode = result.getEmbryoCode();
-        if (embryoCode == null) {
+        String materialCode = result.getMaterialCode();
+        if (StringUtils.isEmpty(materialCode)) {
             return;
         }
-        Integer stock = embryoStockMap.get(embryoCode);
-        if (stock == null || stock < 0) {
+        Integer stock = materialEmbryoStockMap.get(materialCode);
+        if (Objects.isNull(stock) || stock < 0) {
             return;
         }
         int totalPlan = ShiftFieldUtil.resolveScheduledQty(result);
         if (totalPlan <= stock) {
-            embryoStockMap.put(embryoCode, stock - totalPlan);
+            materialEmbryoStockMap.put(materialCode, stock - totalPlan);
         } else {
             // 库存不足，削减计划量
             redistributeShiftQty(context, result, shifts, stock);
-            embryoStockMap.put(embryoCode, 0);
+            materialEmbryoStockMap.put(materialCode, 0);
         }
     }
 

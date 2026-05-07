@@ -269,6 +269,12 @@ public final class LhScheduleConstant {
     /** 试制量试每日上限 */
     public static final int TRIAL_DAILY_LIMIT = 2;
 
+    /** 单控基准机台默认不启用 */
+    public static final String SINGLE_CONTROL_MACHINE_CODES = "K1501,K1502";
+
+    /** 小批量验证SKU默认阈值 */
+    public static final int SMALL_BATCH_SKU_THRESHOLD = 100;
+
     // ======================== 模具交替计划天数 ========================
 
     /** 模具交替计划天数 */

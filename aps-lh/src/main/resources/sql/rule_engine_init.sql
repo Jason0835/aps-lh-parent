@@ -104,7 +104,9 @@ INSERT INTO T_LH_PARAMS (FACTORY_CODE, PARAM_CODE, PARAM_VALUE, PARAM_NAME, REMA
 ('116', 'OPEN_PRODUCTION_WINTER_TIRE_KEYWORDS', '', '开产雪地胎关键词', '多个关键词用逗号分隔'),
 
 -- ======================== 试制量试规则 ========================
-('116', 'TRIAL_DAILY_LIMIT', '2', '试制量试每日上限', '每天最多 2 个试制'),
+('116', 'TRIAL_DAILY_LIMIT', '2', '试制量试每日不同物料数上限', '每天最多 2 个不同试制/量试物料'),
+('116', 'SINGLE_CONTROL_MACHINE_CODES', 'K1501,K1502', '单控基准机台编码', '多个机台用逗号分隔，运行态拆分为左右单模机台'),
+('116', 'SMALL_BATCH_SKU_THRESHOLD', '100', '小批量验证SKU阈值', 'TRIAL_QTY 大于0且小于该值时识别为小批量验证SKU'),
 
 -- ======================== 模具交替计划规则 ========================
 ('116', 'MOULD_CHANGE_PLAN_DAYS', '2', '模具交替计划天数', '提前 2 天计划'),

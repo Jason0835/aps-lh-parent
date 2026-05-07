@@ -25,6 +25,7 @@ import com.zlt.aps.lh.engine.strategy.IFirstInspectionBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
+import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
 import com.zlt.aps.lh.service.impl.LhMaintenanceScheduleService;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
@@ -78,6 +79,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     private TargetScheduleQtyResolver targetScheduleQtyResolver;
     @Resource
     private LhMaintenanceScheduleService maintenanceScheduleService;
+    @Resource
+    private ITrialProductionStrategy trialProductionStrategy;
 
     @Override
     public String getStrategyType() {
@@ -161,6 +164,12 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             log.debug("新增SKU开始排产, materialCode: {}, 结构: {}, 规格: {}, 计划量: {}, 目标量: {}, 余量: {}, 是否收尾: {}",
                     sku.getMaterialCode(), sku.getStructureName(), sku.getSpecCode(),
                     sku.getMonthPlanQty(), sku.resolveTargetScheduleQty(), sku.getSurplusQty(), isEnding);
+
+            if (shouldSkipTrialSku(context, sku)) {
+                addUnscheduledResult(context, sku, "试制量试当日不可排产", unscheduledReasonCountMap);
+                iterator.remove();
+                continue;
+            }
 
             // 1. 匹配候选机台
             List<MachineScheduleDTO> candidates = machineMatch.matchMachines(context, sku);
@@ -964,6 +973,40 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         return maintenanceScheduleService != null
                 ? maintenanceScheduleService
                 : new LhMaintenanceScheduleService();
+    }
+
+    private ITrialProductionStrategy getTrialProductionStrategy() {
+        return trialProductionStrategy != null
+                ? trialProductionStrategy
+                : new DefaultTrialProductionStrategy();
+    }
+
+    /**
+     * 判断试制量试SKU当日是否跳过。
+     *
+     * @param context 排程上下文
+     * @param sku 新增SKU
+     * @return true-跳过排产
+     */
+    private boolean shouldSkipTrialSku(LhScheduleContext context, SkuScheduleDTO sku) {
+        if (sku == null || !sku.isTrial()) {
+            return false;
+        }
+        Date targetDate = context.getScheduleTargetDate() != null
+                ? context.getScheduleTargetDate()
+                : context.getScheduleDate();
+        ITrialProductionStrategy strategy = getTrialProductionStrategy();
+        if (!strategy.canScheduleTrialSkuOnDate(context, sku, targetDate)) {
+            log.info("试制量试SKU当日不排产, materialCode: {}, 日期: {}",
+                    sku.getMaterialCode(), LhScheduleTimeUtil.formatDate(targetDate));
+            return true;
+        }
+        if (strategy.isDailyTrialLimitReached(context, targetDate, sku.getMaterialCode())) {
+            log.info("试制量试SKU达到每日不同物料数限制, materialCode: {}, 日期: {}",
+                    sku.getMaterialCode(), LhScheduleTimeUtil.formatDate(targetDate));
+            return true;
+        }
+        return false;
     }
 
     /**

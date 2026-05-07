@@ -414,6 +414,16 @@ public class LhScheduleConfig {
         return getParamIntValue(LhScheduleParamConstant.TRIAL_DAILY_LIMIT, LhScheduleConstant.TRIAL_DAILY_LIMIT);
     }
 
+    public String getSingleControlMachineCodes() {
+        return getParamValue(LhScheduleParamConstant.SINGLE_CONTROL_MACHINE_CODES,
+                LhScheduleConstant.SINGLE_CONTROL_MACHINE_CODES);
+    }
+
+    public int getSmallBatchSkuThreshold() {
+        return Math.max(1, getParamIntValue(LhScheduleParamConstant.SMALL_BATCH_SKU_THRESHOLD,
+                LhScheduleConstant.SMALL_BATCH_SKU_THRESHOLD));
+    }
+
     public boolean isLocalSearchEnabled() {
         return getParamIntValue(LhScheduleParamConstant.ENABLE_LOCAL_SEARCH, LhScheduleConstant.ENABLE_LOCAL_SEARCH) == 1;
     }

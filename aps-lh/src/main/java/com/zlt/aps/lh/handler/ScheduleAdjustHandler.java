@@ -9,6 +9,7 @@ import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
+import com.zlt.aps.lh.api.enums.ConstructionStageEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.api.enums.SkuTagEnum;
@@ -345,6 +346,12 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
 
         // 施工阶段
         dto.setConstructionStage(plan.getConstructionStage());
+        dto.setTrialDemandQty(safeInt(plan.getTrialQty()));
+        dto.setBeginDay(plan.getBeginDay());
+        dto.setTrial(isTrialStage(plan.getConstructionStage()));
+        dto.setSmallBatchValidation(!dto.isTrial()
+                && dto.getTrialDemandQty() > 0
+                && dto.getTrialDemandQty() < resolveSmallBatchSkuThreshold(context));
 
         // 示方书信息
         dto.setEmbryoNo(plan.getEmbryoNo());
@@ -359,6 +366,31 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
         dto.setSkuTag(SkuTagEnum.NORMAL.getCode());
 
         return dto;
+    }
+
+    /**
+     * 判断施工阶段是否为试制/量试。
+     *
+     * @param constructionStage 施工阶段
+     * @return true-试制/量试
+     */
+    private boolean isTrialStage(String constructionStage) {
+        return StringUtils.equals(ConstructionStageEnum.TRIAL.getCode(), constructionStage)
+                || StringUtils.equals(ConstructionStageEnum.MASS_TRIAL.getCode(), constructionStage);
+    }
+
+    /**
+     * 解析小批量验证SKU阈值。
+     *
+     * @param context 排程上下文
+     * @return 阈值
+     */
+    private int resolveSmallBatchSkuThreshold(LhScheduleContext context) {
+        if (Objects.nonNull(context.getScheduleConfig())) {
+            return context.getScheduleConfig().getSmallBatchSkuThreshold();
+        }
+        return context.getParamIntValue(LhScheduleParamConstant.SMALL_BATCH_SKU_THRESHOLD,
+                LhScheduleConstant.SMALL_BATCH_SKU_THRESHOLD);
     }
 
     /**

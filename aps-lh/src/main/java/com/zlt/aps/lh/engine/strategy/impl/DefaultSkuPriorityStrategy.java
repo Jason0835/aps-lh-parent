@@ -115,7 +115,7 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
     }
 
     /**
-     * 构建新增SKU比较器，定点物料优先进入新增排产。
+     * 构建新增SKU比较器，定点物料、试制量试、小批量验证SKU优先进入新增排产。
      *
      * @param context 排程上下文
      * @param baseComparator 原有SKU比较器
@@ -126,6 +126,8 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
         return Comparator
                 .comparingInt((SkuScheduleDTO sku) -> LhSpecifyMachineUtil.hasLimitSpecifyMachine(
                         context, sku.getMaterialCode()) ? 0 : 1)
+                .thenComparingInt(sku -> sku.isTrial() ? 0 : 1)
+                .thenComparingInt(sku -> sku.isSmallBatchValidation() ? 0 : 1)
                 .thenComparing(baseComparator);
     }
 

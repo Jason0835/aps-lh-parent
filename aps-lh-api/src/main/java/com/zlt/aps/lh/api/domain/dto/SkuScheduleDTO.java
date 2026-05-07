@@ -72,6 +72,12 @@ public class SkuScheduleDTO {
     private boolean trial;
     /** 施工阶段 */
     private String constructionStage;
+    /** 试制量试需求量 */
+    private int trialDemandQty;
+    /** 是否小批量验证SKU */
+    private boolean smallBatchValidation;
+    /** 月计划结构起产日 */
+    private Integer beginDay;
 
     // ========== 优先级信息 ==========
     /** 排产优先级代码 */

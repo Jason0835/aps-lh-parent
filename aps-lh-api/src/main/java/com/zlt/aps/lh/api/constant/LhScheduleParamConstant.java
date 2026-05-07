@@ -156,6 +156,10 @@ public final class LhScheduleParamConstant {
     public static final String OPEN_PRODUCTION_WINTER_TIRE_KEYWORDS = "OPEN_PRODUCTION_WINTER_TIRE_KEYWORDS";
     /** 试制量试每日上限 */
     public static final String TRIAL_DAILY_LIMIT = "TRIAL_DAILY_LIMIT";
+    /** 单控基准机台编码 */
+    public static final String SINGLE_CONTROL_MACHINE_CODES = "SINGLE_CONTROL_MACHINE_CODES";
+    /** 小批量验证SKU阈值 */
+    public static final String SMALL_BATCH_SKU_THRESHOLD = "SMALL_BATCH_SKU_THRESHOLD";
     /** 模具交替计划天数 */
     public static final String MOULD_CHANGE_PLAN_DAYS = "MOULD_CHANGE_PLAN_DAYS";
     /** 局部搜索开关（0-关闭，1-开启） */

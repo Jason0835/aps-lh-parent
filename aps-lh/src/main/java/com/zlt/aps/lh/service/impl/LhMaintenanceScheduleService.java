@@ -7,6 +7,7 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhPrecisionPlan;
 import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.lh.util.LhSingleControlMachineUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmWorkCalendar;
 import lombok.extern.slf4j.Slf4j;
@@ -51,7 +52,8 @@ public class LhMaintenanceScheduleService {
                 || !CollectionUtils.isEmpty(machine.getMaintenanceWindowList())) {
             return false;
         }
-        LhPrecisionPlan plan = context.getMaintenancePlanMap().get(machine.getMachineCode());
+        String lookupMachineCode = LhSingleControlMachineUtil.resolveLookupMachineCode(context, machine.getMachineCode());
+        LhPrecisionPlan plan = context.getMaintenancePlanMap().get(lookupMachineCode);
         if (!isPlanDueSoon(context, plan)) {
             return false;
         }
@@ -70,12 +72,15 @@ public class LhMaintenanceScheduleService {
         if (!isBasicValid(context, machine) || !CollectionUtils.isEmpty(machine.getMaintenanceWindowList())) {
             return false;
         }
-        LhPrecisionPlan plan = context.getMaintenancePlanMap().get(machine.getMachineCode());
+        String lookupMachineCode = LhSingleControlMachineUtil.resolveLookupMachineCode(context, machine.getMachineCode());
+        LhPrecisionPlan plan = context.getMaintenancePlanMap().get(lookupMachineCode);
         if (Objects.isNull(plan) || Objects.isNull(plan.getDueDate()) || Objects.isNull(context.getScheduleDate())) {
             return false;
         }
-        LhMachineOnlineInfo onlineInfo = context.getMachineOnlineInfoMap().get(machine.getMachineCode());
-        if (Objects.isNull(onlineInfo) || Objects.isNull(onlineInfo.getOnlineDate())) {
+        LhMachineOnlineInfo onlineInfo = context.getMachineOnlineInfoMap().get(lookupMachineCode);
+        if (Objects.isNull(onlineInfo)
+                || !LhSingleControlMachineUtil.isLeftRightCompatible(machine.getMachineCode(), onlineInfo.getLrMolds())
+                || Objects.isNull(onlineInfo.getOnlineDate())) {
             return false;
         }
         int onlineDays = diffDays(onlineInfo.getOnlineDate(), context.getScheduleDate());

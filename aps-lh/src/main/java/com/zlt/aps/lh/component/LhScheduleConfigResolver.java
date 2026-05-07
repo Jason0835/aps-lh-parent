@@ -221,6 +221,10 @@ public class LhScheduleConfigResolver {
         putStringValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.OPEN_PRODUCTION_WINTER_TIRE_KEYWORDS,
                 LhScheduleConstant.OPEN_PRODUCTION_WINTER_TIRE_KEYWORDS);
         putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.TRIAL_DAILY_LIMIT, LhScheduleConstant.TRIAL_DAILY_LIMIT);
+        putStringValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.SINGLE_CONTROL_MACHINE_CODES,
+                LhScheduleConstant.SINGLE_CONTROL_MACHINE_CODES);
+        putIntValue(resolvedParamMap, lhParamsMap, LhScheduleParamConstant.SMALL_BATCH_SKU_THRESHOLD,
+                LhScheduleConstant.SMALL_BATCH_SKU_THRESHOLD, 1);
 
         return new LhScheduleConfig(resolvedParamMap);
     }

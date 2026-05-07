@@ -4,6 +4,7 @@ import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
+import com.zlt.aps.lh.api.enums.JobTypeEnum;
 import com.zlt.aps.lh.api.enums.ScheduleStepEnum;
 import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
@@ -323,6 +324,32 @@ class DefaultSkuPriorityStrategyTest {
         assertEquals("MAT-A", context.getNewSpecSkuList().get(1).getMaterialCode());
         assertEquals("MAT-B", context.getNewSpecSkuList().get(2).getMaterialCode());
         assertEquals("MAT-C", context.getNewSpecSkuList().get(3).getMaterialCode());
+    }
+
+    @Test
+    void sortByPriority_shouldPreferTrialThenSmallBatchAfterSpecifyMachine() {
+        SkuScheduleDTO normal = sku("MAT-N");
+        normal.setHighPriorityPendingQty(999);
+        SkuScheduleDTO smallBatch = sku("MAT-S");
+        smallBatch.setSmallBatchValidation(true);
+        SkuScheduleDTO trial = sku("MAT-T");
+        trial.setTrial(true);
+        SkuScheduleDTO specify = sku("MAT-P");
+
+        LhScheduleContext context = contextWithNewSpec(normal, smallBatch, trial, specify);
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.ENABLE_SPECIFY_MACHINE_RULE, "1")));
+        context.getSpecifyMachineMap().put("MAT-P", Collections.singletonList(new com.zlt.aps.lh.api.domain.entity.LhSpecifyMachine()));
+        context.getSpecifyMachineMap().get("MAT-P").get(0).setSpecCode("MAT-P");
+        context.getSpecifyMachineMap().get("MAT-P").get(0).setJobType(JobTypeEnum.RESTRICTED.getCode());
+        context.getSpecifyMachineMap().get("MAT-P").get(0).setMachineCode("K1501L");
+
+        strategy.sortByPriority(context);
+
+        assertEquals("MAT-P", context.getNewSpecSkuList().get(0).getMaterialCode());
+        assertEquals("MAT-T", context.getNewSpecSkuList().get(1).getMaterialCode());
+        assertEquals("MAT-S", context.getNewSpecSkuList().get(2).getMaterialCode());
+        assertEquals("MAT-N", context.getNewSpecSkuList().get(3).getMaterialCode());
     }
 
     private LhScheduleContext contextWithNewSpec(SkuScheduleDTO... skus) {

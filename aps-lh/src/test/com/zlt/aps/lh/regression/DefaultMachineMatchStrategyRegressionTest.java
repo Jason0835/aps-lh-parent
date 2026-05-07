@@ -142,6 +142,49 @@ class DefaultMachineMatchStrategyRegressionTest {
     }
 
     @Test
+    void matchMachines_shouldPreferSingleControlMachineForTrialSku() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+        enableSingleControlMachines(context);
+
+        MachineScheduleDTO normalMachine = machine("K1401", dateTime(2026, 5, 9, 8, 0),
+                "SPEC-A", "22.5", "MAT-NORMAL");
+        MachineScheduleDTO singleControlMachine = machine("K1501L", dateTime(2026, 5, 9, 8, 0),
+                "SPEC-A", "22.5", "MAT-SINGLE");
+        context.getMachineScheduleMap().put(normalMachine.getMachineCode(), normalMachine);
+        context.getMachineScheduleMap().put(singleControlMachine.getMachineCode(), singleControlMachine);
+
+        SkuScheduleDTO sku = sku("3302001575", "SPEC-A", "22.5");
+        sku.setTrial(true);
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku);
+
+        assertEquals(2, candidates.size());
+        assertEquals("K1501L", candidates.get(0).getMachineCode(),
+                "试制量试 SKU 应优先使用单控拆分机台");
+    }
+
+    @Test
+    void matchMachines_shouldMoveSingleControlMachineBehindForNormalSku() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+        enableSingleControlMachines(context);
+
+        MachineScheduleDTO singleControlMachine = machine("K1501L", dateTime(2026, 5, 9, 8, 0),
+                "SPEC-A", "22.5", "MAT-SINGLE");
+        MachineScheduleDTO normalMachine = machine("K1401", dateTime(2026, 5, 9, 8, 0),
+                "SPEC-A", "22.5", "MAT-NORMAL");
+        context.getMachineScheduleMap().put(singleControlMachine.getMachineCode(), singleControlMachine);
+        context.getMachineScheduleMap().put(normalMachine.getMachineCode(), normalMachine);
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku("3302001418", "SPEC-A", "22.5"));
+
+        assertEquals(2, candidates.size());
+        assertEquals("K1401", candidates.get(0).getMachineCode(),
+                "普通新增 SKU 存在其它候选时不应抢占单控拆分机台");
+    }
+
+    @Test
     void matchMachines_usesMouldQtyInsteadOfRelationCount() {
         DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
         LhScheduleContext context = buildContext();
@@ -575,6 +618,12 @@ class DefaultMachineMatchStrategyRegressionTest {
     private void enableSpecifyMachineRule(LhScheduleContext context) {
         Map<String, String> paramMap = new HashMap<>(1);
         paramMap.put(LhScheduleParamConstant.ENABLE_SPECIFY_MACHINE_RULE, "1");
+        context.setScheduleConfig(new LhScheduleConfig(paramMap));
+    }
+
+    private void enableSingleControlMachines(LhScheduleContext context) {
+        Map<String, String> paramMap = new HashMap<>(1);
+        paramMap.put(LhScheduleParamConstant.SINGLE_CONTROL_MACHINE_CODES, "K1501,K1502");
         context.setScheduleConfig(new LhScheduleConfig(paramMap));
     }
 

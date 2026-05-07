@@ -14,6 +14,7 @@ import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.enums.LhSpecialMaterialCategoryEnum;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.util.LhMachineHardMatchUtil;
+import com.zlt.aps.lh.util.LhSingleControlMachineUtil;
 import com.zlt.aps.lh.util.LhSpecialMaterialUtil;
 import com.zlt.aps.lh.util.LhSpecifyMachineUtil;
 import com.zlt.aps.lh.util.MachineStatusUtil;
@@ -270,7 +271,8 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         Date candidateWindowEndTime = resolveCandidateWindowEndTime(context, candidateReferenceTime);
         for (MdmDevicePlanShut planShut : context.getDevicePlanShutList()) {
             if (planShut == null || StringUtils.isEmpty(planShut.getMachineCode())
-                    || !StringUtils.equals(planShut.getMachineCode(), machine.getMachineCode())) {
+                    || !LhSingleControlMachineUtil.isCompatibleMachineCode(
+                    context, machine.getMachineCode(), planShut.getMachineCode())) {
                 continue;
             }
             if (planShut.getBeginDate() == null || planShut.getEndDate() == null
@@ -412,6 +414,11 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                 return compareResult;
             }
 
+            compareResult = compareSingleControlPriority(context, sku, left, right);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+
             compareResult = compareNormalMachinePriority(matchResult, left, right);
             if (compareResult != 0) {
                 return compareResult;
@@ -502,6 +509,40 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         }
         return LhSpecifyMachineUtil.isLimitSpecifyMachine(context, machine.getMachineCode(), sku.getMaterialCode())
                 ? 0 : 1;
+    }
+
+    /**
+     * 比较单控拆分机台优先级。
+     *
+     * @param context 排程上下文
+     * @param sku 待排SKU
+     * @param left 左机台
+     * @param right 右机台
+     * @return 比较结果
+     */
+    private int compareSingleControlPriority(LhScheduleContext context, SkuScheduleDTO sku,
+                                             MachineScheduleDTO left, MachineScheduleDTO right) {
+        return Integer.compare(resolveSingleControlScore(context, sku, left),
+                resolveSingleControlScore(context, sku, right));
+    }
+
+    /**
+     * 解析单控拆分机台得分。
+     *
+     * @param context 排程上下文
+     * @param sku 待排SKU
+     * @param machine 候选机台
+     * @return 试制/小批量单控优先，普通SKU单控靠后
+     */
+    private int resolveSingleControlScore(LhScheduleContext context, SkuScheduleDTO sku, MachineScheduleDTO machine) {
+        if (Objects.isNull(machine)
+                || !LhSingleControlMachineUtil.isSingleControlSplitMachine(context, machine.getMachineCode())) {
+            return 1;
+        }
+        if (Objects.nonNull(sku) && (sku.isTrial() || sku.isSmallBatchValidation())) {
+            return 0;
+        }
+        return 2;
     }
 
     /**

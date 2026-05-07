@@ -134,10 +134,10 @@ public class LhScheduleContext {
     private Map<String, LhPrecisionPlan> maintenancePlanMap = new HashMap<>();
     /** 特殊物料清单配置列表 */
     private List<LhSpecialMaterialBom> specialMaterialBomList = new ArrayList<>();
-    /** 特殊物料分类Map, key=物料编码, value=分类 */
-    private Map<String, String> specialMaterialCategoryByMaterialCode = new HashMap<>();
-    /** 特殊物料分类Map, key=结构名称, value=分类 */
-    private Map<String, String> specialMaterialCategoryByStructureName = new HashMap<>();
+    /** 特殊物料分类Map, key=物料编码, value=分类集合 */
+    private Map<String, Set<String>> specialMaterialCategoryByMaterialCode = new HashMap<>();
+    /** 特殊物料分类Map, key=结构名称, value=分类集合 */
+    private Map<String, Set<String>> specialMaterialCategoryByStructureName = new HashMap<>();
 
     // ========== 中间计算结果(S4.3) ==========
 

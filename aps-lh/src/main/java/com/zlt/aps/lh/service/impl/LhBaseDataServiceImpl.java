@@ -68,6 +68,7 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -514,8 +515,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         Set<String> materialCodeSet = resolveMonthPlanMaterialCodeSet(context);
         Set<String> structureNameSet = resolveMonthPlanStructureNameSet(context);
         List<LhSpecialMaterialBom> specialMaterialBomList = new ArrayList<>();
-        Map<String, String> categoryByMaterialCode = new HashMap<>(Math.max(16, materialCodeSet.size()));
-        Map<String, String> categoryByStructureName = new HashMap<>(Math.max(16, structureNameSet.size()));
+        Map<String, Set<String>> categoryByMaterialCode = new HashMap<>(Math.max(16, materialCodeSet.size()));
+        Map<String, Set<String>> categoryByStructureName = new HashMap<>(Math.max(16, structureNameSet.size()));
         if (CollectionUtils.isEmpty(materialCodeSet) && CollectionUtils.isEmpty(structureNameSet)) {
             attachSpecialMaterialConfig(context, specialMaterialBomList,
                     categoryByMaterialCode, categoryByStructureName);
@@ -591,8 +592,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
     private void buildSpecialMaterialCategoryMap(LhSpecialMaterialBom bom,
                                                  Set<String> materialCodeSet,
                                                  Set<String> structureNameSet,
-                                                 Map<String, String> categoryByMaterialCode,
-                                                 Map<String, String> categoryByStructureName) {
+                                                 Map<String, Set<String>> categoryByMaterialCode,
+                                                 Map<String, Set<String>> categoryByStructureName) {
         if (Objects.isNull(bom) || !LhSpecialMaterialCategoryEnum.isValid(bom.getCategory())) {
             return;
         }
@@ -600,14 +601,16 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         String structureName = normalizeText(bom.getStructureName());
         // 物料编码配置优先进入物料维度Map。
         if (StringUtils.isNotEmpty(materialCode) && materialCodeSet.contains(materialCode)) {
-            categoryByMaterialCode.putIfAbsent(materialCode, bom.getCategory());
+            categoryByMaterialCode.computeIfAbsent(materialCode, key -> new LinkedHashSet<String>(4))
+                    .add(bom.getCategory());
             return;
         }
         // 结构名称只处理未维护物料编码的配置。
         if (StringUtils.isEmpty(materialCode)
                 && StringUtils.isNotEmpty(structureName)
                 && structureNameSet.contains(structureName)) {
-            categoryByStructureName.putIfAbsent(structureName, bom.getCategory());
+            categoryByStructureName.computeIfAbsent(structureName, key -> new LinkedHashSet<String>(4))
+                    .add(bom.getCategory());
         }
     }
 
@@ -621,8 +624,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
      */
     private void attachSpecialMaterialConfig(LhScheduleContext context,
                                              List<LhSpecialMaterialBom> specialMaterialBomList,
-                                             Map<String, String> categoryByMaterialCode,
-                                             Map<String, String> categoryByStructureName) {
+                                             Map<String, Set<String>> categoryByMaterialCode,
+                                             Map<String, Set<String>> categoryByStructureName) {
         context.setSpecialMaterialBomList(specialMaterialBomList);
         context.setSpecialMaterialCategoryByMaterialCode(categoryByMaterialCode);
         context.setSpecialMaterialCategoryByStructureName(categoryByStructureName);

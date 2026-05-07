@@ -986,7 +986,7 @@ class NewSpecProductionStrategyRegressionTest {
         injectDependencies(strategy, false);
 
         LhScheduleContext context = buildContext();
-        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-1", "01");
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-1", java.util.Collections.singleton("01"));
         SkuScheduleDTO sku = buildSku();
         sku.setTargetScheduleQty(1);
         sku.setShiftCapacity(1);

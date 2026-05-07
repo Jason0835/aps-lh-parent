@@ -74,7 +74,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                 LhSpecialMaterialUtil.resolveMatchResult(context, sku);
         log.debug("SKU特殊物料判定, materialCode: {}, special: {}, matchSource: {}, category: {}",
                 sku.getMaterialCode(), specialMaterialMatchResult.isSpecial(),
-                specialMaterialMatchResult.getMatchSource(), specialMaterialMatchResult.getCategory());
+                specialMaterialMatchResult.getMatchSource(), specialMaterialMatchResult.getCategoryDisplayText());
         List<MachineScheduleDTO> candidates = new ArrayList<>();
         List<MachineScheduleDTO> stopTimeoutCandidates = new ArrayList<>();
         MachineFilterTrace trace = new MachineFilterTrace(context.getMachineScheduleMap().size());
@@ -114,7 +114,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         if (CollectionUtils.isEmpty(candidates)) {
             log.warn("SKU候选机台为空, materialCode: {}, 规格: {}, 寸口: {}, 特殊分类: {}, 机台总数: {}, 不可作业过滤: {}, 禁用过滤: {}, 超时停机过滤: {}, 寸口过滤: {}, 模套过滤: {}, 特殊支持过滤: {}, 模具过滤: {}, 限制作业优先机台: {}",
                     sku.getMaterialCode(), sku.getSpecCode(), sku.getProSize(),
-                    specialMaterialMatchResult.getCategory(), trace.totalMachineCount,
+                    specialMaterialMatchResult.getCategoryDisplayText(), trace.totalMachineCount,
                     trace.notAllowedMachineFilteredCount,
                     trace.disabledCount, trace.stopTimeoutCount, trace.inchMismatchCount,
                     trace.mouldSetMismatchCount, trace.resolveSpecialSupportFilteredCount(),
@@ -122,7 +122,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         }
         log.info("SKU可用机台匹配完成, materialCode: {}, special: {}, category: {}, 候选机台数: {}",
                 sku.getMaterialCode(), specialMaterialMatchResult.isSpecial(),
-                specialMaterialMatchResult.getCategory(), candidates.size());
+                specialMaterialMatchResult.getCategoryDisplayText(), candidates.size());
         return candidates;
     }
 
@@ -237,24 +237,26 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         if (Objects.isNull(matchResult) || !matchResult.isSpecial()) {
             return MachineAvailabilityReason.AVAILABLE;
         }
-        LhSpecialMaterialCategoryEnum categoryEnum =
-                LhSpecialMaterialCategoryEnum.getByCode(matchResult.getCategory());
-        if (LhSpecialMaterialCategoryEnum.WIDE_BASE_195 == categoryEnum) {
-            return LhMachineHardMatchUtil.isSupport195WideBase(machine)
-                    ? MachineAvailabilityReason.AVAILABLE
-                    : MachineAvailabilityReason.SPECIAL_195_UNSUPPORTED;
+        for (String category : matchResult.getCategories()) {
+            LhSpecialMaterialCategoryEnum categoryEnum =
+                    LhSpecialMaterialCategoryEnum.getByCode(category);
+            if (LhSpecialMaterialCategoryEnum.WIDE_BASE_195 == categoryEnum
+                    && !LhMachineHardMatchUtil.isCategorySupported(categoryEnum, machine)) {
+                return MachineAvailabilityReason.SPECIAL_195_UNSUPPORTED;
+            }
+            if (LhSpecialMaterialCategoryEnum.WIDE_BASE_225 == categoryEnum
+                    && !LhMachineHardMatchUtil.isCategorySupported(categoryEnum, machine)) {
+                return MachineAvailabilityReason.SPECIAL_225_UNSUPPORTED;
+            }
+            if (LhSpecialMaterialCategoryEnum.CHIP_TIRE == categoryEnum
+                    && !LhMachineHardMatchUtil.isCategorySupported(categoryEnum, machine)) {
+                return MachineAvailabilityReason.SPECIAL_CHIP_UNSUPPORTED;
+            }
+            if (Objects.isNull(categoryEnum)) {
+                return MachineAvailabilityReason.SPECIAL_CATEGORY_UNSUPPORTED;
+            }
         }
-        if (LhSpecialMaterialCategoryEnum.WIDE_BASE_225 == categoryEnum) {
-            return LhMachineHardMatchUtil.isSupport225WideBase(machine)
-                    ? MachineAvailabilityReason.AVAILABLE
-                    : MachineAvailabilityReason.SPECIAL_225_UNSUPPORTED;
-        }
-        if (LhSpecialMaterialCategoryEnum.CHIP_TIRE == categoryEnum) {
-            return LhMachineHardMatchUtil.isSupportChipTire(machine)
-                    ? MachineAvailabilityReason.AVAILABLE
-                    : MachineAvailabilityReason.SPECIAL_CHIP_UNSUPPORTED;
-        }
-        return MachineAvailabilityReason.SPECIAL_CATEGORY_UNSUPPORTED;
+        return MachineAvailabilityReason.AVAILABLE;
     }
 
     /**
@@ -796,7 +798,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                         + ", 寸口=" + PriorityTraceLogHelper.safeText(sku.getProSize())
                         + ", 特殊物料=" + PriorityTraceLogHelper.yesNo(matchResult.isSpecial())
                         + ", 命中方式=" + PriorityTraceLogHelper.safeText(matchResult.getMatchSource())
-                        + ", 特殊分类=" + PriorityTraceLogHelper.safeText(matchResult.getCategory()));
+                        + ", 特殊分类=" + PriorityTraceLogHelper.safeText(matchResult.getCategoryDisplayText()));
         PriorityTraceLogHelper.appendLine(detailBuilder,
                 "候选过滤概况: 机台总数=" + trace.totalMachineCount
                         + ", 不可作业过滤=" + trace.notAllowedMachineFilteredCount

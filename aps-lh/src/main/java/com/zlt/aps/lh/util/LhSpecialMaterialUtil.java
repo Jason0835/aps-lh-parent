@@ -7,8 +7,11 @@ import com.zlt.aps.lh.context.LhScheduleContext;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.util.CollectionUtils;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 硫化特殊材料字段工具。
@@ -72,17 +75,26 @@ public final class LhSpecialMaterialUtil {
      * @param matchSource 命中来源
      * @return 特殊物料命中结果
      */
-    private static SpecialMaterialMatchResult resolveByKey(Map<String, String> categoryMap,
+    private static SpecialMaterialMatchResult resolveByKey(Map<String, Set<String>> categoryMap,
                                                            String key,
                                                            String matchSource) {
         if (CollectionUtils.isEmpty(categoryMap) || StringUtils.isEmpty(key)) {
             return SpecialMaterialMatchResult.nonSpecial();
         }
-        String category = categoryMap.get(key);
-        if (!LhSpecialMaterialCategoryEnum.isValid(category)) {
+        Set<String> categories = categoryMap.get(key);
+        if (CollectionUtils.isEmpty(categories)) {
             return SpecialMaterialMatchResult.nonSpecial();
         }
-        return SpecialMaterialMatchResult.special(category, matchSource);
+        List<String> validCategoryList = new ArrayList<String>(categories.size());
+        for (String category : categories) {
+            if (LhSpecialMaterialCategoryEnum.isValid(category)) {
+                validCategoryList.add(category);
+            }
+        }
+        if (CollectionUtils.isEmpty(validCategoryList)) {
+            return SpecialMaterialMatchResult.nonSpecial();
+        }
+        return SpecialMaterialMatchResult.special(validCategoryList, matchSource);
     }
 
     /**

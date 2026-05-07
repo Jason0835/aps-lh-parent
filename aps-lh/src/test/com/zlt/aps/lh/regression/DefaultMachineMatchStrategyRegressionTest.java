@@ -20,9 +20,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -473,9 +475,9 @@ class DefaultMachineMatchStrategyRegressionTest {
     void matchMachines_shouldFilterSpecialMaterialByMachineSupportCategory() {
         DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
         LhScheduleContext context = buildContext();
-        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-195", "01");
-        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-225", "02");
-        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-CHIP", "03");
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-195", categorySet("01"));
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-225", categorySet("02"));
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-CHIP", categorySet("03"));
 
         MachineScheduleDTO normalMachine = machine("M-NORMAL", dateTime(2026, 4, 21, 8, 0),
                 "SPEC-A", "22.5", "MAT-NORMAL");
@@ -496,6 +498,32 @@ class DefaultMachineMatchStrategyRegressionTest {
         assertEquals("M-195", strategy.matchMachines(context, sku("MAT-195", "SPEC-A", "22.5")).get(0).getMachineCode());
         assertEquals("M-225", strategy.matchMachines(context, sku("MAT-225", "SPEC-A", "22.5")).get(0).getMachineCode());
         assertEquals("M-CHIP", strategy.matchMachines(context, sku("MAT-CHIP", "SPEC-A", "22.5")).get(0).getMachineCode());
+    }
+
+    @Test
+    void matchMachines_shouldRequireAllSpecialMaterialCategories() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-BOTH", categorySet("01", "03"));
+
+        MachineScheduleDTO support195OnlyMachine = machine("M-195", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-195");
+        support195OnlyMachine.setSupport195WideBase("1");
+        MachineScheduleDTO supportChipOnlyMachine = machine("M-CHIP", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-CHIP");
+        supportChipOnlyMachine.setSupportChipTire("1");
+        MachineScheduleDTO supportBothMachine = machine("M-BOTH", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-BOTH");
+        supportBothMachine.setSupport195WideBase("1");
+        supportBothMachine.setSupportChipTire("1");
+        context.getMachineScheduleMap().put(support195OnlyMachine.getMachineCode(), support195OnlyMachine);
+        context.getMachineScheduleMap().put(supportChipOnlyMachine.getMachineCode(), supportChipOnlyMachine);
+        context.getMachineScheduleMap().put(supportBothMachine.getMachineCode(), supportBothMachine);
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku("MAT-BOTH", "SPEC-A", "22.5"));
+
+        assertEquals(1, candidates.size(), "同一物料命中多个特殊分类时，机台必须同时满足全部分类支持能力");
+        assertEquals("M-BOTH", candidates.get(0).getMachineCode());
     }
 
     @Test
@@ -647,6 +675,10 @@ class DefaultMachineMatchStrategyRegressionTest {
         sku.setSpecCode(specCode);
         sku.setProSize(proSize);
         return sku;
+    }
+
+    private Set<String> categorySet(String... categories) {
+        return new LinkedHashSet<String>(Arrays.asList(categories));
     }
 
     private void material(LhScheduleContext context, String materialCode, String embryoDesc) {

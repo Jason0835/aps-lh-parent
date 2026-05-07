@@ -39,14 +39,11 @@ public class SpecialMaterialBomValidator implements IDataValidator {
         }
         List<String> emptyKeyErrorList = new ArrayList<>(MAX_ERROR_DETAIL_COUNT);
         List<String> invalidCategoryErrorList = new ArrayList<>(MAX_ERROR_DETAIL_COUNT);
-        List<String> duplicatedMaterialCategoryErrorList = new ArrayList<>(MAX_ERROR_DETAIL_COUNT);
-        List<String> duplicatedStructureCategoryErrorList = new ArrayList<>(MAX_ERROR_DETAIL_COUNT);
-        Map<String, String> materialCategoryMap = new HashMap<>(16);
-        Map<String, Integer> materialFirstRowMap = new HashMap<>(16);
-        Map<String, String> structureCategoryMap = new HashMap<>(16);
-        Map<String, Integer> structureFirstRowMap = new HashMap<>(16);
+        List<String> wideBaseConflictErrorList = new ArrayList<>(MAX_ERROR_DETAIL_COUNT);
+        Map<String, Set<String>> materialCategoryMap = new HashMap<>(16);
+        Map<String, Integer> materialWideBase195FirstRowMap = new HashMap<>(16);
+        Map<String, Integer> materialWideBase225FirstRowMap = new HashMap<>(16);
         Set<String> materialConflictKeySet = new HashSet<>(8);
-        Set<String> structureConflictKeySet = new HashSet<>(8);
         int rowIndex = 0;
         for (LhSpecialMaterialBom bom : context.getSpecialMaterialBomList()) {
             rowIndex++;
@@ -63,14 +60,9 @@ public class SpecialMaterialBomValidator implements IDataValidator {
                 continue;
             }
             if (StringUtils.isNotEmpty(materialCode)) {
-                collectCategoryConflict(duplicatedMaterialCategoryErrorList,
-                        materialCategoryMap, materialFirstRowMap, materialConflictKeySet,
-                        materialCode, bom.getCategory(), rowIndex, "物料编码");
-            }
-            if (StringUtils.isEmpty(materialCode) && StringUtils.isNotEmpty(structureName)) {
-                collectCategoryConflict(duplicatedStructureCategoryErrorList,
-                        structureCategoryMap, structureFirstRowMap, structureConflictKeySet,
-                        structureName, bom.getCategory(), rowIndex, "结构名称");
+                collectWideBaseConflict(wideBaseConflictErrorList, materialCategoryMap,
+                        materialWideBase195FirstRowMap, materialWideBase225FirstRowMap,
+                        materialConflictKeySet, materialCode, bom.getCategory(), rowIndex);
             }
         }
         if (!CollectionUtils.isEmpty(emptyKeyErrorList)) {
@@ -83,26 +75,20 @@ public class SpecialMaterialBomValidator implements IDataValidator {
                     + "] 特殊物料清单分类只能为01/02/03: "
                     + String.join("；", invalidCategoryErrorList));
         }
-        if (!CollectionUtils.isEmpty(duplicatedMaterialCategoryErrorList)) {
+        if (!CollectionUtils.isEmpty(wideBaseConflictErrorList)) {
             context.addValidationError("[" + getValidatorName()
-                    + "] 物料编码存在重复分类配置: "
-                    + String.join("；", duplicatedMaterialCategoryErrorList));
-        }
-        if (!CollectionUtils.isEmpty(duplicatedStructureCategoryErrorList)) {
-            context.addValidationError("[" + getValidatorName()
-                    + "] 结构名称存在重复分类配置: "
-                    + String.join("；", duplicatedStructureCategoryErrorList));
+                    + "] 同一物料编码不能同时配置19.5寸宽基和22.5寸宽基: "
+                    + String.join("；", wideBaseConflictErrorList));
         }
         boolean passed = CollectionUtils.isEmpty(emptyKeyErrorList)
                 && CollectionUtils.isEmpty(invalidCategoryErrorList)
-                && CollectionUtils.isEmpty(duplicatedMaterialCategoryErrorList)
-                && CollectionUtils.isEmpty(duplicatedStructureCategoryErrorList);
+                && CollectionUtils.isEmpty(wideBaseConflictErrorList);
         if (passed) {
             log.info("特殊物料清单校验通过, 配置数: {}", context.getSpecialMaterialBomList().size());
         } else {
-            log.warn("特殊物料清单校验未通过, 空键错误: {}, 分类错误: {}, 物料编码冲突: {}, 结构名称冲突: {}",
+            log.warn("特殊物料清单校验未通过, 空键错误: {}, 分类错误: {}, 物料宽基冲突: {}",
                     emptyKeyErrorList.size(), invalidCategoryErrorList.size(),
-                    duplicatedMaterialCategoryErrorList.size(), duplicatedStructureCategoryErrorList.size());
+                    wideBaseConflictErrorList.size());
         }
         return passed;
     }
@@ -150,37 +136,45 @@ public class SpecialMaterialBomValidator implements IDataValidator {
     }
 
     /**
-     * 收集同键不同分类的冲突配置。
+     * 收集同一物料编码下 19.5 寸宽基与 22.5 寸宽基互斥冲突。
      *
      * @param errorList 冲突错误列表
-     * @param categoryMap 首次出现的分类Map
-     * @param firstRowMap 首次出现的行号Map
+     * @param categoryMap 已命中的分类集合
+     * @param first195RowMap 首次出现 01 的行号Map
+     * @param first225RowMap 首次出现 02 的行号Map
      * @param conflictKeySet 已记录冲突的键集合
      * @param key 当前命中键
      * @param category 当前分类
      * @param rowIndex 当前行号
-     * @param keyLabel 键名称
      */
-    private void collectCategoryConflict(List<String> errorList,
-                                         Map<String, String> categoryMap,
-                                         Map<String, Integer> firstRowMap,
+    private void collectWideBaseConflict(List<String> errorList,
+                                         Map<String, Set<String>> categoryMap,
+                                         Map<String, Integer> first195RowMap,
+                                         Map<String, Integer> first225RowMap,
                                          Set<String> conflictKeySet,
                                          String key,
                                          String category,
-                                         int rowIndex,
-                                         String keyLabel) {
-        if (!categoryMap.containsKey(key)) {
-            categoryMap.put(key, category);
-            firstRowMap.put(key, rowIndex);
+                                         int rowIndex) {
+        Set<String> categorySet = categoryMap.computeIfAbsent(key, value -> new HashSet<String>(4));
+        categorySet.add(category);
+        if (StringUtils.equals(LhSpecialMaterialCategoryEnum.WIDE_BASE_195.getCode(), category)) {
+            first195RowMap.putIfAbsent(key, rowIndex);
+        }
+        if (StringUtils.equals(LhSpecialMaterialCategoryEnum.WIDE_BASE_225.getCode(), category)) {
+            first225RowMap.putIfAbsent(key, rowIndex);
+        }
+        if (!categorySet.contains(LhSpecialMaterialCategoryEnum.WIDE_BASE_195.getCode())
+                || !categorySet.contains(LhSpecialMaterialCategoryEnum.WIDE_BASE_225.getCode())
+                || !conflictKeySet.add(key)) {
             return;
         }
-        String firstCategory = categoryMap.get(key);
-        if (!StringUtils.equals(firstCategory, category) && conflictKeySet.add(key)) {
-            Integer firstRow = firstRowMap.get(key);
-            addErrorDetail(errorList, keyLabel + "=" + key
-                    + "(第" + firstRow + "条分类=" + firstCategory
-                    + ", 第" + rowIndex + "条分类=" + category + ")");
-        }
+        Integer first195Row = first195RowMap.get(key);
+        Integer first225Row = first225RowMap.get(key);
+        addErrorDetail(errorList, "物料编码=" + key
+                + "(第" + first195Row + "条分类="
+                + LhSpecialMaterialCategoryEnum.WIDE_BASE_195.getCode()
+                + ", 第" + first225Row + "条分类="
+                + LhSpecialMaterialCategoryEnum.WIDE_BASE_225.getCode() + ")");
     }
 
     /**

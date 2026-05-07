@@ -18,7 +18,7 @@ class SpecialMaterialBomValidatorTest {
     private final SpecialMaterialBomValidator validator = new SpecialMaterialBomValidator();
 
     @Test
-    void validate_shouldFailWhenMaterialCodeCategoryConflicts() {
+    void validate_shouldFailWhenMaterialCodeContains195And225WideBaseTogether() {
         LhScheduleContext context = buildContext();
         context.setSpecialMaterialBomList(Arrays.asList(
                 bom(1L, "MAT-001", null, "01"),
@@ -28,31 +28,29 @@ class SpecialMaterialBomValidatorTest {
 
         assertFalse(valid);
         assertTrue(context.getValidationErrorList().stream()
-                .anyMatch(error -> error.contains("物料编码存在重复分类配置") && error.contains("MAT-001")));
+                .anyMatch(error -> error.contains("同一物料编码不能同时配置19.5寸宽基和22.5寸宽基")
+                        && error.contains("MAT-001")));
     }
 
     @Test
-    void validate_shouldFailWhenStructureNameCategoryConflicts() {
+    void validate_shouldPassWhenMaterialCodeContainsWideBaseAndChipTogether() {
+        LhScheduleContext context = buildContext();
+        context.setSpecialMaterialBomList(Arrays.asList(
+                bom(1L, "MAT-001", null, "01"),
+                bom(2L, "MAT-001", null, "03")));
+
+        boolean valid = validator.validate(context);
+
+        assertTrue(valid);
+        assertTrue(context.getValidationErrorList().isEmpty());
+    }
+
+    @Test
+    void validate_shouldPassWhenStructureNameContainsMultipleCategories() {
         LhScheduleContext context = buildContext();
         context.setSpecialMaterialBomList(Arrays.asList(
                 bom(1L, null, "STRUCT-A", "01"),
                 bom(2L, null, "STRUCT-A", "03")));
-
-        boolean valid = validator.validate(context);
-
-        assertFalse(valid);
-        assertTrue(context.getValidationErrorList().stream()
-                .anyMatch(error -> error.contains("结构名称存在重复分类配置") && error.contains("STRUCT-A")));
-    }
-
-    @Test
-    void validate_shouldPassWhenDuplicatedKeysShareSameCategory() {
-        LhScheduleContext context = buildContext();
-        context.setSpecialMaterialBomList(Arrays.asList(
-                bom(1L, "MAT-001", null, "01"),
-                bom(2L, "MAT-001", null, "01"),
-                bom(3L, null, "STRUCT-A", "03"),
-                bom(4L, null, "STRUCT-A", "03")));
 
         boolean valid = validator.validate(context);
 

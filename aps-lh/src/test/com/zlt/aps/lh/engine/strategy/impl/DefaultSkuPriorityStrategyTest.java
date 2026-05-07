@@ -316,7 +316,7 @@ class DefaultSkuPriorityStrategyTest {
         machine.setPreviousProSize("17");
         context.setMachineScheduleMap(new LinkedHashMap<String, MachineScheduleDTO>());
         context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
-        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-C", "01");
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-C", Collections.singleton("01"));
 
         strategy.sortByPriority(context);
 

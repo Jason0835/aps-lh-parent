@@ -634,7 +634,7 @@ class ContinuousProductionTypeBlockRegressionTest {
         context.getMachineScheduleMap().put("M1", machine);
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
         context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-9", "STRUCT-B", "SPEC-B", "PAT-A", 4));
-        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-T1", "03");
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-T1", java.util.Collections.singleton("03"));
         putMaterialInfo(context, "MAT-C1", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
         putMaterialInfo(context, "MAT-T1", "胎胚描述-A", "SPEC-B", "PAT-A", "PAT-A");
         putMouldRel(context, "MAT-C1", "MOULD-1");

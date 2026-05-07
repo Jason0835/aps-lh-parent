@@ -210,7 +210,7 @@ class ContinuousProductionResultQtyRegressionTest {
     @Test
     void buildScheduleResult_shouldWriteSpecialMaterialFlagByMaterialCode() {
         LhScheduleContext context = newContext();
-        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-SPECIAL", "01");
+        context.getSpecialMaterialCategoryByMaterialCode().put("MAT-SPECIAL", java.util.Collections.singleton("01"));
         MachineScheduleDTO machine = new MachineScheduleDTO();
         machine.setMachineCode("K1201");
         machine.setMachineName("FC-K1201");

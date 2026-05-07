@@ -14,6 +14,7 @@ import java.math.BigDecimal;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 
@@ -121,8 +122,27 @@ public final class LhMachineHardMatchUtil {
         if (Objects.isNull(matchResult) || !matchResult.isSpecial()) {
             return true;
         }
-        LhSpecialMaterialCategoryEnum categoryEnum =
-                LhSpecialMaterialCategoryEnum.getByCode(matchResult.getCategory());
+        if (Objects.isNull(machine) || CollectionUtils.isEmpty(matchResult.getCategories())) {
+            return false;
+        }
+        for (String category : new LinkedHashSet<String>(matchResult.getCategories())) {
+            LhSpecialMaterialCategoryEnum categoryEnum = LhSpecialMaterialCategoryEnum.getByCode(category);
+            if (Objects.isNull(categoryEnum) || !isCategorySupported(categoryEnum, machine)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 判断机台是否支持指定特殊材料分类。
+     *
+     * @param categoryEnum 特殊材料分类
+     * @param machine 候选机台
+     * @return true-支持，false-不支持
+     */
+    public static boolean isCategorySupported(LhSpecialMaterialCategoryEnum categoryEnum,
+                                              MachineScheduleDTO machine) {
         if (Objects.isNull(categoryEnum) || Objects.isNull(machine)) {
             return false;
         }

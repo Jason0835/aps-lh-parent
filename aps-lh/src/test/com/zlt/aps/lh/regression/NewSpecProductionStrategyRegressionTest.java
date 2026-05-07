@@ -1045,6 +1045,7 @@ class NewSpecProductionStrategyRegressionTest {
         plan.setFactoryCode("116");
         plan.setMachineCode(machineCode);
         plan.setDueDate(dueDate);
+        plan.setDaysToDue(10);
         plan.setCompletionStatus("0");
         return plan;
     }

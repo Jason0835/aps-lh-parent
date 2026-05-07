@@ -28,7 +28,7 @@ class MaintenanceScheduleServiceRegressionTest {
     @Test
     void tryAttachMaintenanceAfterFirstEnding_shouldCreateFixedMorningWindowWhenDueSoon() {
         LhScheduleContext context = buildContext(date(2026, 4, 20));
-        context.getMaintenancePlanMap().put("K1001", buildPrecisionPlan("K1001", date(2026, 5, 10)));
+        context.getMaintenancePlanMap().put("K1001", buildPrecisionPlan("K1001", date(2026, 5, 10), 20));
         MachineScheduleDTO machine = buildMachine("K1001");
 
         boolean scheduled = service.tryAttachMaintenanceAfterFirstEnding(
@@ -45,7 +45,7 @@ class MaintenanceScheduleServiceRegressionTest {
     @Test
     void tryAttachMaintenanceAfterFirstEnding_shouldDelayWhenSundayInventoryAndHolidayBeforeDaysBlocked() {
         LhScheduleContext context = buildContext(date(2026, 5, 31));
-        context.getMaintenancePlanMap().put("K1001", buildPrecisionPlan("K1001", date(2026, 6, 10)));
+        context.getMaintenancePlanMap().put("K1001", buildPrecisionPlan("K1001", date(2026, 6, 10), 10));
         context.getWorkCalendarList().add(buildHoliday(date(2026, 6, 2)));
         MachineScheduleDTO machine = buildMachine("K1001");
 
@@ -61,7 +61,7 @@ class MaintenanceScheduleServiceRegressionTest {
     @Test
     void tryAttachLongOnlineMaintenance_shouldMarkForceDownWhenMachineOnlineOverThirtyDays() {
         LhScheduleContext context = buildContext(date(2026, 4, 20));
-        context.getMaintenancePlanMap().put("K1001", buildPrecisionPlan("K1001", date(2026, 4, 22)));
+        context.getMaintenancePlanMap().put("K1001", buildPrecisionPlan("K1001", date(2026, 4, 22), 2));
         LhMachineOnlineInfo onlineInfo = new LhMachineOnlineInfo();
         onlineInfo.setLhCode("K1001");
         onlineInfo.setOnlineDate(date(2026, 3, 1));
@@ -74,6 +74,22 @@ class MaintenanceScheduleServiceRegressionTest {
         MachineMaintenanceWindowDTO window = machine.getMaintenanceWindowList().get(0);
         assertTrue(window.isForceDown(), "长期在机触发的保养窗口应标记强制下机");
         assertEquals("长期在机强制下机", window.getTriggerReason());
+    }
+
+    @Test
+    void tryAttachMaintenanceAfterFirstEnding_shouldUseDaysToDueWhenDueDateMissing() {
+        LhScheduleContext context = buildContext(date(2026, 4, 27));
+        context.getMaintenancePlanMap().put("K2025", buildPrecisionPlan("K2025", null, 18));
+        MachineScheduleDTO machine = buildMachine("K2025");
+
+        boolean scheduled = service.tryAttachMaintenanceAfterFirstEnding(
+                context, machine, dateTime(2026, 4, 27, 1, 38));
+
+        assertTrue(scheduled, "dueDate 为空时，只要 daysToDue 落在预警窗口内也应安排保养");
+        assertEquals(1, machine.getMaintenanceWindowList().size());
+        MachineMaintenanceWindowDTO window = machine.getMaintenanceWindowList().get(0);
+        assertEquals(dateTime(2026, 4, 27, 8, 0), window.getMaintenanceStartTime());
+        assertEquals(dateTime(2026, 4, 27, 15, 0), window.getMaintenanceEndTime());
     }
 
     private static LhScheduleContext buildContext(Date scheduleDate) {
@@ -99,12 +115,13 @@ class MaintenanceScheduleServiceRegressionTest {
         return machine;
     }
 
-    private static LhPrecisionPlan buildPrecisionPlan(String machineCode, Date dueDate) {
+    private static LhPrecisionPlan buildPrecisionPlan(String machineCode, Date dueDate, Integer daysToDue) {
         LhPrecisionPlan plan = new LhPrecisionPlan();
         plan.setFactoryCode("116");
         plan.setMachineCode(machineCode);
         plan.setYear(BigDecimal.valueOf(2026));
         plan.setDueDate(dueDate);
+        plan.setDaysToDue(daysToDue);
         plan.setCompletionStatus("0");
         return plan;
     }

@@ -41,6 +41,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -361,6 +362,53 @@ class ContinuousProductionTypeBlockRegressionTest {
         assertEquals("1", typeBlockResult.getIsChangeMould());
         assertNotNull(typeBlockResult.getMouldCode());
         assertFalse(expectedStartTime.equals(LhScheduleTimeUtil.addHours(continuousResult.getSpecEndTime(), 9)));
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldConsumeSharedMouldChangeQuota() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 4));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return sku != null && "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        typeBlockProductionStrategy.scheduleTypeBlockChange(context);
+
+        assertArrayEquals(new int[]{1, 0}, context.getDailyMouldChangeCountMap().get("2026-04-18"),
+                "换活字块成功后应占用与新增换模共享的当日切换配额");
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldRollbackQuotaWhenFollowUpResultFails() {
+        LhScheduleContext context = newContext();
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 0));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return sku != null && "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        typeBlockProductionStrategy.scheduleTypeBlockChange(context);
+
+        assertEquals(1, context.getScheduleResultList().size(),
+                "换活字块结果构造失败时，不应残留无效排程结果");
+        assertArrayEquals(new int[]{0, 0}, context.getDailyMouldChangeCountMap()
+                        .getOrDefault("2026-04-18", new int[]{0, 0}),
+                "换活字块失败后应回滚已占用的切换配额");
     }
 
     @Test

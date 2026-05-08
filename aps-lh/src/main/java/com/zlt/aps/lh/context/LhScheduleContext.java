@@ -180,7 +180,7 @@ public class LhScheduleContext {
     private Map<String, Date> specifyMachineReservedSwitchStartTimeMap = new LinkedHashMap<>();
     /** 定点机台挤量预留物料编码, key=machineCode */
     private Map<String, String> specifyMachineReservedMaterialMap = new LinkedHashMap<>();
-    /** 每日换模计数, key=dateString, value=[早班换模数, 中班换模数] */
+    /** 每日模具切换计数, key=dateString, value=[早班切换数, 中班切换数] */
     private Map<String, int[]> dailyMouldChangeCountMap = new LinkedHashMap<>();
     /** 每日首检计数, key=dateString, value=[早班首检数, 中班首检数] */
     private Map<String, int[]> dailyFirstInspectionCountMap = new LinkedHashMap<>();

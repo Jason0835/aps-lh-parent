@@ -2,7 +2,9 @@ package com.zlt.aps.lh.regression;
 
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
+import com.zlt.aps.lh.api.domain.dto.MachineMaintenanceWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.ShiftProductionControlDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMachineOnlineInfo;
 import com.zlt.aps.lh.api.domain.entity.LhPrecisionPlan;
@@ -1020,6 +1022,34 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
+    void scheduleTypeBlockChange_shouldDelaySwitchUntilOpenProductionShiftStart() {
+        LhScheduleContext context = newContext();
+        context.setOpenProductionMode(true);
+        context.setOpenProductionShift(openProductionShift(dateTime(2026, 4, 19, 6, 0, 0)));
+        context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 1));
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return sku != null && "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        typeBlockProductionStrategy.scheduleTypeBlockChange(context);
+
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        assertEquals(dateTime(2026, 4, 19, 14, 0, 0), resolveFirstStartTime(typeBlockResult),
+                "开产模式下，换活字块主链应等到开产班次开始后再发起切换");
+        assertEquals(dateTime(2026, 4, 19, 6, 0, 0),
+                ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"),
+                "开产模式下，换活字块开始时间不能早于开产班次开始时间");
+    }
+
+    @Test
     void scheduleTypeBlockChange_shouldUseMaintenanceOverlapSwitchHoursAndInspection() {
         LhScheduleContext context = newContext();
         context.setScheduleDate(date(2026, 4, 22));
@@ -1055,6 +1085,47 @@ class ContinuousProductionTypeBlockRegressionTest {
         assertEquals(dateTime(2026, 4, 22, 15, 0, 0),
                 ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"),
                 "维保重叠时，换活字块开始时间应从维保结束时刻起算");
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldUseNormalTypeBlockHoursWhenOpenProductionStartsAfterMaintenanceEnd() {
+        LhScheduleContext context = newContext();
+        context.setScheduleDate(date(2026, 4, 18));
+        context.setScheduleTargetDate(date(2026, 4, 20));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+        context.setOpenProductionMode(true);
+        context.setOpenProductionShift(openProductionShift(dateTime(2026, 4, 18, 16, 0, 0)));
+        MachineScheduleDTO machine = buildMachine("M1", "MAT-C1");
+        context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
+        context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getNewSpecSkuList().add(buildNewSku("MAT-T1", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 8));
+        putMaterialInfo(context, "MAT-C1", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-T1", "胎胚描述-A", "SPEC-A", "PAT-B", "PAT-B");
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenAnswer(invocation -> {
+            SkuScheduleDTO sku = invocation.getArgument(1);
+            return sku != null && "MAT-C1".equals(sku.getMaterialCode());
+        });
+
+        strategy.scheduleContinuousEnding(context);
+        machine.setHasMaintenancePlan(true);
+        machine.setMaintenancePlanTime(date(2026, 4, 18));
+        List<MachineMaintenanceWindowDTO> maintenanceWindowList = new ArrayList<>(1);
+        maintenanceWindowList.add(buildMaintenanceWindow(
+                "M1", dateTime(2026, 4, 18, 8, 0, 0), dateTime(2026, 4, 18, 15, 0, 0)));
+        machine.setMaintenanceWindowList(maintenanceWindowList);
+        typeBlockProductionStrategy.scheduleTypeBlockChange(context);
+
+        assertEquals(2, context.getScheduleResultList().size(), "开产班次晚于维保结束时，换活字块结果仍应正常生成");
+        LhScheduleResult typeBlockResult = context.getScheduleResultList().get(1);
+        assertEquals(dateTime(2026, 4, 19, 0, 0, 0), resolveFirstStartTime(typeBlockResult),
+                "开产班次已晚于维保结束时，应按普通换活字块总时长计算开产时间");
+        assertEquals(dateTime(2026, 4, 18, 16, 0, 0),
+                ReflectionTestUtils.getField(typeBlockResult, "mouldChangeStartTime"),
+                "开产模式将切换起点推到维保结束之后时，不应继续沿用维保重叠起点");
     }
 
     @Test
@@ -1455,6 +1526,26 @@ class ContinuousProductionTypeBlockRegressionTest {
         planShut.setBeginDate(beginDate);
         planShut.setEndDate(endDate);
         return planShut;
+    }
+
+    private MachineMaintenanceWindowDTO buildMaintenanceWindow(String machineCode, Date startTime, Date endTime) {
+        MachineMaintenanceWindowDTO window = new MachineMaintenanceWindowDTO();
+        window.setMachineCode(machineCode);
+        window.setPlanDate(LhScheduleTimeUtil.clearTime(startTime));
+        window.setMaintenanceStartTime(startTime);
+        window.setMaintenanceEndTime(endTime);
+        return window;
+    }
+
+    private ShiftProductionControlDTO openProductionShift(Date startTime) {
+        ShiftProductionControlDTO dto = new ShiftProductionControlDTO();
+        dto.setShiftCode("04");
+        dto.setShiftIndex(4);
+        dto.setShiftStartTime(startTime);
+        dto.setEffectiveStartTime(startTime);
+        dto.setEffectiveEndTime(LhScheduleTimeUtil.addHours(startTime, 8));
+        dto.setCanSchedule(true);
+        return dto;
     }
 
     private Date resolveFirstStartTime(LhScheduleResult result) {

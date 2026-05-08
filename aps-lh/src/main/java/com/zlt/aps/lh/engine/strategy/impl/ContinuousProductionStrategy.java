@@ -802,6 +802,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         Date switchReadyTime = maintenanceOverlapSwitch
                 ? getMaintenanceScheduleService().resolveMaintenanceEndTime(context, machine)
                 : machineReadyTime;
+        switchReadyTime = ShiftProductionControlUtil.resolveEarliestSwitchStartTime(context, switchReadyTime);
         Date mouldChangeStartTime = getMouldChangeBalanceStrategy().allocateMouldChange(
                 context, machine.getMachineCode(), switchReadyTime);
         if (mouldChangeStartTime == null) {

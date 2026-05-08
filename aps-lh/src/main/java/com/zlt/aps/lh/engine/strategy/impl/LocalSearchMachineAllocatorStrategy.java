@@ -310,7 +310,8 @@ public class LocalSearchMachineAllocatorStrategy {
         Date mouldChangeStartTime = null;
         Date mouldChangeCompleteTime = null;
         Date inspectionTime = null;
-        Date candidateSwitchStartTime = machineReadyTime;
+        Date candidateSwitchStartTime = ShiftProductionControlUtil.resolveEarliestSwitchStartTime(
+                context, machineReadyTime);
         int maxDelayRetryCount = resolveMaxSwitchDelayRetryCount(machine);
         for (int retry = 0; retry < maxDelayRetryCount; retry++) {
             mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, candidateSwitchStartTime);

@@ -671,11 +671,13 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         if (switchReadyTime == null) {
             return null;
         }
+        int switchDurationHours = resolveTypeBlockSwitchDurationHours(
+                context, machine, estimatedEndTime, switchReadyTime);
         return getMouldChangeBalanceStrategy().allocateMouldChange(
                 context,
                 machine.getMachineCode(),
                 switchReadyTime,
-                resolveTypeBlockSwitchDurationHours(context, machine, estimatedEndTime));
+                switchDurationHours);
     }
 
     /**
@@ -692,13 +694,21 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         if (machine == null || estimatedEndTime == null) {
             return null;
         }
-        if (getMaintenanceScheduleService().shouldApplyMaintenanceOverlapSwitchRule(context, machine, estimatedEndTime)) {
-            return getMaintenanceScheduleService().resolveMaintenanceEndTime(context, machine);
-        }
-        Date switchStartTime = resolveAllowedSwitchStartTime(
+        Date rawSwitchStartTime = resolveAllowedSwitchStartTime(
                 context, machine.getMachineCode(), estimatedEndTime);
+        if (rawSwitchStartTime == null) {
+            return null;
+        }
+        Date switchReadyTime;
+        if (getMaintenanceScheduleService().shouldApplyMaintenanceOverlapSwitchRule(context, machine, rawSwitchStartTime)) {
+            switchReadyTime = getMaintenanceScheduleService().resolveMaintenanceEndTime(context, machine);
+        } else {
+            switchReadyTime = getMaintenanceScheduleService().delaySwitchStartByMaintenance(
+                    machine, rawSwitchStartTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+        }
+        switchReadyTime = ShiftProductionControlUtil.resolveEarliestSwitchStartTime(context, switchReadyTime);
         return getMaintenanceScheduleService().delaySwitchStartByMaintenance(
-                machine, switchStartTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+                machine, switchReadyTime, LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
     }
 
     private Date resolveTypeBlockSortReadyTime(LhScheduleContext context, MachineScheduleDTO machine) {
@@ -710,8 +720,9 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
 
     private int resolveTypeBlockSwitchDurationHours(LhScheduleContext context,
                                                     MachineScheduleDTO machine,
-                                                    Date estimatedEndTime) {
-        if (getMaintenanceScheduleService().shouldApplyMaintenanceOverlapSwitchRule(context, machine, estimatedEndTime)) {
+                                                    Date estimatedEndTime,
+                                                    Date switchStartTime) {
+        if (isTypeBlockMaintenanceOverlapSwitch(context, machine, estimatedEndTime, switchStartTime)) {
             return LhScheduleTimeUtil.getMaintenanceOverlapSwitchHours(context);
         }
         return LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context);
@@ -733,7 +744,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         if (switchStartTime == null) {
             return null;
         }
-        if (getMaintenanceScheduleService().shouldApplyMaintenanceOverlapSwitchRule(context, machine, estimatedEndTime)) {
+        if (isTypeBlockMaintenanceOverlapSwitch(context, machine, estimatedEndTime, switchStartTime)) {
             Date inspectionStartTime = LhScheduleTimeUtil.addHours(
                     switchStartTime, LhScheduleTimeUtil.getMaintenanceOverlapSwitchHours(context));
             return LhScheduleTimeUtil.addHours(
@@ -741,6 +752,32 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         }
         return LhScheduleTimeUtil.addHours(switchStartTime,
                 LhScheduleTimeUtil.getTypeBlockChangeTotalHours(context));
+    }
+
+    /**
+     * 判断换活字块是否仍应沿用维保重叠专用切换口径。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param estimatedEndTime 预计收尾时间
+     * @param switchStartTime 实际切换开始时间
+     * @return true-沿用维保重叠专用口径；false-按普通换活字块口径
+     */
+    private boolean isTypeBlockMaintenanceOverlapSwitch(LhScheduleContext context,
+                                                        MachineScheduleDTO machine,
+                                                        Date estimatedEndTime,
+                                                        Date switchStartTime) {
+        if (machine == null || estimatedEndTime == null || switchStartTime == null) {
+            return false;
+        }
+        Date rawSwitchStartTime = resolveAllowedSwitchStartTime(
+                context, machine.getMachineCode(), estimatedEndTime);
+        if (!getMaintenanceScheduleService().shouldApplyMaintenanceOverlapSwitchRule(
+                context, machine, rawSwitchStartTime)) {
+            return false;
+        }
+        Date maintenanceEndTime = getMaintenanceScheduleService().resolveMaintenanceEndTime(context, machine);
+        return maintenanceEndTime != null && !switchStartTime.after(maintenanceEndTime);
     }
 
     /**
@@ -1010,6 +1047,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         Date switchReadyTime = maintenanceOverlapSwitch
                 ? getMaintenanceScheduleService().resolveMaintenanceEndTime(context, machine)
                 : machineReadyTime;
+        switchReadyTime = ShiftProductionControlUtil.resolveEarliestSwitchStartTime(context, switchReadyTime);
         Date mouldChangeStartTime = getMouldChangeBalanceStrategy().allocateMouldChange(
                 context, machine.getMachineCode(), switchReadyTime);
         if (mouldChangeStartTime == null) {

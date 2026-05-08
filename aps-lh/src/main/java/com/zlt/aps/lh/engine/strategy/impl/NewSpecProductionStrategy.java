@@ -226,6 +226,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                         ? getMaintenanceScheduleService().resolveMaintenanceEndTime(context, candidateMachine)
                         : machineReadyTime;
                 switchReadyTime = resolveSpecifyReservedReadyTime(context, sku, machineCode, switchReadyTime);
+                switchReadyTime = ShiftProductionControlUtil.resolveEarliestSwitchStartTime(context, switchReadyTime);
 
                 // 4. 分配换模窗口；模具清洗即便重叠，也不再顺延换模起点。
                 Date mouldChangeStartTime = null;

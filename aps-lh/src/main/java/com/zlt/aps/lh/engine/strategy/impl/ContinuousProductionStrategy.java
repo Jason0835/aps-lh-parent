@@ -1752,17 +1752,19 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (context == null || CollectionUtils.isEmpty(context.getUnscheduledResultList())) {
             return;
         }
+        // 合并 key = materialCode + scheduleDate，保留日维度未排记录的日期信息
         Map<String, LhUnscheduledResult> mergedMap = new LinkedHashMap<>(context.getUnscheduledResultList().size());
         for (LhUnscheduledResult unscheduledResult : context.getUnscheduledResultList()) {
             if (unscheduledResult == null || StringUtils.isEmpty(unscheduledResult.getMaterialCode())) {
                 continue;
             }
-            String materialCode = unscheduledResult.getMaterialCode();
-            if (!mergedMap.containsKey(materialCode)) {
-                mergedMap.put(materialCode, unscheduledResult);
+            String mergeKey = unscheduledResult.getMaterialCode() + "_"
+                    + LhScheduleTimeUtil.formatDate(unscheduledResult.getScheduleDate());
+            if (!mergedMap.containsKey(mergeKey)) {
+                mergedMap.put(mergeKey, unscheduledResult);
                 continue;
             }
-            LhUnscheduledResult existing = mergedMap.get(materialCode);
+            LhUnscheduledResult existing = mergedMap.get(mergeKey);
             int existingQty = existing.getUnscheduledQty() != null ? existing.getUnscheduledQty() : 0;
             int currentQty = unscheduledResult.getUnscheduledQty() != null ? unscheduledResult.getUnscheduledQty() : 0;
             existing.setUnscheduledQty(existingQty + currentQty);

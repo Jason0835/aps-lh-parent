@@ -193,19 +193,27 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             MachineScheduleDTO preferredTrialMachine = resolvePreferredTrialMachine(context, sku, candidates);
 
             // 1.2 构建日剩余量 Map，用于多机台拆量时的日计划桶控制
+            // 日维度需求列表为空时（如旧构造数据/测试），回退到窗口总量模式，不做日桶控制
             Map<Date, Integer> dailyRemainingMap = buildDailyRemainingMap(sku);
-            if (!hasRemainingDailyDemand(dailyRemainingMap)) {
+            if (CollectionUtils.isEmpty(sku.getDailyDemandList())) {
+                dailyRemainingMap = null;
+            } else if (!hasRemainingDailyDemand(dailyRemainingMap)) {
                 iterator.remove();
                 continue;
             }
             // 收尾场景：升级最后一天的日目标量，允许上调到胎胚库存
-            if (isEnding) {
+            if (isEnding && dailyRemainingMap != null) {
                 getTargetScheduleQtyResolver().applyEndingDailyDemandUpgrade(context, sku, dailyRemainingMap);
             }
-            // 更新 SKU 初始目标量为日剩余总量，不超过月计划余量约束
-            int dailyRemainingTotal = dailyRemainingTotal(dailyRemainingMap);
-            int pendingQty = Math.max(0, sku.getPendingQty());
-            dailyRemainingTotal = Math.min(dailyRemainingTotal, pendingQty);
+            // 更新 SKU 初始目标量，日桶模式下不超过月计划余量约束
+            int dailyRemainingTotal;
+            if (dailyRemainingMap != null) {
+                dailyRemainingTotal = dailyRemainingTotal(dailyRemainingMap);
+                int pendingQty = Math.max(0, sku.getPendingQty());
+                dailyRemainingTotal = Math.min(dailyRemainingTotal, pendingQty);
+            } else {
+                dailyRemainingTotal = sku.resolveTargetScheduleQty();
+            }
             sku.setTargetScheduleQty(dailyRemainingTotal);
 
             // 2. 基于策略选择最优机台，失败后排除并继续选择下一台
@@ -371,9 +379,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                         LhScheduleTimeUtil.formatDateTime(inspectionTime),
                         LhScheduleTimeUtil.formatDateTime(productionStartTime));
 
-                // 7.1 按结果中各班次所属日期的排产量，扣减日剩余量 Map
-                deductDailyRemainingFromResult(dailyRemainingMap, result, shifts);
-
+                // 7.1 日计划桶扣减已在 distributeToShifts 中完成，直接检查是否排满
                 // 7.2 检查是否所有日计划桶已排满
                 if (!hasRemainingDailyDemand(dailyRemainingMap)) {
                     iterator.remove();
@@ -668,35 +674,6 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             }
         }
         return total;
-    }
-
-    /**
-     * 从排程结果中各班次所属日期的排产量，扣减日剩余量 Map。
-     *
-     * @param dailyRemainingMap 日剩余量 Map
-     * @param result            排程结果
-     * @param shifts            班次列表
-     */
-    private void deductDailyRemainingFromResult(Map<Date, Integer> dailyRemainingMap,
-                                                 LhScheduleResult result,
-                                                 List<LhShiftConfigVO> shifts) {
-        if (dailyRemainingMap == null || result == null || CollectionUtils.isEmpty(shifts)) {
-            return;
-        }
-        for (LhShiftConfigVO shift : shifts) {
-            if (shift == null || shift.getWorkDate() == null) {
-                continue;
-            }
-            Integer shiftPlanQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
-            if (shiftPlanQty == null || shiftPlanQty <= 0) {
-                continue;
-            }
-            Date clearedDate = LhScheduleTimeUtil.clearTime(shift.getWorkDate());
-            Integer remaining = dailyRemainingMap.get(clearedDate);
-            if (remaining != null) {
-                dailyRemainingMap.put(clearedDate, Math.max(0, remaining - shiftPlanQty));
-            }
-        }
     }
 
     /**
@@ -1014,6 +991,15 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shiftPlanEndTime);
                 remaining -= shiftQty;
                 startTime = effectiveEnd;
+
+                // 扣减日计划桶剩余量，避免同一日期多个班次累计超日计划
+                if (workDate != null && dailyRemainingMap != null) {
+                    Date clearedDate = LhScheduleTimeUtil.clearTime(workDate);
+                    Integer dailyRemaining = dailyRemainingMap.get(clearedDate);
+                    if (dailyRemaining != null) {
+                        dailyRemainingMap.put(clearedDate, Math.max(0, dailyRemaining - shiftQty));
+                    }
+                }
 
                 if (!CollectionUtils.isEmpty(stateMap)) {
                     ShiftRuntimeState st = stateMap.get(shift.getShiftIndex());
@@ -1563,17 +1549,19 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         if (context == null || CollectionUtils.isEmpty(context.getUnscheduledResultList())) {
             return;
         }
+        // 合并 key = materialCode + scheduleDate，保留日维度未排记录的日期信息
         Map<String, LhUnscheduledResult> mergedMap = new LinkedHashMap<>(context.getUnscheduledResultList().size());
         for (LhUnscheduledResult unscheduledResult : context.getUnscheduledResultList()) {
             if (unscheduledResult == null || StringUtils.isEmpty(unscheduledResult.getMaterialCode())) {
                 continue;
             }
-            String materialCode = unscheduledResult.getMaterialCode();
-            if (!mergedMap.containsKey(materialCode)) {
-                mergedMap.put(materialCode, unscheduledResult);
+            String mergeKey = unscheduledResult.getMaterialCode() + "_"
+                    + LhScheduleTimeUtil.formatDate(unscheduledResult.getScheduleDate());
+            if (!mergedMap.containsKey(mergeKey)) {
+                mergedMap.put(mergeKey, unscheduledResult);
                 continue;
             }
-            LhUnscheduledResult existing = mergedMap.get(materialCode);
+            LhUnscheduledResult existing = mergedMap.get(mergeKey);
             int existingQty = existing.getUnscheduledQty() != null ? existing.getUnscheduledQty() : 0;
             int currentQty = unscheduledResult.getUnscheduledQty() != null ? unscheduledResult.getUnscheduledQty() : 0;
             existing.setUnscheduledQty(existingQty + currentQty);

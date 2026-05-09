@@ -38,6 +38,9 @@ public class SkuScheduleDTO {
     private String brand;
 
     // ========== 计划量信息 ==========
+    /** 日维度排产需求列表（按排程窗口内每个自然日生成一条） */
+    private List<SkuDailyScheduleDemandDTO> dailyDemandList;
+
     /** 月度计划总量 */
     private int monthPlanQty;
     /** 已完成合格量 */

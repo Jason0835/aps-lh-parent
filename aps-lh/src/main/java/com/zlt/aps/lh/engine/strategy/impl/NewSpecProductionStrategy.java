@@ -217,7 +217,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 Date endingTime = candidateMachine.getEstimatedEndTime() != null
                         ? candidateMachine.getEstimatedEndTime() : resolveDefaultMachineEndTime(context, shifts);
                 getMaintenanceScheduleService().tryAttachLongOnlineMaintenance(context, candidateMachine);
-                getMaintenanceScheduleService().tryAttachMaintenanceAfterFirstEnding(context, candidateMachine, endingTime);
+                if (isEnding) {
+                    getMaintenanceScheduleService().tryAttachMaintenanceAfterFirstEnding(
+                            context, candidateMachine, endingTime);
+                }
                 Date machineReadyTime = capacityCalculate.calculateStartTime(context,
                         machineCode, endingTime);
                 boolean maintenanceOverlapSwitch = getMaintenanceScheduleService()

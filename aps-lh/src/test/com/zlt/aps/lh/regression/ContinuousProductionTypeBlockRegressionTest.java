@@ -367,7 +367,7 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
-    void scheduleTypeBlockChange_shouldNotConsumeMouldChangeQuota() {
+    void scheduleTypeBlockChange_shouldConsumeMouldChangeQuota() {
         LhScheduleContext context = newContext();
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
         context.getContinuousSkuList().add(buildContinuousSku("MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
@@ -384,13 +384,13 @@ class ContinuousProductionTypeBlockRegressionTest {
         strategy.scheduleContinuousEnding(context);
         typeBlockProductionStrategy.scheduleTypeBlockChange(context);
 
-        assertArrayEquals(new int[]{0, 0}, context.getDailyMouldChangeCountMap()
+        assertArrayEquals(new int[]{1, 0}, context.getDailyMouldChangeCountMap()
                         .getOrDefault("2026-04-18", new int[]{0, 0}),
-                "换活字块不应占用新增换模的早中班配额");
+                "换活字块成功后应占用对应班次的换模配额");
     }
 
     @Test
-    void scheduleTypeBlockChange_shouldKeepMorningQuotaForFollowingNewSpecMouldChange() {
+    void scheduleTypeBlockChange_shouldReduceMorningQuotaForFollowingNewSpecMouldChange() {
         LhScheduleContext context = newContext();
         context.getDailyMouldChangeCountMap().put("2026-04-18", new int[]{5, 0});
         context.getMachineScheduleMap().put("M1", buildMachine("M1", "MAT-C1"));
@@ -408,8 +408,8 @@ class ContinuousProductionTypeBlockRegressionTest {
         strategy.scheduleContinuousEnding(context);
         typeBlockProductionStrategy.scheduleTypeBlockChange(context);
 
-        assertArrayEquals(new int[]{5, 0}, context.getDailyMouldChangeCountMap().get("2026-04-18"),
-                "换活字块完成后，不应挤占后续新增换模的早班配额");
+        assertArrayEquals(new int[]{6, 0}, context.getDailyMouldChangeCountMap().get("2026-04-18"),
+                "换活字块完成后，应同步占用后续新增换模共享的早班配额");
     }
 
     @Test

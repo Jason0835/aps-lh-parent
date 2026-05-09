@@ -188,8 +188,10 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                             machineCode, typeBlockSku.getMaterialCode());
                     continue;
                 }
-                getMaintenanceScheduleService().tryAttachMaintenanceAfterFirstEnding(
-                        context, machine, machine.getEstimatedEndTime());
+                if (endingJudgmentStrategy.isEnding(context, typeBlockSku)) {
+                    getMaintenanceScheduleService().tryAttachMaintenanceAfterFirstEnding(
+                            context, machine, machine.getEstimatedEndTime());
+                }
                 Date typeBlockSwitchStartTime = allocateTypeBlockSwitchStartTime(
                         context, machine, machine.getEstimatedEndTime());
                 Date typeBlockStartTime = resolveTypeBlockProductionStartTime(
@@ -933,8 +935,8 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                                                       Date switchStartTime,
                                                       List<LhShiftConfigVO> shifts) {
         boolean success = appendFollowUpResult(context, machine, sku, startTime, switchStartTime, shifts);
-        if (switchStartTime != null) {
-            // 换活字块仍要遵守禁止时段和停机顺延，但不再占用新增换模早/中班配额。
+        if (!success && switchStartTime != null) {
+            // 换活字块结果落地失败时，回滚本轮已占用的切换配额。
             getMouldChangeBalanceStrategy().rollbackMouldChange(context, switchStartTime);
         }
         return success;

@@ -183,6 +183,27 @@ class NewSpecProductionStrategyRegressionTest {
     }
 
     @Test
+    void scheduleNewSpecs_shouldNotAttachMaintenanceBeforeNonEndingSkuCompletes() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        context.getMaintenancePlanMap().put("K1105", buildPrecisionPlan("K1105", dateTime(2026, 5, 10, 0, 0)));
+        SkuScheduleDTO sku = buildSku();
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO machine = new MachineScheduleDTO();
+        machine.setMachineCode("K1105");
+        machine.setMachineName("首规格未收尾机台");
+        machine.setEstimatedEndTime(dateTime(2026, 4, 17, 6, 0));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(machine), defaultMouldChangeBalance(),
+                defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertTrue(machine.getMaintenanceWindowList().isEmpty(), "当前新增SKU未收尾时，不应提前挂载首个规格收尾后的精度保养");
+    }
+
+    @Test
     void scheduleNewSpecs_shouldAllowContinuousCandidateFallbackIntoNewSpec() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, false);
@@ -535,7 +556,7 @@ class NewSpecProductionStrategyRegressionTest {
     @Test
     void scheduleNewSpecs_shouldUseMaintenanceOverlapSwitchHoursAndInspection() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
-        injectDependencies(strategy, false);
+        injectDependencies(strategy, true);
 
         LhScheduleContext context = buildContext();
         Date scheduleDate = dateTime(2026, 4, 22, 0, 0);

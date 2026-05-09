@@ -53,7 +53,7 @@ public class LhMaintenanceScheduleService {
             return false;
         }
         String lookupMachineCode = LhSingleControlMachineUtil.resolveLookupMachineCode(context, machine.getMachineCode());
-        if (!hasRecentOnlineRecord(context, lookupMachineCode)) {
+        if (!hasNoRecentOnlineRecord(context, lookupMachineCode)) {
             return false;
         }
         LhPrecisionPlan plan = context.getMaintenancePlanMap().get(lookupMachineCode);
@@ -285,7 +285,7 @@ public class LhMaintenanceScheduleService {
      * @param lookupMachineCode 查询机台编码
      * @return true-满足触发前提；false-不满足
      */
-    private boolean hasRecentOnlineRecord(LhScheduleContext context, String lookupMachineCode) {
+    private boolean hasNoRecentOnlineRecord(LhScheduleContext context, String lookupMachineCode) {
         if (Objects.isNull(context) || StringUtils.isEmpty(lookupMachineCode)
                 || Objects.isNull(context.getScheduleDate())) {
             return false;
@@ -295,13 +295,9 @@ public class LhMaintenanceScheduleService {
                 || Objects.isNull(onlineInfo.getOnlineDate())
                 || (StringUtils.isEmpty(onlineInfo.getMaterialCode())
                 && StringUtils.isEmpty(onlineInfo.getMesMaterialCode()))) {
-            return false;
+            return true;
         }
-        // MES在机信息中本月有该机台记录时，不触发首个规格收尾后保养
-        if (sameMonth(onlineInfo.getOnlineDate(), context.getScheduleDate())) {
-            return false;
-        }
-        return diffDays(onlineInfo.getOnlineDate(), context.getScheduleDate()) <= LONG_ONLINE_DAYS;
+        return diffDays(onlineInfo.getOnlineDate(), context.getScheduleDate()) > LONG_ONLINE_DAYS;
     }
 
     /**
@@ -406,18 +402,6 @@ public class LhMaintenanceScheduleService {
     private boolean isInventoryDayAllowed(LhScheduleContext context) {
         return getParamInt(context, LhScheduleParamConstant.ALLOW_MAINTENANCE_ON_INVENTORY_DAY,
                 LhScheduleConstant.ALLOW_MAINTENANCE_ON_INVENTORY_DAY) == ENABLED;
-    }
-
-    private boolean sameMonth(Date left, Date right) {
-        if (Objects.isNull(left) || Objects.isNull(right)) {
-            return false;
-        }
-        Calendar cal1 = Calendar.getInstance();
-        cal1.setTime(left);
-        Calendar cal2 = Calendar.getInstance();
-        cal2.setTime(right);
-        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR)
-                && cal1.get(Calendar.MONTH) == cal2.get(Calendar.MONTH);
     }
 
     private boolean isSunday(Date date) {

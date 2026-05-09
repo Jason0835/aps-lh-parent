@@ -16,6 +16,7 @@ import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.util.MachineCleaningOverlapUtil;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.ShiftProductionControlUtil;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -32,6 +33,7 @@ import java.util.Objects;
  *
  * @author APS
  */
+@Slf4j
 @Component
 public class TargetScheduleQtyResolver {
 
@@ -134,7 +136,10 @@ public class TargetScheduleQtyResolver {
             }
             totalCapacity += machineCapacity;
         }
-        return Math.max(0, totalCapacity);
+        int result = Math.max(0, totalCapacity);
+        log.debug("SKU多机台合计产能计算, materialCode: {}, 候选机台数: {}, 合计产能: {}",
+                sku.getMaterialCode(), candidates.size(), result);
+        return result;
     }
 
     /**
@@ -253,6 +258,14 @@ public class TargetScheduleQtyResolver {
         }
         if (embryoUpgradeQty > lastDayRemaining) {
             dailyRemainingMap.put(lastDate, embryoUpgradeQty);
+            log.info("SKU多机台收尾产能计算, materialCode: {}, 窗口计划量合计: {}, 月计划余量: {}, 胎胚库存: {}, "
+                            + "之前日期合计: {}, 最后日期: {}, 原目标量: {}, 上调后: {}, 多机台合计产能: {}",
+                    sku.getMaterialCode(), otherDaysTotal + lastDayRemaining, monthRemainQty, embryoStock,
+                    otherDaysTotal, LhScheduleTimeUtil.formatDate(lastDate), lastDayRemaining,
+                    embryoUpgradeQty, totalAvailableCapacity);
+        } else {
+            log.debug("SKU收尾无需上调, materialCode: {}, 余量: {}, 胎胚库存: {}, 最后日期目标量: {}, 上调量候选: {}",
+                    sku.getMaterialCode(), monthRemainQty, embryoStock, lastDayRemaining, embryoUpgradeQty);
         }
     }
 

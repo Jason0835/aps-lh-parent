@@ -202,8 +202,12 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
             // 收尾场景：升级最后一天的日目标量，允许上调到胎胚库存
+            // 非收尾场景：跳过胎胚库存上调，严格按日计划量排产
             if (isEnding && dailyRemainingMap != null) {
                 getTargetScheduleQtyResolver().applyEndingDailyDemandUpgrade(context, sku, dailyRemainingMap);
+            } else if (!isEnding && sku.getEmbryoStock() > 0) {
+                log.debug("SKU非收尾场景跳过胎胚库存上调, materialCode: {}, 胎胚库存: {}, 日计划量合计: {}",
+                        sku.getMaterialCode(), sku.getEmbryoStock(), dailyRemainingTotal(dailyRemainingMap));
             }
             // 更新 SKU 初始目标量，日桶模式下不超过月计划余量约束
             int dailyRemainingTotal;

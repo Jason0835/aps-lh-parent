@@ -123,8 +123,12 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             // 构建日剩余量 Map，用于续作排产时的日计划桶控制
             Map<Date, Integer> dailyRemainingMap = buildDailyRemainingMap(sku);
             // 收尾场景：升级最后一天的日目标量，允许上调到胎胚库存
+            // 非收尾场景：跳过胎胚库存上调，严格按日计划量排产
             if (isEnding) {
                 getTargetScheduleQtyResolver().applyEndingDailyDemandUpgrade(context, sku, dailyRemainingMap);
+            } else if (sku.getEmbryoStock() > 0) {
+                log.debug("续作SKU非收尾场景跳过胎胚库存上调, materialCode: {}, 胎胚库存: {}, 日计划量合计: {}",
+                        sku.getMaterialCode(), sku.getEmbryoStock(), dailyRemainingTotal(dailyRemainingMap));
             }
 
             // 滚动衔接时沿用机台继承后的可用时间，避免从重叠窗口首班重复起排。

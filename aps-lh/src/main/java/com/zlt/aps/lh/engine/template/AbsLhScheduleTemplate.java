@@ -89,6 +89,7 @@ public abstract class AbsLhScheduleTemplate {
             doResultValidationAndSave(context);
             logStepSnapshot(context, ScheduleStepEnum.S4_6_RESULT_VALIDATION);
 
+            releaseContextHeavyResources(context);
             return buildSuccessResponse(context);
         } catch (ScheduleException e) {
             log.error("硫化排程领域异常, 当前步骤:{}", context.getCurrentStep(), e);
@@ -136,6 +137,7 @@ public abstract class AbsLhScheduleTemplate {
      * @return 中断响应DTO
      */
     private LhScheduleResponseDTO buildInterruptResponse(LhScheduleContext context) {
+        releaseContextHeavyResources(context);
         log.warn("排程在步骤[{}]被中断, 原因: {}", context.getCurrentStep(), context.getInterruptReason());
         String message = "排程中断[" + context.getCurrentStep() + "]: " + context.getInterruptReason();
         LhScheduleResponseDTO response = LhScheduleResponseDTO.fail(context.getBatchNo(), message);
@@ -174,5 +176,26 @@ public abstract class AbsLhScheduleTemplate {
                 context.getBatchNo(), context.getMachineScheduleMap().size(),
                 context.getContinuousSkuList().size(), context.getNewSpecSkuList().size(),
                 context.getScheduleResultList().size(), context.getUnscheduledResultList().size());
+    }
+
+    /**
+     * 释放上下文中排程完成后不再需要的大对象，为响应序列化腾出堆空间。
+     * <p>仅清理S4.2加载的基础数据缓存Map，保留排程结果、未排列表、模具计划等响应必需数据。</p>
+     *
+     * @param context 排程上下文
+     */
+    private void releaseContextHeavyResources(LhScheduleContext context) {
+        if (context == null) {
+            return;
+        }
+        context.setMachineOnlineInfoMap(null);
+        context.setSkuMouldRelMap(null);
+        context.setSkuLhCapacityMap(null);
+        context.setMaterialInfoMap(null);
+        context.setMachineInfoMap(null);
+        context.setCapsuleUsageMap(null);
+        context.setMaintenancePlanMap(null);
+        context.setSkuTotalCapacityCache(null);
+        log.debug("上下文大量数据已释放，准备返回排程响应");
     }
 }

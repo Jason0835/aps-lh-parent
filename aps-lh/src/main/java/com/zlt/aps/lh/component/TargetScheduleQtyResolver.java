@@ -21,6 +21,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -80,6 +82,8 @@ public class TargetScheduleQtyResolver {
      * 计算 SKU 在当前排程窗口内所有可用机台的合计产能。
      * <p>用于收尾判断（规则2）和多机台排产目标量封顶。
      * 遍历候选机台列表，对每台机台按班次计算可用产能并汇总。</p>
+     * <p>班次级管控信息预计算到机台循环外部，避免每对(机台,班次)重复创建 ShiftProductionControlDTO，
+     * 降低 GC 压力。班产折算用长整数运算替代 BigDecimal 分配。</p>
      *
      * @param context 排程上下文
      * @param sku     SKU排程DTO
@@ -112,6 +116,27 @@ public class TargetScheduleQtyResolver {
             return 0;
         }
 
+        // 预计算班次级别数据（对所有机台相同），避免在每对(机台,班次)中重复创建 DTO 和 BigDecimal
+        int shiftCount = shifts.size();
+        long[] shiftAvailableSecondsArr = new long[shiftCount];
+        long[] shiftDurationSecondsArr = new long[shiftCount];
+        BigDecimal[] shiftCapacityRateArr = new BigDecimal[shiftCount];
+        boolean[] shiftCanScheduleArr = new boolean[shiftCount];
+        for (int i = 0; i < shiftCount; i++) {
+            LhShiftConfigVO shift = shifts.get(i);
+            ShiftProductionControlDTO control = ShiftProductionControlUtil.resolveEffectiveControl(
+                    context, shift, shift.getShiftStartDateTime());
+            if (Objects.isNull(control) || !control.isCanSchedule()) {
+                shiftCanScheduleArr[i] = false;
+                continue;
+            }
+            shiftCanScheduleArr[i] = true;
+            shiftAvailableSecondsArr[i] = (control.getEffectiveEndTime().getTime()
+                    - control.getEffectiveStartTime().getTime()) / 1000L;
+            shiftDurationSecondsArr[i] = ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift);
+            shiftCapacityRateArr[i] = control.getCapacityRate();
+        }
+
         int totalCapacity = 0;
         for (MachineScheduleDTO machine : candidates) {
             if (machine == null) {
@@ -124,21 +149,16 @@ public class TargetScheduleQtyResolver {
                 continue;
             }
             int machineCapacity = 0;
-            for (LhShiftConfigVO shift : shifts) {
-                ShiftProductionControlDTO control = ShiftProductionControlUtil.resolveEffectiveControl(
-                        context, shift, shift.getShiftStartDateTime());
-                if (Objects.isNull(control) || !control.isCanSchedule()) {
+            for (int i = 0; i < shiftCount; i++) {
+                if (!shiftCanScheduleArr[i]) {
                     continue;
                 }
-                long availableSeconds = (control.getEffectiveEndTime().getTime()
-                        - control.getEffectiveStartTime().getTime()) / 1000L;
-                int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacity(
-                        runtimeShiftCapacity,
-                        lhTimeSeconds,
-                        machineMouldQty,
-                        ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
-                        availableSeconds);
-                shiftMaxQty = ShiftProductionControlUtil.deductCapacityByControl(control, shiftMaxQty, machineMouldQty);
+                int shiftMaxQty = calcShiftQty(runtimeShiftCapacity, lhTimeSeconds, machineMouldQty,
+                        shiftAvailableSecondsArr[i], shiftDurationSecondsArr[i]);
+                if (shiftMaxQty <= 0) {
+                    continue;
+                }
+                shiftMaxQty = deductQtyByRate(shiftCapacityRateArr[i], shiftMaxQty, machineMouldQty);
                 if (shiftMaxQty > 0) {
                     machineCapacity += shiftMaxQty;
                 }
@@ -153,6 +173,67 @@ public class TargetScheduleQtyResolver {
         log.debug("SKU多机台合计产能计算, materialCode: {}, 候选机台数: {}, 合计产能: {}",
                 sku.getMaterialCode(), candidates.size(), result);
         return result;
+    }
+
+    /**
+     * 按班次预计算值计算可排产能（长整数版 resolveShiftCapacity）。
+     * <p>等价于 {@link ShiftCapacityResolverUtil#resolveShiftCapacity(int, int, int, long, long)}，
+     * 但用长整数运算替代 BigDecimal 分配，消除热路径 GC 压力。</p>
+     *
+     * @param shiftCapacity        机台运行态班产
+     * @param lhTimeSeconds        硫化时长（秒）
+     * @param mouldQty             模台数
+     * @param availableSeconds     班次有效可生产秒数
+     * @param shiftDurationSeconds 班次总时长（秒）
+     * @return 班次可排产能
+     */
+    private int calcShiftQty(int shiftCapacity, int lhTimeSeconds, int mouldQty,
+                             long availableSeconds, long shiftDurationSeconds) {
+        if (availableSeconds <= 0) {
+            return 0;
+        }
+        long effectiveAvailable = Math.min(availableSeconds, shiftDurationSeconds);
+
+        // 有班产主数据：按班产 × 可用时间占比折算
+        if (shiftCapacity > 0) {
+            if (shiftDurationSeconds <= 0) {
+                return shiftCapacity;
+            }
+            int resolvedQty = (int) (((long) shiftCapacity * effectiveAvailable) / shiftDurationSeconds);
+            return ShiftCapacityResolverUtil.normalizeQtyToMouldMultiple(
+                    resolvedQty, mouldQty, effectiveAvailable < shiftDurationSeconds);
+        }
+
+        // 无班产主数据：按完整硫化周期数 × 模台数回退
+        int resolvedMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(mouldQty);
+        if (lhTimeSeconds <= 0 || resolvedMouldQty <= 0) {
+            return 0;
+        }
+        return (int) (effectiveAvailable / lhTimeSeconds) * resolvedMouldQty;
+    }
+
+    /**
+     * 按产能比例扣减产能。
+     * <p>等价于 {@link ShiftProductionControlUtil#deductCapacityByControl(
+     * ShiftProductionControlDTO, int, int)}，接受预计算的 capacityRate 作为参数，
+     * 避免传递 DTO 对象。</p>
+     *
+     * @param capacityRate 产能比例，>=1 时不扣减
+     * @param qty          原始产能
+     * @param mouldQty     模台数
+     * @return 扣减后产能
+     */
+    private int deductQtyByRate(BigDecimal capacityRate, int qty, int mouldQty) {
+        if (Objects.isNull(capacityRate) || qty <= 0) {
+            return Math.max(qty, 0);
+        }
+        if (capacityRate.compareTo(BigDecimal.ONE) >= 0) {
+            return qty;
+        }
+        int adjusted = capacityRate.multiply(BigDecimal.valueOf(qty))
+                .setScale(0, RoundingMode.DOWN)
+                .intValue();
+        return ShiftCapacityResolverUtil.normalizeQtyToMouldMultiple(adjusted, mouldQty, true);
     }
 
     /**

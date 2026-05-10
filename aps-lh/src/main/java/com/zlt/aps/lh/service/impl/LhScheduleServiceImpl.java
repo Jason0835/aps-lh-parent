@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -132,6 +133,8 @@ public class LhScheduleServiceImpl implements ILhScheduleService {
      */
     private LhScheduleContext buildContext(LhScheduleRequestDTO request) {
         LhScheduleContext context = new LhScheduleContext();
+        // 初始化SKU多机台合计产能缓存，避免S4.3阶段重复计算机台班次产能导致GC抖荡
+        context.setSkuTotalCapacityCache(new HashMap<>(32));
         String factoryCode = request.getFactoryCode();
         context.setFactoryCode(factoryCode);
         context.setMonthPlanVersion(StringUtils.isNotEmpty(request.getMonthPlanVersion())

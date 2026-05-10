@@ -57,15 +57,19 @@ public class TargetScheduleQtyResolver {
         if (pendingQty <= 0) {
             return 0;
         }
+        // 优先计算多机台合计产能（自带缓存），同时用于满排封顶和产能上限
+        int totalAvailableCapacity = calcSkuTotalAvailableCapacityInWindow(context, sku);
         int upperLimitQty;
         if (isFullCapacityMode(context)) {
-            upperLimitQty = resolveTheoreticalWindowCapacity(context, sku);
+            // 满排模式：优先用多机台合计产能封顶，无候选机台时回退到理论窗口产能
+            upperLimitQty = totalAvailableCapacity > 0
+                    ? totalAvailableCapacity
+                    : resolveTheoreticalWindowCapacity(context, sku);
         } else {
             upperLimitQty = pendingQty;
         }
         int targetQty = Math.max(0, Math.min(pendingQty, upperLimitQty));
         // 多机台总产能封顶，避免排产量超过所有可用机台合计产能
-        int totalAvailableCapacity = calcSkuTotalAvailableCapacityInWindow(context, sku);
         if (totalAvailableCapacity > 0) {
             targetQty = Math.min(targetQty, totalAvailableCapacity);
         }
@@ -84,6 +88,11 @@ public class TargetScheduleQtyResolver {
     public int calcSkuTotalAvailableCapacityInWindow(LhScheduleContext context, SkuScheduleDTO sku) {
         if (Objects.isNull(context) || Objects.isNull(sku)) {
             return 0;
+        }
+        // 产能缓存命中直接返回，避免三阶段重复计算
+        Map<String, Integer> cache = context.getSkuTotalCapacityCache();
+        if (cache != null && cache.containsKey(sku.getMaterialCode())) {
+            return cache.get(sku.getMaterialCode());
         }
         IMachineMatchStrategy strategy = getMachineMatchStrategy();
         if (Objects.isNull(strategy)) {
@@ -137,6 +146,10 @@ public class TargetScheduleQtyResolver {
             totalCapacity += machineCapacity;
         }
         int result = Math.max(0, totalCapacity);
+        // 写入缓存，后续同一SKU的收尾判定和日计划上调可直接命中
+        if (cache != null) {
+            cache.put(sku.getMaterialCode(), result);
+        }
         log.debug("SKU多机台合计产能计算, materialCode: {}, 候选机台数: {}, 合计产能: {}",
                 sku.getMaterialCode(), candidates.size(), result);
         return result;

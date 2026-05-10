@@ -81,6 +81,8 @@ public class ScheduleAdjustHandler extends AbsScheduleStepHandler {
                 context.getFactoryCode(), LhScheduleTimeUtil.formatDate(context.getScheduleTargetDate()),
                 LhScheduleTimeUtil.formatDate(context.getScheduleDate()),
                 context.getMonthPlanList().size(), context.getPreviousScheduleResultList().size());
+        // 初始化SKU合计产能缓存，避免resolveInitialTargetQty/markEndingSkus/applyEndingDailyDemandUpgrade三阶段重复计算
+        context.setSkuTotalCapacityCache(new LinkedHashMap<>(context.getMonthPlanList().size()));
         // S4.3.1 前日排程欠/超产量调整
         adjustPreviousSchedule(context);
 

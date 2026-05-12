@@ -30,6 +30,7 @@ import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
 import com.zlt.aps.lh.service.impl.LhMaintenanceScheduleService;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
+import com.zlt.aps.lh.util.LhSingleControlMachineUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.LhMultiMachineDistributionUtil;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
@@ -517,7 +518,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
     /**
      * 优先选择窗口内可单机收完剩余量的候选机台。
-     * <p>仅在试制优选机台未命中时生效，避免中间机台被无谓占用。</p>
+     * <p>试制/量试 SKU 存在可用单控机台时，仅考虑单控候选，避免普通机台抢占，
+     * 迫使试制 SKU 等待单控机台收尾而非回落普通机台。</p>
      *
      * @param context 排程上下文
      * @param sku SKU
@@ -538,11 +540,32 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         if (remainingQty <= 0) {
             return null;
         }
+        // 试制/量试SKU有可用单控机台时，仅考虑单控候选，避免普通机台抢占
+        boolean trialStickToSingleControl = false;
+        if (shouldPreferTrialMachine(sku)) {
+            for (MachineScheduleDTO candidate : candidates) {
+                if (candidate == null || StringUtils.isEmpty(candidate.getMachineCode())) {
+                    continue;
+                }
+                if (!CollectionUtils.isEmpty(excludedMachineCodes)
+                        && excludedMachineCodes.contains(candidate.getMachineCode())) {
+                    continue;
+                }
+                if (LhSingleControlMachineUtil.isSingleControlSplitMachine(context, candidate.getMachineCode())) {
+                    trialStickToSingleControl = true;
+                    break;
+                }
+            }
+        }
         for (MachineScheduleDTO candidate : candidates) {
             if (candidate == null
                     || StringUtils.isEmpty(candidate.getMachineCode())
                     || (!CollectionUtils.isEmpty(excludedMachineCodes)
                     && excludedMachineCodes.contains(candidate.getMachineCode()))) {
+                continue;
+            }
+            if (trialStickToSingleControl
+                    && !LhSingleControlMachineUtil.isSingleControlSplitMachine(context, candidate.getMachineCode())) {
                 continue;
             }
             int machineCapacity = getTargetScheduleQtyResolver()

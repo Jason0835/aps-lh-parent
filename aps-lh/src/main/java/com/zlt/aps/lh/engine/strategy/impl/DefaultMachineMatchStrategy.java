@@ -11,6 +11,7 @@ import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
+import com.zlt.aps.lh.api.enums.ConstructionStageEnum;
 import com.zlt.aps.lh.api.enums.LhSpecialMaterialCategoryEnum;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.util.LhMachineHardMatchUtil;
@@ -107,6 +108,8 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
             }
         }
 
+        candidates = applySingleControlReservationRule(context, sku, candidates);
+
         // 5. 按多维度排序
         sortCandidates(context, candidates, sku, specialMaterialMatchResult);
         traceMachineCandidates(context, sku, specialMaterialMatchResult, candidates, trace);
@@ -124,6 +127,76 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                 sku.getMaterialCode(), specialMaterialMatchResult.isSpecial(),
                 specialMaterialMatchResult.getCategoryDisplayText(), candidates.size());
         return candidates;
+    }
+
+    /**
+     * 对单控拆分机台执行试制保留规则。
+     * <p>试制/量试、小批量 SKU 命中“收尾中的单控机台”时，仅保留该类候选并等待其收尾；
+     * 若单控机台存在但都不是收尾态，则试制/量试不再等待，可回落普通机台。
+     * 普通 SKU 默认剔除单控候选，避免在普通机台失败后回落占用试制保留机台。
+     * 若普通 SKU 存在限制作业定点配置，则仍保留原候选。</p>
+     *
+     * @param context 排程上下文
+     * @param sku 待排SKU
+     * @param candidates 原候选机台
+     * @return 处理后的候选机台
+     */
+    private List<MachineScheduleDTO> applySingleControlReservationRule(LhScheduleContext context,
+                                                                       SkuScheduleDTO sku,
+                                                                       List<MachineScheduleDTO> candidates) {
+        if (CollectionUtils.isEmpty(candidates) || sku == null) {
+            return candidates;
+        }
+        List<MachineScheduleDTO> singleControlCandidates = new ArrayList<>(2);
+        List<MachineScheduleDTO> endingSingleControlCandidates = new ArrayList<>(2);
+        List<MachineScheduleDTO> normalCandidates = new ArrayList<>(candidates.size());
+        for (MachineScheduleDTO candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            if (LhSingleControlMachineUtil.isSingleControlSplitMachine(context, candidate.getMachineCode())) {
+                singleControlCandidates.add(candidate);
+                if (candidate.isEnding() && candidate.getEstimatedEndTime() != null) {
+                    endingSingleControlCandidates.add(candidate);
+                }
+                continue;
+            }
+            normalCandidates.add(candidate);
+        }
+        if (CollectionUtils.isEmpty(singleControlCandidates)) {
+            return candidates;
+        }
+        if (shouldReserveSingleControlForTrialSku(sku)) {
+            if (!CollectionUtils.isEmpty(endingSingleControlCandidates)) {
+                return endingSingleControlCandidates;
+            }
+            if (!CollectionUtils.isEmpty(normalCandidates)) {
+                return normalCandidates;
+            }
+            return candidates;
+        }
+        if (LhSpecifyMachineUtil.hasLimitSpecifyMachine(context, sku.getMaterialCode())
+                || CollectionUtils.isEmpty(normalCandidates)) {
+            return candidates;
+        }
+        return normalCandidates;
+    }
+
+    /**
+     * 判断当前 SKU 是否需要保留单控机台候选。
+     *
+     * @param sku 待排SKU
+     * @return true-试制保留
+     */
+    private boolean shouldReserveSingleControlForTrialSku(SkuScheduleDTO sku) {
+        if (sku == null) {
+            return false;
+        }
+        if (sku.isTrial() || sku.isSmallBatchValidation()) {
+            return true;
+        }
+        return StringUtils.equals(ConstructionStageEnum.TRIAL.getCode(), sku.getConstructionStage())
+                || StringUtils.equals(ConstructionStageEnum.MASS_TRIAL.getCode(), sku.getConstructionStage());
     }
 
     @Override

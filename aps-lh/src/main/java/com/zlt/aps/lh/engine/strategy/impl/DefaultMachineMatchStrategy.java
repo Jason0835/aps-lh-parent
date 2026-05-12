@@ -131,8 +131,8 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
 
     /**
      * 对单控拆分机台执行试制保留规则。
-     * <p>试制/量试、小批量 SKU 命中“收尾中的单控机台”时，仅保留该类候选并等待其收尾；
-     * 若单控机台存在但都不是收尾态，则试制/量试不再等待，可回落普通机台。
+     * <p>试制/量试、小批量 SKU 只要命中单控候选，就应继续保留单控机台，
+     * 由后续排序优先选择单控；这样在单控空闲时可直接占用，在单控被占用时也会优先等待单控收尾。
      * 普通 SKU 默认剔除单控候选，避免在普通机台失败后回落占用试制保留机台。
      * 若普通 SKU 存在限制作业定点配置，则仍保留原候选。</p>
      *
@@ -148,7 +148,6 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
             return candidates;
         }
         List<MachineScheduleDTO> singleControlCandidates = new ArrayList<>(2);
-        List<MachineScheduleDTO> endingSingleControlCandidates = new ArrayList<>(2);
         List<MachineScheduleDTO> normalCandidates = new ArrayList<>(candidates.size());
         for (MachineScheduleDTO candidate : candidates) {
             if (candidate == null) {
@@ -156,9 +155,6 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
             }
             if (LhSingleControlMachineUtil.isSingleControlSplitMachine(context, candidate.getMachineCode())) {
                 singleControlCandidates.add(candidate);
-                if (candidate.isEnding() && candidate.getEstimatedEndTime() != null) {
-                    endingSingleControlCandidates.add(candidate);
-                }
                 continue;
             }
             normalCandidates.add(candidate);
@@ -167,12 +163,6 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
             return candidates;
         }
         if (shouldReserveSingleControlForTrialSku(sku)) {
-            if (!CollectionUtils.isEmpty(endingSingleControlCandidates)) {
-                return endingSingleControlCandidates;
-            }
-            if (!CollectionUtils.isEmpty(normalCandidates)) {
-                return normalCandidates;
-            }
             return candidates;
         }
         if (LhSpecifyMachineUtil.hasLimitSpecifyMachine(context, sku.getMaterialCode())
@@ -614,7 +604,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                 || !LhSingleControlMachineUtil.isSingleControlSplitMachine(context, machine.getMachineCode())) {
             return 1;
         }
-        if (Objects.nonNull(sku) && (sku.isTrial() || sku.isSmallBatchValidation())) {
+        if (shouldReserveSingleControlForTrialSku(sku)) {
             return 0;
         }
         return 2;

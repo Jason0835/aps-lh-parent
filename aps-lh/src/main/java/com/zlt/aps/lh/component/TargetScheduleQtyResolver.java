@@ -424,11 +424,11 @@ public class TargetScheduleQtyResolver {
     }
 
     /**
-     * 收尾场景下调整目标排产量（考虑胎胚库存与窗口计划封顶）。
+     * 收尾场景下调整目标排产量。
      * <p>仅在收尾判定完成后调用，非收尾SKU不应调用此方法。</p>
-     * <p>公式：endingTargetQty = min(max(embryoStock, surplusQty), windowPlanQty)。</p>
-     * <p>收尾目标量由余量和胎胚库存取大，但不超过排程窗口内的月计划日总量（dayN合计），
-     * 避免收尾SKU单窗口超排。同时禁止为了填满班次而补满。</p>
+     * <p>公式：endingTargetQty = max(embryoStock, surplusQty)。</p>
+     * <p>收尾SKU的目标量不再受窗口 dayN 总量限制，需按硫化余量/胎胚库存较大值排满；
+     * 仅保留多机台合计产能封顶，避免超出当前窗口真实可排能力。</p>
      *
      * @param context 排程上下文
      * @param sku SKU排程DTO
@@ -445,11 +445,8 @@ public class TargetScheduleQtyResolver {
         int embryoStock = Math.max(0, sku.getEmbryoStock());
         int surplusQty = Math.max(0, sku.getSurplusQty());
         int windowPlanQty = Math.max(0, sku.getWindowPlanQty());
-        // 收尾目标量：余量与胎胚库存取大，但不超过窗口日计划总量
         int endingBaseQty = Math.max(embryoStock, surplusQty);
-        int endingTargetQty = windowPlanQty > 0
-                ? Math.min(endingBaseQty, windowPlanQty)
-                : endingBaseQty;
+        int endingTargetQty = endingBaseQty;
         // 多机台合计产能封顶
         int totalAvailableCapacity = calcSkuTotalAvailableCapacityInWindow(context, sku);
         if (totalAvailableCapacity > 0) {

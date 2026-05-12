@@ -54,6 +54,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -777,7 +778,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 context, result.getLhMachineCode());
         distributeToShifts(context, result, shifts, startTime,
                 runtimeShiftCapacity, sku.getLhTimeSeconds(), mouldQty, pendingQty, cleaningWindowList,
-                maintenanceWindowList);
+                maintenanceWindowList, sku, isEnding);
         refreshResultSummary(context, result);
         applyCleaningMouldChangeAnalysis(context, result);
         return result;
@@ -898,7 +899,10 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
 
     /**
      * 将计划量分配到各班次（从开产时间开始）
+     * <p>试制非收尾SKU会根据日计划额度限制每个班次的排产量</p>
      *
+     * @param sku    SKU排程DTO（用于获取日计划额度账本和目标量控制标记）
+     * @param isEnding 是否收尾
      * @return 未排产的剩余量
      */
     private int distributeToShifts(LhScheduleContext context,
@@ -910,7 +914,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                    int mouldQty,
                                    int remaining,
                                    List<MachineCleaningWindowDTO> cleaningWindowList,
-                                   List<MachineMaintenanceWindowDTO> maintenanceWindowList) {
+                                   List<MachineMaintenanceWindowDTO> maintenanceWindowList,
+                                   SkuScheduleDTO sku,
+                                   boolean isEnding) {
         if (lhTimeSeconds <= 0 || mouldQty <= 0 || remaining <= 0 || startTime == null) {
             return remaining;
         }
@@ -919,6 +925,15 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
         int dryIceDurationHours = context.getParamIntValue(
                 LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
+
+        // 试制非收尾SKU在本轮分配内按日期追踪已消费日计划额度，防止同一天多个班次重复消费
+        Map<LocalDate, Integer> trialDailyConsumedMap = null;
+        if (sku != null && sku.isStrictTargetQty() && !isEnding) {
+            Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = sku.getDailyPlanQuotaMap();
+            if (quotaMap != null && !quotaMap.isEmpty()) {
+                trialDailyConsumedMap = new HashMap<>(4);
+            }
+        }
 
         boolean started = false;
         for (LhShiftConfigVO shift : shifts) {
@@ -958,6 +973,17 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 continue;
             }
 
+            // 试制非收尾SKU严格按照日计划额度限制班次可排量上限，不允许超出当日计划量补满班次
+            if (trialDailyConsumedMap != null) {
+                int dailyQuotaCap = resolveDailyQuotaCap(sku, shift.getWorkDate(), mouldQty, trialDailyConsumedMap);
+                if (dailyQuotaCap >= 0) {
+                    shiftMaxQty = Math.min(shiftMaxQty, dailyQuotaCap);
+                }
+                if (shiftMaxQty <= 0) {
+                    continue;
+                }
+            }
+
             int shiftQty = ShiftCapacityResolverUtil.normalizeAllocatedShiftQty(
                     Math.min(remaining, shiftMaxQty), shiftMaxQty, mouldQty);
             if (shiftQty > 0) {
@@ -972,6 +998,14 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                         shiftMaxQty);
                 setShiftPlanQty(result, shift.getShiftIndex(), shiftQty, effectiveStart, shiftPlanEndTime);
                 remaining -= shiftQty;
+
+                // 更新本轮分配内该日已消费的日计划额度
+                if (trialDailyConsumedMap != null && shift.getWorkDate() != null) {
+                    LocalDate productionDate = shift.getWorkDate().toInstant()
+                            .atZone(ZoneId.systemDefault()).toLocalDate();
+                    trialDailyConsumedMap.merge(productionDate, shiftQty, Integer::sum);
+                }
+
                 startTime = effectiveEnd;
 
                 if (!CollectionUtils.isEmpty(stateMap)) {
@@ -983,6 +1017,52 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             }
         }
         return remaining;
+    }
+
+    /**
+     * 解析试制非收尾SKU在某工作日的日计划额度上限。
+     * <p>从SKU的日计划额度账本中读取该日期的剩余额度，并扣除本轮已消费量，
+     * 防止同一天多个班次重复消费。多模场景下按模台数对齐。</p>
+     *
+     * @param sku                  SKU排程DTO
+     * @param workDate             班次归属工作日
+     * @param mouldQty             模台数
+     * @param trialDailyConsumedMap 本轮分配内按日期已消费量追踪
+     * @return 日计划额度上限，-1表示无需限制
+     */
+    private int resolveDailyQuotaCap(SkuScheduleDTO sku, Date workDate, int mouldQty,
+                                      Map<LocalDate, Integer> trialDailyConsumedMap) {
+        if (workDate == null) {
+            return -1;
+        }
+        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = sku.getDailyPlanQuotaMap();
+        if (quotaMap == null || quotaMap.isEmpty()) {
+            return -1;
+        }
+        LocalDate productionDate = workDate.toInstant()
+                .atZone(ZoneId.systemDefault()).toLocalDate();
+        SkuDailyPlanQuotaDTO quota = quotaMap.get(productionDate);
+        if (quota == null) {
+            // 该日期不在月计划范围内，不允许排产
+            return 0;
+        }
+        int dailyRemaining = Math.max(0, quota.getRemainingQty());
+        // 扣除本轮分配中该日期已消费的额度
+        if (trialDailyConsumedMap != null) {
+            Integer consumed = trialDailyConsumedMap.get(productionDate);
+            if (consumed != null) {
+                dailyRemaining = Math.max(0, dailyRemaining - consumed);
+            }
+        }
+        if (dailyRemaining <= 0) {
+            return 0;
+        }
+        // 多模场景下按模台数对齐，确保分配量可被机台实际生产
+        int resolvedMouldQty = ShiftCapacityResolverUtil.resolveMachineMouldQty(mouldQty);
+        if (resolvedMouldQty > 1) {
+            dailyRemaining = (dailyRemaining / resolvedMouldQty) * resolvedMouldQty;
+        }
+        return Math.max(dailyRemaining, 0);
     }
 
     private void setShiftPlanQty(LhScheduleResult result, int shiftIndex, int qty, Date startTime, Date endTime) {

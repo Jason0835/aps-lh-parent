@@ -147,6 +147,11 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             if (sku == null || totalPlan <= 0 || totalPlan <= sku.getEmbryoStock()) {
                 continue;
             }
+            if (shouldKeepFormalNewSpecFullCapacity(sku, entry.getValue())) {
+                log.info("正式新增跳过胎胚库存后置裁减, materialCode: {}, totalPlan: {}, embryoStock: {}",
+                        materialCode, totalPlan, sku.getEmbryoStock());
+                continue;
+            }
             // 库存不足时按物料整体裁剪，避免逐条逐班取整导致总量丢失。
             ShiftFieldUtil.scaleGroupedShiftPlanQty(entry.getValue(), shifts, sku.getEmbryoStock());
             for (LhScheduleResult result : entry.getValue()) {
@@ -161,6 +166,23 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         syncMachineStateAfterNewAdjust(context);
         // S4.5 后置步骤均完成后，再按当前待排列表收口结构视图，避免影响本阶段元数据回查。
         context.rebuildStructureSkuMapFromPending(context.getNewSpecSkuList());
+    }
+
+    /**
+     * 正式新增在非试制场景下保留满班补齐结果，不做胎胚库存后置裁减。
+     *
+     * @param sku SKU排程DTO
+     * @param skuResults 该物料编码对应的新增结果
+     * @return true-保留满班结果，不做库存裁减
+     */
+    private boolean shouldKeepFormalNewSpecFullCapacity(SkuScheduleDTO sku, List<LhScheduleResult> skuResults) {
+        if (sku == null || CollectionUtils.isEmpty(skuResults)) {
+            return false;
+        }
+        if (sku.isTrial()) {
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -1560,12 +1582,16 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             int consumed = SkuDailyPlanQuotaUtil.consumeRollingQuota(quotaMap, productionDate, planQty);
             int overQty = planQty - consumed;
             if (overQty > 0) {
-                trimShiftPlanQty(result, shift.getShiftIndex(), consumed);
                 // 无法冲抵的部分记录为满班补齐超排量
                 quota.setShiftFillOverQty(quota.getShiftFillOverQty() + overQty);
                 totalShiftFillOverQty += overQty;
                 log.debug("班次满班补齐超排, materialCode: {}, 日期: {}, 班次: {}, 排产量: {}, 超排: {}",
                         sku.getMaterialCode(), productionDate, shift.getShiftIndex(), planQty, overQty);
+                // 正式新增非试制、非收尾且满排模式下保留满班补齐产量，不做额度回裁
+                if (sku.isTrial() || sku.isStrictTargetQty()
+                        || !getTargetScheduleQtyResolver().isFullCapacityMode(context)) {
+                    trimShiftPlanQty(result, shift.getShiftIndex(), consumed);
+                }
             }
         }
         if (totalShiftFillOverQty > 0) {

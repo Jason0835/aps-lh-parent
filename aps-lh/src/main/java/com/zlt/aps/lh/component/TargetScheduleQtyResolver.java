@@ -68,8 +68,10 @@ public class TargetScheduleQtyResolver {
         } else if (isFullCapacityMode(context)) {
             // 正式/量试SKU允许超出dayN补满班次，按理论窗口产能封顶
             upperLimitQty = resolveTheoreticalWindowCapacity(context, sku);
+            // 满排模式下目标量直接取窗口理论满产产能，不因 dayN 计划量较小而被钳制
+            return Math.max(0, upperLimitQty);
         } else {
-            // 按需求排产只保留“需求口径”，不在此阶段按窗口额度压缩目标量。
+            // 按需求排产只保留”需求口径”，不在此阶段按窗口额度压缩目标量。
             // 欠产滚动、未来预占、窗口总量封顶统一交由日计划账本消费链路处理，
             // 避免 DTO 初始化后再次把需求量压回 dayN 额度。
             upperLimitQty = pendingQty;

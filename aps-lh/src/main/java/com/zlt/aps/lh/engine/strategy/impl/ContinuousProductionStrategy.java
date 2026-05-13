@@ -376,7 +376,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     }
 
     /**
-     * 正式续作在非试制、非量试、非收尾场景下保留满班补齐结果，不做胎胚库存后置裁减。
+     * 正式续作在非试制场景下保留满班补齐结果，不做胎胚库存后置裁减。
      *
      * @param sku 来源SKU
      * @param skuResults 该SKU对应的续作结果
@@ -386,13 +386,8 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         if (sku == null || CollectionUtils.isEmpty(skuResults)) {
             return false;
         }
-        if (sku.isTrial() || sku.isStrictTargetQty()) {
+        if (sku.isTrial()) {
             return false;
-        }
-        for (LhScheduleResult result : skuResults) {
-            if (result != null && "1".equals(result.getIsEnd())) {
-                return false;
-            }
         }
         return true;
     }
@@ -1581,11 +1576,15 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             if (overQty <= 0) {
                 continue;
             }
-            trimShiftPlanQty(result, shift.getShiftIndex(), consumedQty);
             quota.setShiftFillOverQty(quota.getShiftFillOverQty() + overQty);
             totalShiftFillOverQty += overQty;
             log.debug("续作班次满班补齐超排, materialCode: {}, 日期: {}, 班次: {}, 排产量: {}, 超排: {}",
                     sku.getMaterialCode(), productionDate, shift.getShiftIndex(), planQty, overQty);
+            // 正式续作非试制、非收尾且满排模式下保留满班补齐产量，不做额度回裁
+            if (sku.isTrial() || sku.isStrictTargetQty()
+                    || !getTargetScheduleQtyResolver().isFullCapacityMode(context)) {
+                trimShiftPlanQty(result, shift.getShiftIndex(), consumedQty);
+            }
         }
         if (totalShiftFillOverQty > 0) {
             sku.setShiftFillOverQty(sku.getShiftFillOverQty() + totalShiftFillOverQty);

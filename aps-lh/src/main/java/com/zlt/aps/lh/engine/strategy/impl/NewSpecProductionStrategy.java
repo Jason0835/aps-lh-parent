@@ -119,7 +119,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         // 按物料编码汇总多机台排产量，再统一做库存裁剪（避免多机台场景下各机台独立比对导致总量超库存）
         Map<String, Integer> materialTotalPlanMap = new LinkedHashMap<>(16);
         Map<String, SkuScheduleDTO> materialSkuMap = new LinkedHashMap<>(16);
-        List<LhScheduleResult> newSpecResults = new ArrayList<>();
+        Map<String, List<LhScheduleResult>> materialResultMap = new LinkedHashMap<>(16);
         for (LhScheduleResult result : context.getScheduleResultList()) {
             if (!NEW_SPEC_SCHEDULE_TYPE.equals(result.getScheduleType())
                     || "1".equals(result.getIsTypeBlock())) {
@@ -135,20 +135,23 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             int planQty = ShiftFieldUtil.resolveScheduledQty(result);
             materialTotalPlanMap.merge(result.getMaterialCode(), planQty, Integer::sum);
             materialSkuMap.putIfAbsent(result.getMaterialCode(), sku);
-            newSpecResults.add(result);
+            materialResultMap.computeIfAbsent(result.getMaterialCode(), key -> new ArrayList<LhScheduleResult>())
+                    .add(result);
         }
         // 按汇总计划量统一裁剪同物料的所有结果
-        for (LhScheduleResult result : newSpecResults) {
-            String materialCode = result.getMaterialCode();
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
+        for (Map.Entry<String, List<LhScheduleResult>> entry : materialResultMap.entrySet()) {
+            String materialCode = entry.getKey();
             int totalPlan = materialTotalPlanMap.getOrDefault(materialCode, 0);
             SkuScheduleDTO sku = materialSkuMap.get(materialCode);
             if (sku == null || totalPlan <= 0 || totalPlan <= sku.getEmbryoStock()) {
                 continue;
             }
-            // 库存不足，按比例削减各班次计划量
-            double ratio = (double) sku.getEmbryoStock() / totalPlan;
-            scaleShiftPlanQty(context, result, ratio);
-            refreshResultSummary(context, result);
+            // 库存不足时按物料整体裁剪，避免逐条逐班取整导致总量丢失。
+            ShiftFieldUtil.scaleGroupedShiftPlanQty(entry.getValue(), shifts, sku.getEmbryoStock());
+            for (LhScheduleResult result : entry.getValue()) {
+                refreshResultSummary(context, result);
+            }
         }
         // 多机台余量和胎胚库存按机台数均分，最后一台补尾差
         distributeMultiMachineSurplusAndStock(context);
@@ -1159,19 +1162,6 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             total += (q != null ? q : 0);
         }
         return total;
-    }
-
-    private void scaleShiftPlanQty(LhScheduleContext context, LhScheduleResult result, double ratio) {
-        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, context.getScheduleDate());
-        for (LhShiftConfigVO s : shifts) {
-            int idx = s.getShiftIndex();
-            Integer qty = ShiftFieldUtil.getShiftPlanQty(result, idx);
-            if (qty != null && qty > 0) {
-                setShiftPlanQty(result, idx, (int) (qty * ratio),
-                        ShiftFieldUtil.getShiftStartTime(result, idx),
-                        ShiftFieldUtil.getShiftEndTime(result, idx));
-            }
-        }
     }
 
     /**

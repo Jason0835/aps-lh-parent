@@ -232,6 +232,64 @@ public class ContinuousProductionStrategyTest {
     }
 
     @Test
+    public void adjustEmbryoStock_shouldKeepFormalContinuousFullCapacityResult() {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(toDate(2026, 4, 25, 0, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("MAT-FORMAL");
+        sku.setEmbryoCode("EMB-FORMAL");
+        sku.setEmbryoStock(15);
+        sku.setConstructionStage("03");
+        sku.setTrial(false);
+        sku.setStrictTargetQty(false);
+        context.setContinuousSkuList(Collections.singletonList(sku));
+
+        LhScheduleResult result = buildContinuousShiftResult("MAT-FORMAL", "EMB-FORMAL", 15, "0",
+                16, 16, 16, 16, 16, 16, 16, 16);
+        context.getScheduleResultList().add(result);
+        context.getScheduleResultSourceSkuMap().put(result, sku);
+
+        strategy.adjustEmbryoStock(context);
+
+        assertEquals(128, context.getScheduleResultList().get(0).getDailyPlanQty().intValue(),
+                "正式非收尾续作应保留满班补齐结果，不应被胎胚库存后置裁减");
+        assertEquals(Integer.valueOf(16), ShiftFieldUtil.getShiftPlanQty(result, 1));
+        assertEquals(Integer.valueOf(16), ShiftFieldUtil.getShiftPlanQty(result, 8));
+    }
+
+    @Test
+    public void adjustEmbryoStock_shouldStillTrimEndingContinuousResultByEmbryoStock() {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(toDate(2026, 4, 25, 0, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate()));
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("MAT-END");
+        sku.setEmbryoCode("EMB-END");
+        sku.setEmbryoStock(15);
+        sku.setConstructionStage("03");
+        sku.setTrial(false);
+        sku.setStrictTargetQty(true);
+        context.setContinuousSkuList(Collections.singletonList(sku));
+
+        LhScheduleResult result = buildContinuousShiftResult("MAT-END", "EMB-END", 15, "1",
+                16, 16, 16, 16, 16, 16, 16, 16);
+        context.getScheduleResultList().add(result);
+        context.getScheduleResultSourceSkuMap().put(result, sku);
+
+        strategy.adjustEmbryoStock(context);
+
+        assertEquals(15, context.getScheduleResultList().get(0).getDailyPlanQty().intValue(),
+                "收尾续作仍应保留胎胚库存裁减约束");
+    }
+
+    @Test
     public void syncContinuousDailyPlanQuota_shouldTrimResultQtyAndAvoidDoubleConsume() {
         ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
 
@@ -508,6 +566,37 @@ public class ContinuousProductionStrategyTest {
         context.setContinuousSkuList(Collections.singletonList(sku));
         context.getStructureSkuMap().put(sku.getStructureName(), Collections.singletonList(sku));
         return context;
+    }
+
+    private LhScheduleResult buildContinuousShiftResult(String materialCode,
+                                                        String embryoCode,
+                                                        int embryoStock,
+                                                        String isEnd,
+                                                        int class1PlanQty,
+                                                        int class2PlanQty,
+                                                        int class3PlanQty,
+                                                        int class4PlanQty,
+                                                        int class5PlanQty,
+                                                        int class6PlanQty,
+                                                        int class7PlanQty,
+                                                        int class8PlanQty) {
+        LhScheduleResult result = new LhScheduleResult();
+        result.setScheduleType("01");
+        result.setIsTypeBlock("0");
+        result.setMaterialCode(materialCode);
+        result.setEmbryoCode(embryoCode);
+        result.setEmbryoStock(embryoStock);
+        result.setIsEnd(isEnd);
+        ShiftFieldUtil.setShiftPlanQty(result, 1, class1PlanQty, null, null);
+        ShiftFieldUtil.setShiftPlanQty(result, 2, class2PlanQty, null, null);
+        ShiftFieldUtil.setShiftPlanQty(result, 3, class3PlanQty, null, null);
+        ShiftFieldUtil.setShiftPlanQty(result, 4, class4PlanQty, null, null);
+        ShiftFieldUtil.setShiftPlanQty(result, 5, class5PlanQty, null, null);
+        ShiftFieldUtil.setShiftPlanQty(result, 6, class6PlanQty, null, null);
+        ShiftFieldUtil.setShiftPlanQty(result, 7, class7PlanQty, null, null);
+        ShiftFieldUtil.setShiftPlanQty(result, 8, class8PlanQty, null, null);
+        ShiftFieldUtil.syncDailyPlanQty(result);
+        return result;
     }
 
     /**

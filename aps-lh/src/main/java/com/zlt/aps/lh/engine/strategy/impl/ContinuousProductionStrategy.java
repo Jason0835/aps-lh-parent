@@ -360,14 +360,41 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             if (totalPlan <= 0 || totalPlan <= sku.getEmbryoStock()) {
                 continue;
             }
-            // 库存不足，按比例削减各班次计划量
-            double ratio = (double) sku.getEmbryoStock() / totalPlan;
-            for (LhScheduleResult result : skuResultMap.get(sku)) {
-                scaleShiftPlanQty(context, result, ratio, shifts);
+            List<LhScheduleResult> skuResults = skuResultMap.get(sku);
+            if (shouldKeepFormalContinuousFullCapacity(sku, skuResults)) {
+                log.info("正式续作跳过胎胚库存后置裁减, materialCode: {}, totalPlan: {}, embryoStock: {}",
+                        sku.getMaterialCode(), totalPlan, sku.getEmbryoStock());
+                continue;
+            }
+            // 库存不足时按来源SKU整体裁剪，避免逐条逐班取整导致总量丢失。
+            ShiftFieldUtil.scaleGroupedShiftPlanQty(skuResults, shifts, sku.getEmbryoStock());
+            for (LhScheduleResult result : skuResults) {
                 refreshResultSummary(context, result, shifts);
             }
         }
         refreshContinuousEndingFlagByResult(context);
+    }
+
+    /**
+     * 正式续作在非试制、非量试、非收尾场景下保留满班补齐结果，不做胎胚库存后置裁减。
+     *
+     * @param sku 来源SKU
+     * @param skuResults 该SKU对应的续作结果
+     * @return true-保留满班结果，不做库存裁减
+     */
+    private boolean shouldKeepFormalContinuousFullCapacity(SkuScheduleDTO sku, List<LhScheduleResult> skuResults) {
+        if (sku == null || CollectionUtils.isEmpty(skuResults)) {
+            return false;
+        }
+        if (sku.isTrial() || sku.isStrictTargetQty()) {
+            return false;
+        }
+        for (LhScheduleResult result : skuResults) {
+            if (result != null && "1".equals(result.getIsEnd())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -1338,25 +1365,6 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
     private void clearShiftPlanQty(LhScheduleResult result, List<LhShiftConfigVO> shifts) {
         for (LhShiftConfigVO shift : shifts) {
             setShiftPlanQty(result, shift.getShiftIndex(), 0, null, null);
-        }
-    }
-
-    /**
-     * 按比例削减各班次计划量（用于库存裁剪或降模）。
-     *
-     * @param result 排程结果
-     * @param ratio  削减比例
-     * @param shifts 班次列表
-     */
-    private void scaleShiftPlanQty(LhScheduleContext context, LhScheduleResult result, double ratio, List<LhShiftConfigVO> shifts) {
-        for (LhShiftConfigVO shift : shifts) {
-            int idx = shift.getShiftIndex();
-            Integer qty = ShiftFieldUtil.getShiftPlanQty(result, idx);
-            if (qty != null && qty > 0) {
-                setShiftPlanQty(result, idx, (int) (qty * ratio),
-                        ShiftFieldUtil.getShiftStartTime(result, idx),
-                        ShiftFieldUtil.getShiftEndTime(result, idx));
-            }
         }
     }
 

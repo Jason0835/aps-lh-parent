@@ -61,4 +61,53 @@ public class ProductionQuantityPolicyTest {
         Assertions.assertTrue(policy.isStrictUpperLimit());
         Assertions.assertFalse(policy.isFullRunForNonTailMachine());
     }
+
+    @Test
+    public void shouldKeepFormalEndingSkuStrictWhenEndingComesFromWindowCapacityRule() {
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setTargetScheduleQty(158);
+        sku.setWindowPlanQty(158);
+        sku.setSurplusQty(158);
+        sku.setDailyCapacity(48);
+
+        ProductionQuantityPolicy policy = ProductionQuantityPolicy.from(sku, true);
+
+        Assertions.assertFalse(policy.isAllowFillStartedShift());
+        Assertions.assertTrue(policy.isStrictUpperLimit());
+        Assertions.assertFalse(policy.isFullRunForNonTailMachine());
+    }
+
+    @Test
+    public void shouldKeepEndingSkuStrictWhenEndingTargetExceedsWindowPlan() {
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setTargetScheduleQty(50);
+        sku.setWindowPlanQty(46);
+        sku.setSurplusQty(46);
+        sku.setEmbryoStock(50);
+        sku.setDailyCapacity(48);
+
+        ProductionQuantityPolicy policy = ProductionQuantityPolicy.from(sku, true);
+
+        Assertions.assertFalse(policy.isAllowFillStartedShift());
+        Assertions.assertTrue(policy.isStrictUpperLimit());
+        Assertions.assertFalse(policy.isFullRunForNonTailMachine());
+    }
+
+    @Test
+    public void shouldKeepSmallTailEndingSkuStrict() {
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setTargetScheduleQty(46);
+        sku.setWindowPlanQty(46);
+        sku.setSurplusQty(46);
+        sku.setDailyCapacity(48);
+
+        ProductionQuantityPolicy policy = ProductionQuantityPolicy.from(sku, true);
+
+        Assertions.assertFalse(policy.isAllowFillStartedShift());
+        Assertions.assertTrue(policy.isStrictUpperLimit());
+        Assertions.assertFalse(policy.isFullRunForNonTailMachine());
+    }
 }

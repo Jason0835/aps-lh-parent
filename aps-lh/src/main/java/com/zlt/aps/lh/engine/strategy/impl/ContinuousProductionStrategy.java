@@ -128,11 +128,7 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             }
 
             boolean isEnding = endingJudgmentStrategy.isEnding(context, sku);
-
-            // 收尾SKU严格限制目标量，不允许为了填满班次而超排
-            if (isEnding) {
-                sku.setStrictTargetQty(true);
-            }
+            sku.setStrictTargetQty(ProductionQuantityPolicy.from(sku, isEnding).isStrictUpperLimit());
 
             // 滚动衔接时沿用机台继承后的可用时间，避免从重叠窗口首班重复起排。
             Date startTime = resolveContinuousStartTime(context, machine, shifts);
@@ -1717,15 +1713,19 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
             if (overQty <= 0) {
                 continue;
             }
+            boolean endingResult = "1".equals(result.getIsEnd());
+            // 续作链路与新增链路保持一致：
+            // 收尾结果必须严格截断且不记超排；试制等严格目标量场景回裁后仍保留超排账本。
+            if (endingResult || (sku != null && sku.isStrictTargetQty())) {
+                trimShiftPlanQty(result, shift.getShiftIndex(), consumedQty);
+                if (endingResult) {
+                    continue;
+                }
+            }
             quota.setShiftFillOverQty(quota.getShiftFillOverQty() + overQty);
             totalShiftFillOverQty += overQty;
             log.debug("续作班次满班补齐超排, materialCode: {}, 日期: {}, 班次: {}, 排产量: {}, 超排: {}",
                     sku.getMaterialCode(), productionDate, shift.getShiftIndex(), planQty, overQty);
-            ProductionQuantityPolicy policy = ProductionQuantityPolicy.from(sku, "1".equals(result.getIsEnd()));
-            // 试制/收尾严格按目标量回裁；正式/量试非收尾保留最后已开班班次补满产量
-            if (policy.isStrictUpperLimit()) {
-                trimShiftPlanQty(result, shift.getShiftIndex(), consumedQty);
-            }
         }
         if (totalShiftFillOverQty > 0) {
             sku.setShiftFillOverQty(sku.getShiftFillOverQty() + totalShiftFillOverQty);

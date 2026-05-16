@@ -228,6 +228,57 @@ public class NewSpecProductionStrategyTest {
         Assertions.assertEquals(2, sku.getShiftFillOverQty());
     }
 
+    /**
+     * 用例说明：只要命中收尾场景，账本回写就必须严格按目标量截断，
+     * 即使最后一个已开班班次有剩余产能，也不能再补满到 48。
+     *
+     * @throws Exception 反射调用异常
+     */
+    @Test
+    public void shouldTrimEndingSkuToQuotaWhenApplyingDailyQuota() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectTargetScheduleQtyResolver(strategy, new TargetScheduleQtyResolver());
+        LhScheduleContext context = new LhScheduleContext();
+        context.setScheduleDate(toDate(2026, 5, 1, 0, 0, 0));
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.buildDefaultScheduleShifts(context, context.getScheduleDate());
+
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode("3302001724");
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        // 新增拆机进入尾机台时，SKU临时目标量已经被收敛到本机台计划量 48，
+        // 但只要结果标记为收尾，就必须按日计划额度严格截断到 46。
+        sku.setTargetScheduleQty(48);
+        sku.setWindowPlanQty(158);
+        sku.setSurplusQty(158);
+        sku.setDailyCapacity(52);
+        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = new LinkedHashMap<>(4);
+        LocalDate productionDate = shifts.get(2).getWorkDate().toInstant()
+                .atZone(java.time.ZoneId.systemDefault()).toLocalDate();
+        quotaMap.put(productionDate, buildQuota(46));
+        sku.setDailyPlanQuotaMap(quotaMap);
+        sku.setStrictTargetQty(false);
+
+        LhScheduleResult result = new LhScheduleResult();
+        result.setIsEnd("1");
+        ShiftFieldUtil.setShiftPlanQty(result, shifts.get(2).getShiftIndex(), 48,
+                shifts.get(2).getShiftStartDateTime(), shifts.get(2).getShiftEndDateTime());
+        ShiftFieldUtil.syncDailyPlanQty(result);
+
+        Method method = NewSpecProductionStrategy.class.getDeclaredMethod(
+                "applyBlockToDailyQuota",
+                LhScheduleContext.class,
+                SkuScheduleDTO.class,
+                LhScheduleResult.class,
+                List.class);
+        method.setAccessible(true);
+
+        Integer scheduledQty = (Integer) method.invoke(strategy, context, sku, result, shifts);
+
+        Assertions.assertEquals(46, scheduledQty.intValue());
+        Assertions.assertEquals(46, ShiftFieldUtil.getShiftPlanQty(result, shifts.get(2).getShiftIndex()).intValue());
+        Assertions.assertEquals(0, sku.getShiftFillOverQty());
+    }
+
     private void injectTargetScheduleQtyResolver(NewSpecProductionStrategy strategy,
                                                  TargetScheduleQtyResolver resolver) throws Exception {
         Field field = NewSpecProductionStrategy.class.getDeclaredField("targetScheduleQtyResolver");

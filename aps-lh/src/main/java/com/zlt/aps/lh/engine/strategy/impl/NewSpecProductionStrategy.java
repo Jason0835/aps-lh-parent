@@ -944,19 +944,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         return candidates.size() < scheduleConfig.getLocalSearchMachineThreshold();
     }
 
-    /**
-     * 输出新增排产机台决策跟踪日志。
-     *
-     * @param context 排程上下文
-     * @param sku 当前SKU
-     * @param candidates 候选机台
-     * @param localSearchSuggestedMachine 局部搜索评估机台
-     * @param finalMachine 最终机台
-     * @param excludedMachineCodes 已排除机台
-     * @param failReason 失败原因
-     * @param success 是否成功
-     * @param startTimeText 开产时间文本或附加说明
-     */
+
     /**
      * 输出新增排产机台决策日志（含SKU基本信息和最终选中原因）。
      *
@@ -2183,16 +2171,20 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             int consumed = SkuDailyPlanQuotaUtil.consumeRollingQuota(quotaMap, productionDate, planQty);
             int overQty = planQty - consumed;
             if (overQty > 0) {
+                boolean endingResult = "1".equals(result.getIsEnd());
+                // 收尾结果必须严格截断，且不再记录满班补齐超排；
+                // 试制等严格目标量场景仍需回裁，但保留超排账本用于追踪被截掉的补满量。
+                if (endingResult || (sku != null && sku.isStrictTargetQty())) {
+                    trimShiftPlanQty(result, shift.getShiftIndex(), consumed);
+                    if (endingResult) {
+                        continue;
+                    }
+                }
                 // 无法冲抵的部分记录为满班补齐超排量
                 quota.setShiftFillOverQty(quota.getShiftFillOverQty() + overQty);
                 totalShiftFillOverQty += overQty;
                 log.debug("班次满班补齐超排, materialCode: {}, 日期: {}, 班次: {}, 排产量: {}, 超排: {}",
                         sku.getMaterialCode(), productionDate, shift.getShiftIndex(), planQty, overQty);
-                ProductionQuantityPolicy policy = ProductionQuantityPolicy.from(sku, "1".equals(result.getIsEnd()));
-                // 试制/收尾严格按目标量回裁；正式/量试非收尾保留最后已开班班次补满产量
-                if (policy.isStrictUpperLimit()) {
-                    trimShiftPlanQty(result, shift.getShiftIndex(), consumed);
-                }
             }
         }
         if (totalShiftFillOverQty > 0) {

@@ -915,6 +915,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         applyTypeBlockCleaningAnalysis(context, result, shifts);
 
         context.getScheduleResultList().add(result);
+        context.getScheduleResultSourceSkuMap().put(result, sku);
         registerMachineAssignment(context, machine.getMachineCode(), result);
         updateMachineState(context, machine, sku, result);
         context.getNewSpecSkuList().remove(sku);

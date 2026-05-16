@@ -28,6 +28,9 @@ import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.IMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.IProductionStrategy;
 import com.zlt.aps.lh.engine.strategy.ITrialProductionStrategy;
+import com.zlt.aps.lh.engine.strategy.support.MachineProductionSegment;
+import com.zlt.aps.lh.engine.strategy.support.MachineScheduleRole;
+import com.zlt.aps.lh.engine.strategy.support.ProductionQuantityPolicy;
 import com.zlt.aps.lh.service.impl.LhMaintenanceScheduleService;
 import com.zlt.aps.lh.util.LeftRightMouldUtil;
 import com.zlt.aps.lh.util.LhSingleControlMachineUtil;
@@ -179,7 +182,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         if (sku == null || CollectionUtils.isEmpty(skuResults)) {
             return false;
         }
-        if (sku.isTrial()) {
+        boolean endingResult = skuResults.stream().anyMatch(result -> result != null && "1".equals(result.getIsEnd()));
+        ProductionQuantityPolicy policy = ProductionQuantityPolicy.from(sku, endingResult);
+        if (policy.isStrictUpperLimit() && !policy.isEnding()) {
             return false;
         }
         return true;
@@ -211,10 +216,16 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             if (isEnding) {
                 getTargetScheduleQtyResolver().upsizeEndingTargetQty(context, sku);
             }
-            log.info("新增SKU开始排产, materialCode: {}, 结构: {}, 规格: {}, 月计划量: {}, 目标量: {}, 余量: {}, 胎胚库存: {}, 是否收尾: {}",
+            ProductionQuantityPolicy quantityPolicy = ProductionQuantityPolicy.from(sku, isEnding);
+            sku.setStrictTargetQty(quantityPolicy.isStrictUpperLimit());
+            log.info("新增SKU开始排产, materialCode: {}, 结构: {}, 规格: {}, 月计划量: {}, 目标量: {}, "
+                            + "day1/day2/day3窗口量: {}, 余量: {}, 胎胚库存: {}, 是否收尾: {}, "
+                            + "允许补满已开班次: {}, 严格禁止超排: {}, 非最后机台满排: {}",
                     sku.getMaterialCode(), sku.getStructureName(), sku.getSpecCode(),
-                    sku.getMonthPlanQty(), sku.resolveTargetScheduleQty(), sku.getSurplusQty(),
-                    sku.getEmbryoStock(), isEnding);
+                    sku.getMonthPlanQty(), sku.resolveTargetScheduleQty(), sku.getWindowPlanQty(),
+                    sku.getSurplusQty(), sku.getEmbryoStock(), isEnding,
+                    quantityPolicy.isAllowFillStartedShift(), quantityPolicy.isStrictUpperLimit(),
+                    quantityPolicy.isFullRunForNonTailMachine());
 
             if (shouldSkipTrialSku(context, sku)) {
                 addUnscheduledResult(context, sku, "试制量试当日不可排产", unscheduledReasonCountMap);
@@ -249,6 +260,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             Integer originalTargetScheduleQty = sku.getTargetScheduleQty();
             // 初始化多机台拆量剩余量：需求目标保留月计划口径，实际拆机按日计划账本剩余额度收敛。
             int remainingQty = resolveSchedulableRemainingQty(sku);
+            int dynamicTargetQty = remainingQty;
             sku.setRemainingScheduleQty(remainingQty);
             MachineScheduleDTO finalMachine = null;
             Date finalProductionStartTime = null;
@@ -256,7 +268,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             int totalScheduledQty = 0;
             while (true) {
                 MachineScheduleDTO candidateMachine = selectCandidateMachine(
-                        context, sku, candidates, excludedMachineCodes, machineMatch, preferredTrialMachine);
+                        context, sku, candidates, excludedMachineCodes, machineMatch, preferredTrialMachine,
+                        quantityPolicy);
                 if (candidateMachine == null) {
                     break;
                 }
@@ -293,7 +306,11 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 Date inspectionTime = null;
                 Date productionStartTime = null;
                 NewSpecFailReasonEnum switchAllocateFailReason = null;
-                mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(context, machineCode, switchReadyTime);
+                int switchDurationHours = maintenanceOverlapSwitch
+                        ? LhScheduleTimeUtil.getMaintenanceOverlapSwitchHours(context)
+                        : LhScheduleTimeUtil.getMouldChangeTotalHours(context);
+                mouldChangeStartTime = allocateGreenTireAwareMouldChange(
+                        context, sku, machineCode, switchReadyTime, switchDurationHours, mouldChangeBalance);
                 if (mouldChangeStartTime == null) {
                     log.debug("新增SKU换模窗口分配失败, materialCode: {}, 机台: {}, 机台就绪: {}, 目标量: {}",
                             sku.getMaterialCode(), machineCode,
@@ -301,9 +318,6 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                     switchAllocateFailReason = NewSpecFailReasonEnum.MOULD_CHANGE_SHIFT_ALLOCATE_FAILED;
                 }
                 if (mouldChangeStartTime != null) {
-                    int switchDurationHours = maintenanceOverlapSwitch
-                            ? LhScheduleTimeUtil.getMaintenanceOverlapSwitchHours(context)
-                            : LhScheduleTimeUtil.getMouldChangeTotalHours(context);
                     mouldChangeCompleteTime = LhScheduleTimeUtil.addHours(mouldChangeStartTime, switchDurationHours);
                     inspectionTime = inspectionBalance.allocateInspection(context, machineCode, mouldChangeCompleteTime);
                     if (inspectionTime == null) {
@@ -311,7 +325,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                 sku.getMaterialCode(), machineCode,
                                 LhScheduleTimeUtil.formatDateTime(mouldChangeStartTime),
                                 LhScheduleTimeUtil.formatDateTime(mouldChangeCompleteTime));
-                        mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                        rollbackMouldChangeAllocation(context, sku, mouldChangeBalance, mouldChangeStartTime);
                         mouldChangeStartTime = null;
                         switchAllocateFailReason = NewSpecFailReasonEnum.FIRST_INSPECTION_SHIFT_ALLOCATE_FAILED;
                     } else {
@@ -350,27 +364,41 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                             LhScheduleTimeUtil.formatDateTime(productionStartTime),
                             sku.getShiftCapacity(), sku.getLhTimeSeconds(), machineMouldQty);
                     inspectionBalance.rollbackInspection(context, inspectionTime);
-                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    rollbackMouldChangeAllocation(context, sku, mouldChangeBalance, mouldChangeStartTime);
                     excludedMachineCodes.add(machineCode);
                     failReason = selectHigherPriorityFailReason(
                             failReason, NewSpecFailReasonEnum.NO_CAPACITY_IN_SCHEDULE_WINDOW);
                     continue;
                 }
-                int refinedTargetQty = getTargetScheduleQtyResolver().refineTargetQtyByMachineCapacity(
-                        context, sku, candidateMachine, mouldChangeStartTime, firstProductionStartTime, shifts);
-                if (refinedTargetQty <= 0) {
-                    log.debug("新增SKU按机台产能收敛后目标量为0, materialCode: {}, 机台: {}, 原目标量: {}, 换模开始: {}, 开产时间: {}",
-                            sku.getMaterialCode(), machineCode, sku.resolveTargetScheduleQty(),
+                int maxQtyToWindowEnd = calculateMaxQtyToWindowEnd(
+                        context, candidateMachine, sku, firstProductionStartTime, mouldChangeStartTime,
+                        shifts, machineMouldQty, runtimeShiftCapacity, isEnding);
+                MachineProductionSegment segment = buildMachineProductionSegment(
+                        context, sku, machineCode, mouldChangeStartTime, firstProductionStartTime,
+                        maxQtyToWindowEnd, runtimeShiftCapacity);
+                MachineScheduleRole role = resolveMachineScheduleRole(quantityPolicy, totalScheduledQty,
+                        maxQtyToWindowEnd, dynamicTargetQty);
+                segment.setRole(role);
+                int machinePlanQty = resolveMachinePlanQty(quantityPolicy, role, dynamicTargetQty,
+                        totalScheduledQty, maxQtyToWindowEnd, runtimeShiftCapacity);
+                log.info("新增SKU候选机台动态分配, materialCode: {}, 机台: {}, 角色: {}, 最大可排量: {}, "
+                                + "累计已排: {}, 窗口目标量: {}, 本机台计划量: {}, 换模班次: {}, 开产班次: {}",
+                        sku.getMaterialCode(), machineCode, role, maxQtyToWindowEnd, totalScheduledQty,
+                        dynamicTargetQty, machinePlanQty, segment.getChangeoverShiftIndex(),
+                        segment.getStartProductionShiftIndex());
+                if (machinePlanQty <= 0) {
+                    log.debug("新增SKU动态分配后本机台计划量为0, materialCode: {}, 机台: {}, 目标量: {}, 换模开始: {}, 开产时间: {}",
+                            sku.getMaterialCode(), machineCode, dynamicTargetQty,
                             LhScheduleTimeUtil.formatDateTime(mouldChangeStartTime),
                             LhScheduleTimeUtil.formatDateTime(firstProductionStartTime));
                     inspectionBalance.rollbackInspection(context, inspectionTime);
-                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    rollbackMouldChangeAllocation(context, sku, mouldChangeBalance, mouldChangeStartTime);
                     excludedMachineCodes.add(machineCode);
                     failReason = selectHigherPriorityFailReason(
                             failReason, NewSpecFailReasonEnum.NO_CAPACITY_IN_SCHEDULE_WINDOW);
                     continue;
                 }
-                sku.setTargetScheduleQty(refinedTargetQty);
+                sku.setTargetScheduleQty(machinePlanQty);
                 LhScheduleResult result = buildNewSpecScheduleResult(
                         context, candidateMachine, sku, firstProductionStartTime, mouldChangeStartTime,
                         mouldChangeCompleteTime, shifts, machineMouldQty, isEnding);
@@ -380,7 +408,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                             LhScheduleTimeUtil.formatDateTime(firstProductionStartTime));
                     // 无有效产能时回滚首检和换模占用，避免影响后续SKU排产
                     inspectionBalance.rollbackInspection(context, inspectionTime);
-                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    rollbackMouldChangeAllocation(context, sku, mouldChangeBalance, mouldChangeStartTime);
                     // 候选机台失败时恢复原目标量，避免把本次失败收敛值泄漏到后续候选机台。
                     sku.setTargetScheduleQty(originalTargetScheduleQty);
                     excludedMachineCodes.add(machineCode);
@@ -394,7 +422,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 int machineScheduledQty = applyBlockToDailyQuota(context, sku, result, shifts);
                 if (machineScheduledQty <= 0) {
                     inspectionBalance.rollbackInspection(context, inspectionTime);
-                    mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+                    rollbackMouldChangeAllocation(context, sku, mouldChangeBalance, mouldChangeStartTime);
                     sku.setTargetScheduleQty(originalTargetScheduleQty);
                     remainingQty = resolveSchedulableRemainingQty(sku);
                     sku.setRemainingScheduleQty(remainingQty);
@@ -407,6 +435,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                     continue;
                 }
                 context.getScheduleResultList().add(result);
+                context.getScheduleResultSourceSkuMap().put(result, sku);
                 updateMachineState(context, candidateMachine, sku, result);
                 registerMachineAssignment(context, machineCode, result);
                 clearSpecifyReservation(context, machineCode, sku.getMaterialCode());
@@ -416,7 +445,7 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 finalProductionStartTime = firstProductionStartTime;
                 // 累计本机台实际排产量，递减多机台剩余量
                 totalScheduledQty += machineScheduledQty;
-                remainingQty = Math.max(0, remainingQty - machineScheduledQty);
+                remainingQty = Math.max(0, dynamicTargetQty - totalScheduledQty);
                 sku.setRemainingScheduleQty(remainingQty);
                 log.debug("新增排产本机台完成, SKU: {}, 机台: {}, 本机台排产量: {}, 累计已排: {}, 剩余: {}, 满班超排: {}, 机台就绪: {}, 换模开始: {}, 换模结束: {}, 首检开始: {}, 开产时间: {}",
                         sku.getMaterialCode(), machineCode, machineScheduledQty, totalScheduledQty, remainingQty,
@@ -440,13 +469,14 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                     }
                     break;
                 }
-                // 一台排不完，将剩余量作为下一台机台的目标量继续尝试
-                sku.setTargetScheduleQty(remainingQty);
+                // 一台排不完，保留原业务目标量，下一台机台按剩余缺口动态计算本机台计划量
+                sku.setTargetScheduleQty(originalTargetScheduleQty);
                 excludedMachineCodes.add(machineCode);
                 log.info("新增SKU一台机台未排完，继续尝试下一台, materialCode: {}, 本机台: {}, 已排: {}, 剩余: {}",
                         sku.getMaterialCode(), machineCode, totalScheduledQty, remainingQty);
             }
 
+            sku.setTargetScheduleQty(originalTargetScheduleQty);
             if (!scheduled) {
                 // 所有候选机台都失败，记录未排产原因并移出待排队列
                 log.warn("新增SKU排产失败, materialCode: {}, 结构: {}, 规格: {}, 目标量: {}, 候选机台数: {}, 排除机台: {}, 原因: {}",
@@ -538,12 +568,16 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                                                       List<MachineScheduleDTO> candidates,
                                                       Set<String> excludedMachineCodes,
                                                       IMachineMatchStrategy machineMatch,
-                                                      MachineScheduleDTO preferredTrialMachine) {
+                                                      MachineScheduleDTO preferredTrialMachine,
+                                                      ProductionQuantityPolicy quantityPolicy) {
         if (preferredTrialMachine != null
                 && !excludedMachineCodes.contains(preferredTrialMachine.getMachineCode())) {
             log.info("新增排产优先尝试试制/小批量预选机台, materialCode: {}, machineCode: {}",
                     sku.getMaterialCode(), preferredTrialMachine.getMachineCode());
             return preferredTrialMachine;
+        }
+        if (quantityPolicy != null && quantityPolicy.isFullRunForNonTailMachine()) {
+            return machineMatch.selectBestMachine(context, sku, candidates, excludedMachineCodes);
         }
         MachineScheduleDTO finishRemainingFirstMachine = resolveCanFinishRemainingQtyFirst(
                 context, sku, candidates, excludedMachineCodes);
@@ -562,6 +596,178 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             return tailConcentratedMachine;
         }
         return machineMatch.selectBestMachine(context, sku, candidates, excludedMachineCodes);
+    }
+
+    /**
+     * 计算当前机台从开产班次到窗口结束的物理最大可排量。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param sku SKU
+     * @param firstProductionStartTime 首个可生产时间
+     * @param mouldChangeStartTime 换模开始时间
+     * @param shifts 排程窗口班次
+     * @param mouldQty 模台数
+     * @param shiftCapacity 运行态班产
+     * @param isEnding 是否收尾
+     * @return 最大可排量
+     */
+    private int calculateMaxQtyToWindowEnd(LhScheduleContext context,
+                                           MachineScheduleDTO machine,
+                                           SkuScheduleDTO sku,
+                                           Date firstProductionStartTime,
+                                           Date mouldChangeStartTime,
+                                           List<LhShiftConfigVO> shifts,
+                                           int mouldQty,
+                                           int shiftCapacity,
+                                           boolean isEnding) {
+        if (context == null || machine == null || sku == null || firstProductionStartTime == null
+                || CollectionUtils.isEmpty(shifts)) {
+            return 0;
+        }
+        List<MachineCleaningWindowDTO> cleaningWindowList = resolveEffectiveCleaningWindowList(
+                context, machine.getMachineCode(), mouldChangeStartTime, firstProductionStartTime);
+        List<MachineMaintenanceWindowDTO> maintenanceWindowList = resolveMachineMaintenanceWindowList(
+                context, machine.getMachineCode());
+        Date cursorStartTime = firstProductionStartTime;
+        int dryIceLossQty = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);
+        int dryIceDurationHours = context.getParamIntValue(
+                LhScheduleParamConstant.DRY_ICE_DURATION_HOURS, LhScheduleConstant.DRY_ICE_DURATION_HOURS);
+        int totalQty = 0;
+        boolean started = false;
+        for (LhShiftConfigVO shift : shifts) {
+            if (!started) {
+                if (cursorStartTime.before(shift.getShiftEndDateTime())) {
+                    started = true;
+                } else {
+                    continue;
+                }
+            }
+            ShiftProductionControlDTO control = ShiftProductionControlUtil.resolveEffectiveControl(context, shift, cursorStartTime);
+            if (control == null || !control.isCanSchedule()) {
+                continue;
+            }
+            int shiftMaxQty = ShiftCapacityResolverUtil.resolveShiftCapacityWithDowntime(
+                    context.getDevicePlanShutList(),
+                    cleaningWindowList,
+                    maintenanceWindowList,
+                    machine.getMachineCode(),
+                    control.getEffectiveStartTime(),
+                    control.getEffectiveEndTime(),
+                    shiftCapacity,
+                    sku.getLhTimeSeconds(),
+                    mouldQty,
+                    ShiftCapacityResolverUtil.resolveShiftDurationSeconds(shift),
+                    dryIceLossQty,
+                    dryIceDurationHours);
+            shiftMaxQty = ShiftProductionControlUtil.deductCapacityByControl(control, shiftMaxQty, mouldQty);
+            if (shiftMaxQty <= 0) {
+                continue;
+            }
+            totalQty += shiftMaxQty;
+            cursorStartTime = control.getEffectiveEndTime();
+        }
+        return Math.max(0, totalQty);
+    }
+
+    /**
+     * 构建机台生产段，用于记录角色判断和关键日志。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @param machineCode 机台编码
+     * @param mouldChangeStartTime 换模开始时间
+     * @param firstProductionStartTime 首个可生产时间
+     * @param maxQtyToWindowEnd 最大可排量
+     * @param shiftCapacity 运行态班产
+     * @return 机台生产段
+     */
+    private MachineProductionSegment buildMachineProductionSegment(LhScheduleContext context,
+                                                                   SkuScheduleDTO sku,
+                                                                   String machineCode,
+                                                                   Date mouldChangeStartTime,
+                                                                   Date firstProductionStartTime,
+                                                                   int maxQtyToWindowEnd,
+                                                                   int shiftCapacity) {
+        MachineProductionSegment segment = new MachineProductionSegment();
+        segment.setMachineCode(machineCode);
+        segment.setMaterialCode(sku.getMaterialCode());
+        segment.setGreenTireGroupKey(sku.getEmbryoCode());
+        segment.setNeedChangeover(true);
+        segment.setMaxQtyToWindowEnd(maxQtyToWindowEnd);
+        segment.setShiftCapacity(shiftCapacity);
+        segment.setChangeoverShiftIndex(LhScheduleTimeUtil.getShiftIndex(
+                context, context.getScheduleDate(), mouldChangeStartTime));
+        segment.setStartProductionShiftIndex(LhScheduleTimeUtil.getShiftIndex(
+                context, context.getScheduleDate(), firstProductionStartTime));
+        return segment;
+    }
+
+    /**
+     * 判断当前机台在多机台补量中的角色。
+     *
+     * @param policy 排产数量策略
+     * @param scheduledQty 当前已排量
+     * @param maxQtyToWindowEnd 当前机台最大可排量
+     * @param targetQty 窗口目标量
+     * @return 机台角色
+     */
+    private MachineScheduleRole resolveMachineScheduleRole(ProductionQuantityPolicy policy,
+                                                           int scheduledQty,
+                                                           int maxQtyToWindowEnd,
+                                                           int targetQty) {
+        if (policy != null && policy.isFullRunForNonTailMachine()
+                && scheduledQty + maxQtyToWindowEnd < targetQty) {
+            return MachineScheduleRole.FULL_RUN_MACHINE;
+        }
+        return MachineScheduleRole.TAIL_MACHINE;
+    }
+
+    /**
+     * 根据机台角色计算当前机台计划量。
+     *
+     * @param policy 排产数量策略
+     * @param role 机台角色
+     * @param targetQty 窗口目标量
+     * @param scheduledQty 当前已排量
+     * @param maxQtyToWindowEnd 当前机台最大可排量
+     * @param shiftCapacity 运行态班产
+     * @return 当前机台计划量
+     */
+    private int resolveMachinePlanQty(ProductionQuantityPolicy policy,
+                                      MachineScheduleRole role,
+                                      int targetQty,
+                                      int scheduledQty,
+                                      int maxQtyToWindowEnd,
+                                      int shiftCapacity) {
+        if (maxQtyToWindowEnd <= 0) {
+            return 0;
+        }
+        if (MachineScheduleRole.FULL_RUN_MACHINE == role) {
+            return maxQtyToWindowEnd;
+        }
+        int remainingQty = Math.max(0, targetQty - scheduledQty);
+        if (remainingQty <= 0) {
+            return 0;
+        }
+        int planQty = policy != null && policy.isAllowFillStartedShift()
+                ? roundUpToShiftCapacity(remainingQty, shiftCapacity) : remainingQty;
+        return Math.min(planQty, maxQtyToWindowEnd);
+    }
+
+    /**
+     * 将剩余量向上取整到单班产能，表示最后已开班班次补满。
+     *
+     * @param qty 剩余目标量
+     * @param shiftCapacity 单班产能
+     * @return 补满后的计划量
+     */
+    private int roundUpToShiftCapacity(int qty, int shiftCapacity) {
+        if (qty <= 0 || shiftCapacity <= 0) {
+            return Math.max(0, qty);
+        }
+        return ((qty + shiftCapacity - 1) / shiftCapacity) * shiftCapacity;
     }
 
     /**
@@ -1418,6 +1624,267 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     }
 
     /**
+     * 分配同胎胚错峰后的换模时间。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @param machineCode 机台编码
+     * @param switchReadyTime 机台可换模时间
+     * @param switchDurationHours 换模时长
+     * @param mouldChangeBalance 换模均衡策略
+     * @return 换模开始时间；无法分配时返回 null
+     */
+    private Date allocateGreenTireAwareMouldChange(LhScheduleContext context,
+                                                   SkuScheduleDTO sku,
+                                                   String machineCode,
+                                                   Date switchReadyTime,
+                                                   int switchDurationHours,
+                                                   IMouldChangeBalanceStrategy mouldChangeBalance) {
+        if (sku == null || StringUtils.isEmpty(sku.getEmbryoCode())) {
+            if (sku != null) {
+                log.debug("SKU胎胚编码为空，跳过同胎胚换模错开判断, materialCode: {}, machineCode: {}",
+                        sku.getMaterialCode(), machineCode);
+            }
+            return mouldChangeBalance.allocateMouldChange(context, machineCode, switchReadyTime, switchDurationHours);
+        }
+        // 先把已有结果和滚动继承结果里的同胎胚换模班次回填到占用表，避免新增规格只感知本轮登记的占用。
+        preloadGreenTireChangeoverOccupancy(context);
+        Date cursorTime = switchReadyTime;
+        for (int attempt = 0; attempt < LhScheduleConstant.MAX_SHIFT_SLOT_COUNT * 2; attempt++) {
+            Date allocatedTime = mouldChangeBalance.allocateMouldChange(
+                    context, machineCode, cursorTime, switchDurationHours);
+            if (allocatedTime == null) {
+                return null;
+            }
+            int shiftIndex = LhScheduleTimeUtil.getShiftIndex(context, context.getScheduleDate(), allocatedTime);
+            if (!hasGreenTireChangeoverConflict(context, sku.getEmbryoCode(), shiftIndex)) {
+                registerGreenTireChangeoverShift(context, sku.getEmbryoCode(), shiftIndex);
+                return allocatedTime;
+            }
+            mouldChangeBalance.rollbackMouldChange(context, allocatedTime);
+            Date nextProbeTime = resolveNextChangeoverProbeTime(context, shiftIndex, allocatedTime);
+            log.info("同胎胚换模班次冲突，顺延换模, materialCode: {}, embryoCode: {}, machineCode: {}, "
+                            + "冲突班次: {}, 原换模时间: {}, 顺延探测时间: {}",
+                    sku.getMaterialCode(), sku.getEmbryoCode(), machineCode, shiftIndex,
+                    LhScheduleTimeUtil.formatDateTime(allocatedTime),
+                    LhScheduleTimeUtil.formatDateTime(nextProbeTime));
+            if (nextProbeTime == null) {
+                return null;
+            }
+            cursorTime = nextProbeTime;
+        }
+        log.warn("同胎胚换模错开失败，超过窗口探测上限, materialCode: {}, embryoCode: {}, machineCode: {}",
+                sku.getMaterialCode(), sku.getEmbryoCode(), machineCode);
+        return null;
+    }
+
+    /**
+     * 回填已有排程结果中的同胎胚换模班次占用。
+     *
+     * @param context 排程上下文
+     */
+    private void preloadGreenTireChangeoverOccupancy(LhScheduleContext context) {
+        if (context == null || CollectionUtils.isEmpty(context.getScheduleResultList())) {
+            return;
+        }
+        for (LhScheduleResult result : context.getScheduleResultList()) {
+            if (!shouldTrackGreenTireChangeoverResult(result)) {
+                continue;
+            }
+            Date changeoverStartTime = resolveExistingGreenTireChangeoverStartTime(result);
+            if (changeoverStartTime == null) {
+                continue;
+            }
+            int shiftIndex = LhScheduleTimeUtil.getShiftIndex(context, context.getScheduleDate(), changeoverStartTime);
+            if (shiftIndex <= 0) {
+                continue;
+            }
+            registerGreenTireChangeoverShift(context, result.getEmbryoCode(), shiftIndex);
+        }
+    }
+
+    /**
+     * 判断结果是否需要参与同胎胚换模占用回填。
+     *
+     * @param result 排程结果
+     * @return true-需要参与；false-跳过
+     */
+    private boolean shouldTrackGreenTireChangeoverResult(LhScheduleResult result) {
+        return result != null
+                && "1".equals(result.getIsChangeMould())
+                && StringUtils.isNotEmpty(result.getEmbryoCode())
+                && resolveExistingGreenTireScheduledQty(result) > 0;
+    }
+
+    /**
+     * 解析已有换模结果的计划量。
+     *
+     * @param result 排程结果
+     * @return 计划量
+     */
+    private int resolveExistingGreenTireScheduledQty(LhScheduleResult result) {
+        int scheduledQty = ShiftFieldUtil.resolveScheduledQty(result);
+        if (scheduledQty > 0) {
+            return scheduledQty;
+        }
+        return result.getDailyPlanQty() != null ? Math.max(0, result.getDailyPlanQty()) : 0;
+    }
+
+    /**
+     * 解析已有换模结果应占用的换模开始时间。
+     *
+     * @param result 排程结果
+     * @return 换模开始时间
+     */
+    private Date resolveExistingGreenTireChangeoverStartTime(LhScheduleResult result) {
+        if (result == null) {
+            return null;
+        }
+        if (result.getMouldChangeStartTime() != null) {
+            return result.getMouldChangeStartTime();
+        }
+        if (result.isRollingInherited()) {
+            return null;
+        }
+        Date productionStartTime = resolveExistingProductionStartTime(result);
+        if (productionStartTime != null) {
+            return productionStartTime;
+        }
+        return result.getSpecEndTime();
+    }
+
+    /**
+     * 解析已有结果的首个开产时间，供缺少真实换模时间的继承结果复用。
+     *
+     * @param result 排程结果
+     * @return 首个开产时间
+     */
+    private Date resolveExistingProductionStartTime(LhScheduleResult result) {
+        List<Date> startTimes = new ArrayList<Date>(LhScheduleConstant.MAX_SHIFT_SLOT_COUNT);
+        if (result.getClass1StartTime() != null) {
+            startTimes.add(result.getClass1StartTime());
+        }
+        if (result.getClass2StartTime() != null) {
+            startTimes.add(result.getClass2StartTime());
+        }
+        if (result.getClass3StartTime() != null) {
+            startTimes.add(result.getClass3StartTime());
+        }
+        if (result.getClass4StartTime() != null) {
+            startTimes.add(result.getClass4StartTime());
+        }
+        if (result.getClass5StartTime() != null) {
+            startTimes.add(result.getClass5StartTime());
+        }
+        if (result.getClass6StartTime() != null) {
+            startTimes.add(result.getClass6StartTime());
+        }
+        if (result.getClass7StartTime() != null) {
+            startTimes.add(result.getClass7StartTime());
+        }
+        if (result.getClass8StartTime() != null) {
+            startTimes.add(result.getClass8StartTime());
+        }
+        return startTimes.stream().min(Date::compareTo).orElse(null);
+    }
+
+    /**
+     * 回滚换模均衡占用及同胎胚换模班次占用。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @param mouldChangeBalance 换模均衡策略
+     * @param mouldChangeStartTime 换模开始时间
+     */
+    private void rollbackMouldChangeAllocation(LhScheduleContext context,
+                                               SkuScheduleDTO sku,
+                                               IMouldChangeBalanceStrategy mouldChangeBalance,
+                                               Date mouldChangeStartTime) {
+        mouldChangeBalance.rollbackMouldChange(context, mouldChangeStartTime);
+        rollbackGreenTireChangeoverShift(context, sku, mouldChangeStartTime);
+    }
+
+    /**
+     * 判断同胎胚换模班次是否冲突。
+     *
+     * @param context 排程上下文
+     * @param greenTireGroupKey 胎胚分组Key
+     * @param shiftIndex 班次索引
+     * @return true-冲突，false-不冲突
+     */
+    private boolean hasGreenTireChangeoverConflict(LhScheduleContext context,
+                                                   String greenTireGroupKey,
+                                                   int shiftIndex) {
+        if (context == null || StringUtils.isEmpty(greenTireGroupKey) || shiftIndex <= 0) {
+            return false;
+        }
+        Set<Integer> occupiedShiftSet = context.getGreenTireChangeoverShiftMap().get(greenTireGroupKey);
+        return !CollectionUtils.isEmpty(occupiedShiftSet) && occupiedShiftSet.contains(shiftIndex);
+    }
+
+    /**
+     * 登记同胎胚换模班次占用。
+     *
+     * @param context 排程上下文
+     * @param greenTireGroupKey 胎胚分组Key
+     * @param shiftIndex 班次索引
+     */
+    private void registerGreenTireChangeoverShift(LhScheduleContext context,
+                                                  String greenTireGroupKey,
+                                                  int shiftIndex) {
+        if (context == null || StringUtils.isEmpty(greenTireGroupKey) || shiftIndex <= 0) {
+            return;
+        }
+        context.getGreenTireChangeoverShiftMap()
+                .computeIfAbsent(greenTireGroupKey, key -> new HashSet<Integer>(4))
+                .add(shiftIndex);
+    }
+
+    /**
+     * 回滚同胎胚换模班次占用。
+     *
+     * @param context 排程上下文
+     * @param sku SKU
+     * @param mouldChangeStartTime 换模开始时间
+     */
+    private void rollbackGreenTireChangeoverShift(LhScheduleContext context,
+                                                  SkuScheduleDTO sku,
+                                                  Date mouldChangeStartTime) {
+        if (context == null || sku == null || StringUtils.isEmpty(sku.getEmbryoCode())
+                || mouldChangeStartTime == null) {
+            return;
+        }
+        int shiftIndex = LhScheduleTimeUtil.getShiftIndex(context, context.getScheduleDate(), mouldChangeStartTime);
+        Set<Integer> occupiedShiftSet = context.getGreenTireChangeoverShiftMap().get(sku.getEmbryoCode());
+        if (CollectionUtils.isEmpty(occupiedShiftSet)) {
+            return;
+        }
+        occupiedShiftSet.remove(shiftIndex);
+        if (occupiedShiftSet.isEmpty()) {
+            context.getGreenTireChangeoverShiftMap().remove(sku.getEmbryoCode());
+        }
+    }
+
+    /**
+     * 获取下一次换模探测时间。
+     *
+     * @param context 排程上下文
+     * @param shiftIndex 当前冲突班次索引
+     * @param allocatedTime 当前换模时间
+     * @return 下一探测时间
+     */
+    private Date resolveNextChangeoverProbeTime(LhScheduleContext context, int shiftIndex, Date allocatedTime) {
+        if (context == null || shiftIndex <= 0) {
+            return null;
+        }
+        LhShiftConfigVO shift = LhScheduleTimeUtil.getShiftByIndex(context, context.getScheduleDate(), shiftIndex);
+        if (shift != null && shift.getShiftEndDateTime() != null) {
+            return shift.getShiftEndDateTime();
+        }
+        return LhScheduleTimeUtil.addHours(allocatedTime, 1);
+    }
+
+    /**
      * 解析定点机台挤量后预留的机台就绪时间。
      *
      * @param context 排程上下文
@@ -1587,9 +2054,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 totalShiftFillOverQty += overQty;
                 log.debug("班次满班补齐超排, materialCode: {}, 日期: {}, 班次: {}, 排产量: {}, 超排: {}",
                         sku.getMaterialCode(), productionDate, shift.getShiftIndex(), planQty, overQty);
-                // 正式新增非试制、非收尾且满排模式下保留满班补齐产量，不做额度回裁
-                if (sku.isTrial() || sku.isStrictTargetQty()
-                        || !getTargetScheduleQtyResolver().isFullCapacityMode(context)) {
+                ProductionQuantityPolicy policy = ProductionQuantityPolicy.from(sku, "1".equals(result.getIsEnd()));
+                // 试制/收尾严格按目标量回裁；正式/量试非收尾保留最后已开班班次补满产量
+                if (policy.isStrictUpperLimit()) {
                     trimShiftPlanQty(result, shift.getShiftIndex(), consumed);
                 }
             }

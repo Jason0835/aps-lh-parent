@@ -1500,6 +1500,8 @@ class NewSpecProductionStrategyRegressionTest {
         assertTrue(totalPlanQty < 20, "总排产量应小于目标量（产能不足）");
         // 应有未排记录
         assertFalse(context.getUnscheduledResultList().isEmpty(), "产能不足应有未排记录");
+        assertEquals(20 - totalPlanQty, context.getUnscheduledResultList().get(0).getUnscheduledQty(),
+                "部分排产后的未排数量应只记录剩余缺口");
         assertTrue(context.getNewSpecSkuList().isEmpty(), "SKU应从待排列表移除");
     }
 

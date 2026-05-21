@@ -1,27 +1,43 @@
+#!/usr/bin/env python3
 import pymysql
 from pymysql.err import OperationalError, ProgrammingError
-
-# ====================== 【必须修改】数据库配置（和导出脚本一致） ======================
-DB_CONFIG = {
-    "host": "127.0.0.1",       # 数据库地址  16.162.95.221
-    "port": 3307,              # 端口  3306
-    "user": "root",            # 用户名 apslh
-    "password": "123456",     # 密码 747452
-    "database": "apslh",     # 数据库名 apslh
-    "charset": "utf8mb4"       # 字符集 utf8mb4
-}
+import configparser
+import sys
 
 # ====================== 配置项 ======================
 SQL_FILE_PATH = "table_structure_data.sql"  # SQL文件路径
 BATCH_COMMIT_SIZE = 100  # 批量提交大小
 
+# ====================== 读取数据库配置文件 ======================
+def load_db_config(config_file, section="dev"):
+    if not config_file:
+        print("❌ 未指定数据库配置文件，请使用 --config 参数指定")
+        sys.exit(1)
+    config = configparser.RawConfigParser()
+    config.read(config_file, encoding="utf-8")
+    if section not in config.sections():
+        print(f"❌ 配置文件中缺少 [{section}] 节: {config_file}")
+        sys.exit(1)
+    db_config = {
+        "host": config.get(section, "host"),
+        "port": config.getint(section, "port"),
+        "user": config.get(section, "user"),
+        "password": config.get(section, "password"),
+        "database": config.get(section, "database"),
+        "charset": config.get(section, "charset", fallback="utf8mb4")
+    }
+    # 读取可选字段 max_allowed_packet，默认 512MB
+    if config.has_option(section, "max_allowed_packet"):
+        db_config["max_allowed_packet"] = config.getint(section, "max_allowed_packet")
+    return db_config
+
 # ====================== 专业SQL解析+执行（终极修复） ======================
-def execute_sql_file():
+def execute_sql_file(db_config):
     conn = None
     cursor = None
     try:
         # 连接数据库，关闭自动提交
-        conn = pymysql.connect(**DB_CONFIG, autocommit=False)
+        conn = pymysql.connect(**db_config, autocommit=False)
         cursor = conn.cursor()
         print("✅ 数据库连接成功")
 
@@ -60,7 +76,6 @@ def execute_sql_file():
                 # 打印错误详情
                 print(f"\n❌ 第{idx}条SQL执行失败")
                 print(f"错误：{err}")
-                conn.rollback()
                 return
 
             # 批量提交事务
@@ -78,14 +93,25 @@ def execute_sql_file():
         print("❌ 数据库连接失败，请检查配置")
     except Exception as e:
         print(f"❌ 程序异常：{str(e)}")
-        if conn:
-            conn.rollback()
     finally:
         if cursor:
-            cursor.close()
+            try:
+                cursor.close()
+            except Exception:
+                pass
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except Exception:
+                pass
         print("\n🔌 数据库连接已关闭")
 
 if __name__ == "__main__":
-    execute_sql_file()
+    import argparse
+    parser = argparse.ArgumentParser(description="批量执行SQL文件")
+    parser.add_argument("--config", default="db_config.ini", help="数据库配置文件路径，默认 db_config.ini")
+    parser.add_argument("--section", default="dev", help="配置节名称，默认 dev")
+    args = parser.parse_args()
+
+    db_config = load_db_config(args.config, args.section)
+    execute_sql_file(db_config)

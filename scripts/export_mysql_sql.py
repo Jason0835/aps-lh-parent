@@ -1,18 +1,8 @@
+#!/usr/bin/env python3
 import pymysql
 from pymysql.err import OperationalError, ProgrammingError
-
-# ====================== 【必须修改】数据库配置 ======================
-
-DB_CONFIG = {
-    "host": "192.168.2.124",       # 数据库地址 192.168.2.124  172.21.7.130
-    "port": 3306,              # 端口  3306
-    "user": "root",            # 用户名  root  tbr_aps
-    "password": "neW46Ik#Gq@",     # 密码 neW46Ik#Gq@  NahPDzeShSxA%
-    "database": "jy_aps",     # 数据库名 jy_aps jy_aps
-    "charset": "utf8mb4"       # 字符集 utf8mb4
-}
-
-
+import configparser
+import sys
 
 # ====================== 【必须修改】需要导出的表名列表 ======================
 TABLE_NAMES = [
@@ -52,13 +42,36 @@ TABLE_NAMES = [
 # ====================== 导出文件配置 ======================
 OUTPUT_SQL_FILE = "table_structure_data.sql"  # 输出的SQL文件名
 
+# ====================== 读取数据库配置文件 ======================
+def load_db_config(config_file, section="dev"):
+    if not config_file:
+        print("❌ 未指定数据库配置文件，请使用 --config 参数指定")
+        sys.exit(1)
+    config = configparser.RawConfigParser()
+    config.read(config_file, encoding="utf-8")
+    if section not in config.sections():
+        print(f"❌ 配置文件中缺少 [{section}] 节: {config_file}")
+        sys.exit(1)
+    db_config = {
+        "host": config.get(section, "host"),
+        "port": config.getint(section, "port"),
+        "user": config.get(section, "user"),
+        "password": config.get(section, "password"),
+        "database": config.get(section, "database"),
+        "charset": config.get(section, "charset", fallback="utf8mb4")
+    }
+    # 读取可选字段 max_allowed_packet，默认 512MB
+    if config.has_option(section, "max_allowed_packet"):
+        db_config["max_allowed_packet"] = config.getint(section, "max_allowed_packet")
+    return db_config
+
 # ====================== 核心导出函数 ======================
-def export_mysql_table_sql():
+def export_mysql_table_sql(db_config):
     conn = None
     cursor = None
     try:
         # 1. 连接数据库
-        conn = pymysql.connect(**DB_CONFIG)
+        conn = pymysql.connect(**db_config)
         cursor = conn.cursor()
         print(f"✅ 数据库连接成功，开始导出表：{TABLE_NAMES}")
 
@@ -66,7 +79,7 @@ def export_mysql_table_sql():
         with open(OUTPUT_SQL_FILE, "w", encoding="utf-8") as f:
             # 写入文件头注释
             f.write("-- 自动生成：表结构 + 数据导出脚本\n")
-            f.write(f"-- 数据库：{DB_CONFIG['database']}\n")
+            f.write(f"-- 数据库：{db_config['database']}\n")
             f.write(f"-- 兼容MySQL5.6/5.7/8.0，自动修复排序规则\n")
             f.write("SET FOREIGN_KEY_CHECKS=0;\n\n")  # 关闭外键检查，避免导入报错
 
@@ -146,4 +159,11 @@ def export_mysql_table_sql():
 
 # ====================== 执行脚本 ======================
 if __name__ == "__main__":
-    export_mysql_table_sql()
+    import argparse
+    parser = argparse.ArgumentParser(description="导出MySQL表结构和数据")
+    parser.add_argument("--config", default="db_config.ini", help="数据库配置文件路径，默认 db_config.ini")
+    parser.add_argument("--section", default="dev", help="配置节名称，默认 dev")
+    args = parser.parse_args()
+
+    db_config = load_db_config(args.config, args.section)
+    export_mysql_table_sql(db_config)

@@ -244,7 +244,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 16.1 加载胶囊卡盘分组
         loadCapsuleChuck(context, factoryCode);
 
-        // 17. 加载MES硫化在机信息（从 T-1 开始，按配置天数向前追溯最近有数据日期）
+        // 17. 加载MES硫化在机信息（从 T 日开始，按配置天数向前追溯最近有数据日期）
         int machineOnlineLookbackDays = context.getParamIntValue(
                 LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS,
                 LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS);
@@ -1112,19 +1112,19 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         Date tDay = LhScheduleTimeUtil.clearTime(scheduleTDay);
         Date lookbackStartDay = LhScheduleTimeUtil.addDays(tDay, -safeLookbackDays);
 
-        // 在 [T-lookbackDays, T) 内加载窗口数据，并按机台保留距离T最近的一条记录。
+        // 在 [T-lookbackDays, T] 内加载窗口数据，并按机台保留距离T最近的一条记录。
         List<LhMachineOnlineInfo> machineOnlineInfoList = lhMachineOnlineInfoMapper.selectList(
                 buildMachineOnlineBaseQuery(factoryCode)
                         .isNotNull(LhMachineOnlineInfo::getOnlineDate)
                         .ge(LhMachineOnlineInfo::getOnlineDate, lookbackStartDay)
-                        .lt(LhMachineOnlineInfo::getOnlineDate, tDay)
+                        .le(LhMachineOnlineInfo::getOnlineDate, tDay)
                         .orderByDesc(LhMachineOnlineInfo::getOnlineDate)
                         // ONLINE_DATE 为 date 类型；同日多条记录时按更新时间取最近同步版本。
                         .orderByDesc(LhMachineOnlineInfo::getUpdateTime)
                         .orderByAsc(LhMachineOnlineInfo::getLhCode));
         if (CollectionUtils.isEmpty(machineOnlineInfoList)) {
             context.setMachineOnlineInfoMap(new HashMap<>(16));
-            log.info("MES硫化在机信息未命中, 回溯窗口: [{} ~ {}), 回溯天数: {}, 命中机台: 0",
+            log.info("MES硫化在机信息未命中, 回溯窗口: [{} ~ {}], 回溯天数: {}, 命中机台: 0",
                     LhScheduleTimeUtil.formatDate(lookbackStartDay),
                     LhScheduleTimeUtil.formatDate(tDay),
                     safeLookbackDays);
@@ -1140,7 +1140,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
             machineOnlineInfoMap.putIfAbsent(onlineInfo.getLhCode(), onlineInfo);
         }
         context.setMachineOnlineInfoMap(machineOnlineInfoMap);
-        log.info("MES硫化在机信息加载完成, 回溯窗口: [{} ~ {}), 回溯天数: {}, 命中机台: {}",
+        log.info("MES硫化在机信息加载完成, 回溯窗口: [{} ~ {}], 回溯天数: {}, 命中机台: {}",
                 LhScheduleTimeUtil.formatDate(lookbackStartDay),
                 LhScheduleTimeUtil.formatDate(tDay),
                 safeLookbackDays,

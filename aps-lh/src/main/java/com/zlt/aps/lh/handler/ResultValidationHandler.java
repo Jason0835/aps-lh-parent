@@ -242,7 +242,9 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
                                               Integer shiftCapacity) {
         int overQty = scheduledQty - targetQty;
         int validationShiftCapacity = shiftCapacity != null ? shiftCapacity : 0;
-        if (overQty > 0 && validationShiftCapacity > 0 && overQty >= validationShiftCapacity) {
+        int allowedOverQty = Math.max(validationShiftCapacity,
+                sku != null ? Math.max(0, sku.getShiftFillOverQty()) : 0);
+        if (allowedOverQty > 0 && overQty > allowedOverQty) {
             String message = String.format("正式/量试SKU超排超过最后已开班补满范围：物料[%s] 目标量[%d] 实际排产[%d] 超排[%d] 班产[%d]",
                     sku.getMaterialCode(), targetQty, scheduledQty, overQty, validationShiftCapacity);
             log.error("排程结果校验失败, {}", message);

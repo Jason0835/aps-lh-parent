@@ -3,11 +3,13 @@ package com.zlt.aps.lh.regression;
 import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.api.domain.dto.MachineCleaningWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.enums.CleaningTypeEnum;
 import com.zlt.aps.lh.api.enums.MouldChangeTypeEnum;
 import com.zlt.aps.lh.context.LhScheduleContext;
+import com.zlt.aps.lh.exception.ScheduleException;
 import com.zlt.aps.lh.handler.ResultValidationHandler;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -19,11 +21,37 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * 结果校验处理器左右模回归测试。
  */
 class ResultValidationHandlerLeftRightMouldRegressionTest {
+
+    @Test
+    void validateFormalQuantityPolicy_shouldAllowExactlyOneShiftFillOver() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        SkuScheduleDTO sku = newSku("3302002654");
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(handler,
+                "validateFormalQuantityPolicy", context, sku, 153, 136, 17));
+        assertThrows(ScheduleException.class, () -> ReflectionTestUtils.invokeMethod(handler,
+                "validateFormalQuantityPolicy", context, sku, 170, 136, 17));
+    }
+
+    @Test
+    void validateFormalQuantityPolicy_shouldAllowShiftFillOverQtyAcrossMultipleFilledShifts() {
+        ResultValidationHandler handler = new ResultValidationHandler();
+        LhScheduleContext context = newContext();
+        SkuScheduleDTO sku = newSku("3302002654");
+        sku.setShiftFillOverQty(23);
+
+        assertDoesNotThrow(() -> ReflectionTestUtils.invokeMethod(handler,
+                "validateFormalQuantityPolicy", context, sku, 323, 300, 17));
+        assertThrows(ScheduleException.class, () -> ReflectionTestUtils.invokeMethod(handler,
+                "validateFormalQuantityPolicy", context, sku, 324, 300, 17));
+    }
 
     @Test
     void generateMouldChangePlan_shouldKeepResultLeftRightMould() {
@@ -435,6 +463,12 @@ class ResultValidationHandlerLeftRightMouldRegressionTest {
         context.setBatchNo("LHPC20260417003");
         context.setScheduleTargetDate(date(2026, 4, 17));
         return context;
+    }
+
+    private SkuScheduleDTO newSku(String materialCode) {
+        SkuScheduleDTO sku = new SkuScheduleDTO();
+        sku.setMaterialCode(materialCode);
+        return sku;
     }
 
     private void invokeManualSundaySandBlastValidationWithoutException(ResultValidationHandler handler, LhScheduleContext context)

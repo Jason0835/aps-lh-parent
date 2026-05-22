@@ -1839,6 +1839,197 @@ class NewSpecProductionStrategyRegressionTest {
     }
 
     @Test
+    void scheduleNewSpecs_shouldNotOverExpandWhenWindowTargetIsLessThanRollingDailyQuota() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 3, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("3302002654");
+        sku.setMaterialDesc("窗口目标小于滚动dayN总量");
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setLhTimeSeconds(3600);
+        sku.setShiftCapacity(17);
+        sku.setMouldQty(1);
+        sku.setPendingQty(136);
+        sku.setDailyPlanQty(136);
+        sku.setTargetScheduleQty(136);
+        sku.setWindowPlanQty(136);
+        sku.setSurplusQty(300);
+        sku.setEmbryoStock(-1);
+        sku.setDailyPlanQuotaMap(buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), sku.getMaterialCode(), 100, 100, 100));
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO k2024 = buildMachine("K2024", dateTime(2026, 5, 4, 14, 0));
+        MachineScheduleDTO k1111 = buildMachine("K1111", dateTime(2026, 5, 4, 14, 0));
+        MachineScheduleDTO k1113 = buildMachine("K1113", dateTime(2026, 5, 4, 14, 0));
+        MachineScheduleDTO k1206 = buildMachine("K1206", dateTime(2026, 5, 4, 14, 0));
+        MachineScheduleDTO k1313 = buildMachine("K1313", dateTime(2026, 5, 4, 14, 0));
+
+        IMachineMatchStrategy machineMatchStrategy = new IMachineMatchStrategy() {
+            @Override
+            public List<MachineScheduleDTO> matchMachines(LhScheduleContext ctx, SkuScheduleDTO scheduleSku) {
+                return Arrays.asList(k2024, k1111, k1113, k1206, k1313);
+            }
+
+            @Override
+            public MachineScheduleDTO selectBestMachine(LhScheduleContext ctx, SkuScheduleDTO scheduleSku,
+                                                        List<MachineScheduleDTO> candidates,
+                                                        Set<String> excludedMachineCodes) {
+                for (MachineScheduleDTO candidate : candidates) {
+                    if (candidate != null && !excludedMachineCodes.contains(candidate.getMachineCode())) {
+                        return candidate;
+                    }
+                }
+                return null;
+            }
+        };
+
+        strategy.scheduleNewSpecs(context, machineMatchStrategy,
+                defaultMouldChangeBalance(), defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(3, context.getScheduleResultList().size(),
+                "本轮窗口目标仅136时，不应按滚动dayN总量300继续扩到五台机台");
+        assertEquals(51, findResult(context.getScheduleResultList(), "K2024").getDailyPlanQty().intValue(),
+                "首台机台应保留整段满班产量");
+        assertEquals(51, findResult(context.getScheduleResultList(), "K1111").getDailyPlanQty().intValue(),
+                "第二台机台应保留整段满班产量");
+        assertEquals(51, findResult(context.getScheduleResultList(), "K1113").getDailyPlanQty().intValue(),
+                "正规非收尾第三台机台已上机后也应补满后续班次");
+        assertFalse(context.getScheduleResultList().stream()
+                        .anyMatch(result -> "K1206".equals(result.getLhMachineCode())
+                                || "K1313".equals(result.getLhMachineCode())),
+                "滚动dayN总量大于本轮窗口目标时，不应再扩出K1206、K1313这类浅排机台");
+        assertEquals(153, context.getScheduleResultList().stream()
+                        .map(LhScheduleResult::getDailyPlanQty)
+                        .filter(Objects::nonNull)
+                        .mapToInt(Integer::intValue)
+                        .sum(),
+                "三台机台补满后，应按滚动dayN账本继续吃掉后续日期额度");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldUseWindowDayPlanAsMinimumTargetForFormalFullCapacityMode() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 1, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(dateTime(2026, 5, 3, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("3302002654");
+        sku.setMaterialDesc("正式非收尾dayN累计目标量");
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setLhTimeSeconds(3600);
+        sku.setShiftCapacity(17);
+        sku.setMouldQty(1);
+        sku.setPendingQty(1752);
+        sku.setDailyPlanQty(100);
+        sku.setTargetScheduleQty(300);
+        sku.setWindowPlanQty(300);
+        sku.setWindowRemainingPlanQty(300);
+        sku.setSurplusQty(1752);
+        sku.setEmbryoStock(-1);
+        sku.setDailyPlanQuotaMap(buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), sku.getMaterialCode(), 100, 100, 100));
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO k2024 = buildMachine("K2024", dateTime(2026, 5, 1, 6, 0));
+        MachineScheduleDTO k1111 = buildMachine("K1111", dateTime(2026, 5, 1, 6, 0));
+        MachineScheduleDTO k1113 = buildMachine("K1113", dateTime(2026, 5, 1, 22, 0));
+
+        IMachineMatchStrategy machineMatchStrategy = new IMachineMatchStrategy() {
+            @Override
+            public List<MachineScheduleDTO> matchMachines(LhScheduleContext ctx, SkuScheduleDTO scheduleSku) {
+                return Arrays.asList(k2024, k1111, k1113);
+            }
+
+            @Override
+            public MachineScheduleDTO selectBestMachine(LhScheduleContext ctx, SkuScheduleDTO scheduleSku,
+                                                        List<MachineScheduleDTO> candidates,
+                                                        Set<String> excludedMachineCodes) {
+                for (MachineScheduleDTO candidate : candidates) {
+                    if (candidate != null && !excludedMachineCodes.contains(candidate.getMachineCode())) {
+                        return candidate;
+                    }
+                }
+                return null;
+            }
+        };
+
+        strategy.scheduleNewSpecs(context, machineMatchStrategy,
+                defaultMouldChangeBalance(), defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(3, context.getScheduleResultList().size(),
+                "正式非收尾dayN累计目标量为300时，应由三台机台共同承接");
+        assertEquals(119, findResult(context.getScheduleResultList(), "K2024").getDailyPlanQty().intValue(),
+                "第一台机台应保留整段满班产量");
+        assertEquals(119, findResult(context.getScheduleResultList(), "K1111").getDailyPlanQty().intValue(),
+                "第二台机台应保留整段满班产量");
+        assertEquals(85, findResult(context.getScheduleResultList(), "K1113").getDailyPlanQty().intValue(),
+                "第三台机台在达到最低目标量后，应继续补满其当天剩余班次");
+        assertEquals(323, context.getScheduleResultList().stream()
+                        .map(LhScheduleResult::getDailyPlanQty)
+                        .filter(Objects::nonNull)
+                        .mapToInt(Integer::intValue)
+                        .sum(),
+                "正规非收尾在达到最低目标量300后，应允许已开机台当天继续补满班产");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldIgnoreTheoreticalFullCapacityTargetForFormalNonEnding() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 1, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(dateTime(2026, 5, 3, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("3302002654");
+        sku.setMaterialDesc("理论满排目标应回落到dayN最低目标");
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setLhTimeSeconds(3600);
+        sku.setShiftCapacity(17);
+        sku.setMouldQty(1);
+        sku.setPendingQty(1752);
+        sku.setDailyPlanQty(100);
+        sku.setTargetScheduleQty(357);
+        sku.setWindowPlanQty(300);
+        sku.setWindowRemainingPlanQty(300);
+        sku.setSurplusQty(1752);
+        sku.setEmbryoStock(-1);
+        sku.setDailyPlanQuotaMap(buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), sku.getMaterialCode(), 100, 100, 100));
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO k2024 = buildMachine("K2024", dateTime(2026, 5, 1, 6, 0));
+        MachineScheduleDTO k1111 = buildMachine("K1111", dateTime(2026, 5, 1, 6, 0));
+        MachineScheduleDTO k1113 = buildMachine("K1113", dateTime(2026, 5, 1, 22, 0));
+
+        strategy.scheduleNewSpecs(context, orderedMachineMatch(k2024, k1111, k1113),
+                defaultMouldChangeBalance(), defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(119, findResult(context.getScheduleResultList(), "K2024").getDailyPlanQty().intValue(),
+                "第一台机台不应继续按理论窗口产能平衡拆量");
+        assertEquals(119, findResult(context.getScheduleResultList(), "K1111").getDailyPlanQty().intValue(),
+                "第二台机台不应继续按理论窗口产能平衡拆量");
+        assertEquals(85, findResult(context.getScheduleResultList(), "K1113").getDailyPlanQty().intValue(),
+                "第三台机台应按dayN最低目标+当天补满口径收尾");
+    }
+
+    @Test
     void adjustSameSkuMultiMachineEndingStagger_shouldMoveMorningTailQtyToNextShift() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, true);
@@ -2372,6 +2563,29 @@ class NewSpecProductionStrategyRegressionTest {
             @Override
             public List<MachineScheduleDTO> matchMachines(LhScheduleContext ctx, SkuScheduleDTO scheduleSku) {
                 return Arrays.asList(firstMachine, secondMachine);
+            }
+
+            @Override
+            public MachineScheduleDTO selectBestMachine(LhScheduleContext ctx, SkuScheduleDTO scheduleSku,
+                                                        List<MachineScheduleDTO> candidates,
+                                                        Set<String> excludedMachineCodes) {
+                for (MachineScheduleDTO candidate : candidates) {
+                    if (candidate != null && !excludedMachineCodes.contains(candidate.getMachineCode())) {
+                        return candidate;
+                    }
+                }
+                return null;
+            }
+        };
+    }
+
+    private IMachineMatchStrategy orderedMachineMatch(MachineScheduleDTO firstMachine,
+                                                      MachineScheduleDTO secondMachine,
+                                                      MachineScheduleDTO thirdMachine) {
+        return new IMachineMatchStrategy() {
+            @Override
+            public List<MachineScheduleDTO> matchMachines(LhScheduleContext ctx, SkuScheduleDTO scheduleSku) {
+                return Arrays.asList(firstMachine, secondMachine, thirdMachine);
             }
 
             @Override

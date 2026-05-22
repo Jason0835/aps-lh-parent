@@ -131,7 +131,6 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                 endingMachines.size(), fallbackMachines.size(), candidateMachines.size(),
                 context.getNewSpecSkuList().size());
 
-        Map<String, Boolean> strictPriorityOneMachineMap = new HashMap<>(Math.max(16, candidateMachines.size() * 2));
         Map<String, Boolean> completedMachineMap = new HashMap<>(Math.max(16, candidateMachines.size() * 2));
         int typeBlockScheduledCount = 0;
         while (!CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
@@ -148,7 +147,6 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
             boolean scheduledInCurrentRound = false;
             for (MachineScheduleDTO machine : activeMachines) {
                 String machineCode = machine.getMachineCode();
-                boolean strictPriorityOneAfterFirstHit = Boolean.TRUE.equals(strictPriorityOneMachineMap.get(machineCode));
                 SkuScheduleDTO limitSpecifySku = selectLimitSpecifySkuByMachine(context, machine);
                 if (shouldReserveMachineForSpecifyNewSpec(context, machine, limitSpecifySku, shifts)) {
                     completedMachineMap.put(machineCode, true);
@@ -166,21 +164,14 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                     break;
                 }
 
-                List<SkuScheduleDTO> priorityOneCandidates =
-                        filterSameEmbryoDescAndMainPatternCandidates(context, machine);
-                List<SkuScheduleDTO> priorityTwoCandidates =
-                        !strictPriorityOneAfterFirstHit && CollectionUtils.isEmpty(priorityOneCandidates)
-                                ? filterSameSpecCandidates(context, machine) : new ArrayList<SkuScheduleDTO>(0);
-                SkuScheduleDTO typeBlockSku = !CollectionUtils.isEmpty(priorityOneCandidates)
-                        ? selectPreferredSkuFromCandidates(priorityOneCandidates)
-                        : selectPreferredSkuFromCandidates(priorityTwoCandidates);
-                String matchedLayer = !CollectionUtils.isEmpty(priorityOneCandidates) ? "第一层"
-                        : (!CollectionUtils.isEmpty(priorityTwoCandidates) ? "第二层" : "未命中");
+                List<SkuScheduleDTO> typeBlockCandidates = filterTypeBlockCandidates(context, machine);
+                SkuScheduleDTO typeBlockSku = selectPreferredSkuFromCandidates(typeBlockCandidates);
+                String matchedLayer = !CollectionUtils.isEmpty(typeBlockCandidates) ? "同胎胚+同模具" : "未命中";
                 if (typeBlockSku == null) {
-                    log.debug("换活字块未匹配到SKU, 机台: {}, 触发来源: {}, 第一层候选: {}, 第二层候选: {}",
+                    log.debug("换活字块未匹配到SKU, 机台: {}, 触发来源: {}, 候选数: {}",
                             machineCode, machineTriggerSourceMap.get(machineCode),
-                            priorityOneCandidates.size(), priorityTwoCandidates.size());
-                    traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                            typeBlockCandidates.size());
+                    traceTypeBlockDecision(context, machine, typeBlockCandidates,
                             null, matchedLayer, false, null, null, machineTriggerSourceMap.get(machineCode));
                     completedMachineMap.put(machineCode, true);
                     continue;
@@ -201,7 +192,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                         context, machine, machine.getEstimatedEndTime(), typeBlockSwitchStartTime);
                 boolean success = appendTypeBlockResultWithRollback(
                         context, machine, typeBlockSku, typeBlockStartTime, typeBlockSwitchStartTime, shifts);
-                traceTypeBlockDecision(context, machine, priorityOneCandidates, priorityTwoCandidates,
+                traceTypeBlockDecision(context, machine, typeBlockCandidates,
                         typeBlockSku, matchedLayer, success, typeBlockSwitchStartTime, typeBlockStartTime,
                         machineTriggerSourceMap.get(machineCode));
                 if (!success) {
@@ -213,11 +204,6 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                 }
                 scheduledInCurrentRound = true;
                 typeBlockScheduledCount++;
-                if (CollectionUtils.isEmpty(priorityOneCandidates)) {
-                    completedMachineMap.put(machineCode, true);
-                } else {
-                    strictPriorityOneMachineMap.put(machineCode, true);
-                }
                 if (!machine.isEnding()) {
                     completedMachineMap.put(machineCode, true);
                 }
@@ -339,7 +325,9 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         boolean success = appendTypeBlockResultWithRollback(
                 context, machine, specifySku, typeBlockStartTime, typeBlockSwitchStartTime, shifts);
         if (success) {
-            completedMachineMap.put(machine.getMachineCode(), true);
+            if (!machine.isEnding()) {
+                completedMachineMap.put(machine.getMachineCode(), true);
+            }
             log.info("收尾机台命中定点物料衔接, machineCode: {}, materialCode: {}, startTime: {}",
                     machine.getMachineCode(), specifySku.getMaterialCode(),
                     LhScheduleTimeUtil.formatDateTime(typeBlockStartTime));
@@ -455,37 +443,16 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
     }
 
     /**
-     * 过滤同胎胚描述且同主花纹的候选SKU。
+     * 过滤满足换活字块条件的候选SKU。
      *
      * @param context 排程上下文
      * @param machine 机台
      * @return 候选SKU
      */
-    private List<SkuScheduleDTO> filterSameEmbryoDescAndMainPatternCandidates(LhScheduleContext context,
-                                                                              MachineScheduleDTO machine) {
+    private List<SkuScheduleDTO> filterTypeBlockCandidates(LhScheduleContext context, MachineScheduleDTO machine) {
         List<SkuScheduleDTO> candidateList = new ArrayList<>(context.getNewSpecSkuList().size());
         for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
-            // 优先级1：同时命中胎胚描述和主花纹，才进入本层候选集。
-            if (isMachineHardMatched(context, machine, sku)
-                    && isSameEmbryoDesc(context, machine, sku)
-                    && isSameMainPatternStrict(context, machine, sku)) {
-                candidateList.add(sku);
-            }
-        }
-        return candidateList;
-    }
-
-    /**
-     * 过滤同规格的候选SKU。
-     *
-     * @param context 排程上下文
-     * @param machine 机台
-     * @return 候选SKU
-     */
-    private List<SkuScheduleDTO> filterSameSpecCandidates(LhScheduleContext context, MachineScheduleDTO machine) {
-        List<SkuScheduleDTO> candidateList = new ArrayList<>(context.getNewSpecSkuList().size());
-        for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
-            if (isMachineHardMatched(context, machine, sku) && isSameSpec(context, machine, sku)) {
+            if (isTypeBlockCandidate(context, machine, sku, false)) {
                 candidateList.add(sku);
             }
         }
@@ -506,7 +473,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
     }
 
     /**
-     * 判断SKU是否满足换活字块条件：同胎胚、同规格、不同花纹。
+     * 判断SKU是否满足换活字块条件：同胎胚且同模具。
      *
      * @param context 排程上下文
      * @param machine 机台
@@ -516,6 +483,22 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
     private boolean isTypeBlockCandidate(LhScheduleContext context,
                                          MachineScheduleDTO machine,
                                          SkuScheduleDTO sku) {
+        return isTypeBlockCandidate(context, machine, sku, true);
+    }
+
+    /**
+     * 判断SKU是否满足换活字块条件：同胎胚且同模具。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param sku SKU
+     * @param writeDecisionLog 是否输出判断日志
+     * @return true-满足条件
+     */
+    private boolean isTypeBlockCandidate(LhScheduleContext context,
+                                         MachineScheduleDTO machine,
+                                         SkuScheduleDTO sku,
+                                         boolean writeDecisionLog) {
         if (sku == null) {
             return false;
         }
@@ -524,20 +507,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                     machine == null ? null : machine.getMachineCode(), sku.getMaterialCode());
             return false;
         }
-        if (!isSameEmbryo(context, machine, sku)) {
-            return false;
-        }
-        String machineSpecCode = resolveMachineSpecCode(context, machine);
-        String machinePatternKey = resolveMachinePatternKey(context, machine);
-        String skuPatternKey = resolvePatternKey(sku.getMainPattern(), sku.getPattern());
-        if (StringUtils.isEmpty(machineSpecCode)
-                || StringUtils.isEmpty(machinePatternKey)
-                || StringUtils.isEmpty(sku.getSpecCode())
-                || StringUtils.isEmpty(skuPatternKey)) {
-            return false;
-        }
-        return StringUtils.equals(machineSpecCode, sku.getSpecCode())
-                && !StringUtils.equals(machinePatternKey, skuPatternKey);
+        return canChangeLetterBlock(context, machine, sku, writeDecisionLog);
     }
 
     /**
@@ -549,10 +519,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
      * @return true-相同胎胚
      */
     private boolean isSameEmbryo(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
-        String machineEmbryoCode = resolveMachineEmbryoCode(context, machine);
-        return StringUtils.isNotEmpty(machineEmbryoCode)
-                && StringUtils.isNotEmpty(sku.getEmbryoCode())
-                && StringUtils.equals(machineEmbryoCode, sku.getEmbryoCode());
+        return isSameCarcass(context, machine, sku);
     }
 
     /**
@@ -564,10 +531,107 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
      * @return true-相同胎胚描述
      */
     private boolean isSameEmbryoDesc(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
-        String machineEmbryoDesc = resolveMachineEmbryoDesc(context, machine);
-        String skuEmbryoDesc = resolveSkuEmbryoDesc(context, sku);
+        String machineEmbryoDesc = normalizeCompareToken(resolveMachineEmbryoDesc(context, machine));
+        String skuEmbryoDesc = normalizeCompareToken(resolveSkuEmbryoDesc(context, sku));
         return StringUtils.isNotEmpty(machineEmbryoDesc)
                 && StringUtils.equals(machineEmbryoDesc, skuEmbryoDesc);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否同胎胚。
+     * <p>胎胚代码和胎胚描述只要命中其一即可。</p>
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param sku SKU
+     * @return true-同胎胚
+     */
+    private boolean isSameCarcass(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        String machineEmbryoCode = normalizeCompareToken(resolveMachineEmbryoCode(context, machine));
+        String skuEmbryoCode = normalizeCompareToken(sku == null ? null : sku.getEmbryoCode());
+        boolean sameEmbryoCode = StringUtils.isNotEmpty(machineEmbryoCode)
+                && StringUtils.equals(machineEmbryoCode, skuEmbryoCode);
+        if (sameEmbryoCode) {
+            return true;
+        }
+        String machineEmbryoDesc = normalizeCompareToken(resolveMachineEmbryoDesc(context, machine));
+        String skuEmbryoDesc = normalizeCompareToken(resolveSkuEmbryoDesc(context, sku));
+        return StringUtils.isNotEmpty(machineEmbryoDesc)
+                && StringUtils.equals(machineEmbryoDesc, skuEmbryoDesc);
+    }
+
+    /**
+     * 判断机台当前物料与候选SKU是否存在相同模具。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param sku SKU
+     * @return true-同模具
+     */
+    private boolean isSameMold(LhScheduleContext context, MachineScheduleDTO machine, SkuScheduleDTO sku) {
+        if (machine == null || sku == null) {
+            return false;
+        }
+        Set<String> machineMouldCodeSet = resolveMouldCodeSet(context, machine.getCurrentMaterialCode());
+        Set<String> skuMouldCodeSet = resolveMouldCodeSet(context, sku.getMaterialCode());
+        if (CollectionUtils.isEmpty(machineMouldCodeSet) || CollectionUtils.isEmpty(skuMouldCodeSet)) {
+            return false;
+        }
+        for (String mouldCode : machineMouldCodeSet) {
+            if (skuMouldCodeSet.contains(mouldCode)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 判断当前在机SKU与候选SKU是否允许换活字块。
+     *
+     * @param context 排程上下文
+     * @param machine 机台
+     * @param sku SKU
+     * @param writeDecisionLog 是否输出判断日志
+     * @return true-允许换活字块
+     */
+    private boolean canChangeLetterBlock(LhScheduleContext context,
+                                         MachineScheduleDTO machine,
+                                         SkuScheduleDTO sku,
+                                         boolean writeDecisionLog) {
+        String machineEmbryoCode = normalizeCompareToken(resolveMachineEmbryoCode(context, machine));
+        String skuEmbryoCode = normalizeCompareToken(sku == null ? null : sku.getEmbryoCode());
+        String machineEmbryoDesc = normalizeCompareToken(resolveMachineEmbryoDesc(context, machine));
+        String skuEmbryoDesc = normalizeCompareToken(resolveSkuEmbryoDesc(context, sku));
+        Set<String> machineMouldCodeSet = machine == null
+                ? new LinkedHashSet<>(0) : resolveMouldCodeSet(context, machine.getCurrentMaterialCode());
+        Set<String> skuMouldCodeSet = sku == null
+                ? new LinkedHashSet<>(0) : resolveMouldCodeSet(context, sku.getMaterialCode());
+        boolean sameCarcass = (StringUtils.isNotEmpty(machineEmbryoCode)
+                && StringUtils.equals(machineEmbryoCode, skuEmbryoCode))
+                || (StringUtils.isNotEmpty(machineEmbryoDesc)
+                && StringUtils.equals(machineEmbryoDesc, skuEmbryoDesc));
+        boolean sameMold = false;
+        if (!CollectionUtils.isEmpty(machineMouldCodeSet) && !CollectionUtils.isEmpty(skuMouldCodeSet)) {
+            for (String mouldCode : machineMouldCodeSet) {
+                if (skuMouldCodeSet.contains(mouldCode)) {
+                    sameMold = true;
+                    break;
+                }
+            }
+        }
+        boolean canChangeLetterBlock = sameCarcass && sameMold;
+        if (writeDecisionLog) {
+            log.info("[换活字块匹配判断] 机台编码: {}, 在机SKU: {}, 候选SKU: {}, 在机胎胚代码: {}, 候选胎胚代码: {}, "
+                            + "在机胎胚描述: {}, 候选胎胚描述: {}, 同胎胚: {}, 在机模具号集合: {}, 候选模具号集合: {}, "
+                            + "同模具: {}, 是否可换活字块: {}{}",
+                    machine == null ? null : machine.getMachineCode(),
+                    machine == null ? null : machine.getCurrentMaterialCode(),
+                    sku == null ? null : sku.getMaterialCode(),
+                    machineEmbryoCode, skuEmbryoCode, machineEmbryoDesc, skuEmbryoDesc,
+                    sameCarcass, machineMouldCodeSet, skuMouldCodeSet, sameMold, canChangeLetterBlock,
+                    canChangeLetterBlock ? "" : "，不满足换活字块：同胎胚=" + sameCarcass + "，同模具=" + sameMold);
+        }
+        return canChangeLetterBlock;
     }
 
     /**
@@ -1157,7 +1221,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         if (!PriorityTraceLogHelper.isEnabled(context)) {
             return;
         }
-        String title = "机台排序优先级汇总【换活字块衔接】";
+        String title = "衔接机台排序总览【换活字块衔接】";
         int topN = LhScheduleConstant.MACHINE_SORT_TRACE_TOP_N;
         int machineCount = PriorityTraceLogHelper.sizeOf(endingMachines);
         int outputCount = Math.min(topN, machineCount);
@@ -1250,7 +1314,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
             if (sku == null || StringUtils.isEmpty(sku.getMaterialCode())) {
                 continue;
             }
-            if (isTypeBlockCandidate(context, machine, sku)) {
+            if (isTypeBlockCandidate(context, machine, sku, false)) {
                 return true;
             }
         }
@@ -1262,8 +1326,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
      *
      * @param context 排程上下文
      * @param machine 收尾机台
-     * @param priorityOneCandidates 第一层候选(同胎胚描述+同主花纹)
-     * @param priorityTwoCandidates 第二层候选(同规格)
+     * @param candidates 候选SKU
      * @param selectedSku 选中SKU
      * @param matchedLayer 命中层级
      * @param success 是否成功
@@ -1272,8 +1335,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
      * @param triggerSource 触发来源
      */
     private void traceTypeBlockDecision(LhScheduleContext context, MachineScheduleDTO machine,
-                                        List<SkuScheduleDTO> priorityOneCandidates,
-                                        List<SkuScheduleDTO> priorityTwoCandidates,
+                                        List<SkuScheduleDTO> candidates,
                                         SkuScheduleDTO selectedSku,
                                         String matchedLayer,
                                         boolean success,
@@ -1283,7 +1345,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         if (!PriorityTraceLogHelper.isEnabled(context)) {
             return;
         }
-        String title = "换活字块机台反选SKU TOP5列表";
+        String title = "收尾机台衔接决策【换活字块机台反选SKU TOP5列表】";
         StringBuilder detailBuilder = new StringBuilder(1024);
         PriorityTraceLogHelper.appendTitleHeader(detailBuilder, title);
 
@@ -1300,38 +1362,25 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                         + ", " + PriorityTraceLogHelper.kv("当前规格", machineSpecCode)
                         + ", " + PriorityTraceLogHelper.kv("收尾时间", PriorityTraceLogHelper.formatDateTime(machine.getEstimatedEndTime())));
 
-        int firstLayerCount = PriorityTraceLogHelper.sizeOf(priorityOneCandidates);
-        int secondLayerCount = PriorityTraceLogHelper.sizeOf(priorityTwoCandidates);
-        int totalCandidates = firstLayerCount + secondLayerCount;
+        int totalCandidates = PriorityTraceLogHelper.sizeOf(candidates);
         int newSpecTotal = PriorityTraceLogHelper.sizeOf(context.getNewSpecSkuList());
         int filteredCount = newSpecTotal - totalCandidates;
         PriorityTraceLogHelper.appendLine(detailBuilder,
                 PriorityTraceLogHelper.kv("候选SKU总数", totalCandidates)
-                        + ", " + PriorityTraceLogHelper.kv("第一层候选数", firstLayerCount)
-                        + ", " + PriorityTraceLogHelper.kv("第二层候选数", secondLayerCount)
                         + ", " + PriorityTraceLogHelper.kv("过滤SKU数", filteredCount)
-                        + ", 过滤原因统计: 不满足换活字块条件=" + Math.max(0, filteredCount - secondLayerCount)
-                        + ", 同规格不符=" + Math.max(0, filteredCount));
+                        + ", 过滤原因统计: 未满足换活字块准入条件=" + Math.max(0, filteredCount));
 
-        // 输出第一层候选 TOP5（同胎胚描述+同主花纹）
+        // 输出候选 TOP5（同胎胚+同模具）
         int topN = LhScheduleConstant.TYPE_BLOCK_SKU_CANDIDATE_TOP_N;
-        if (!CollectionUtils.isEmpty(priorityOneCandidates)) {
-            int outputCount = Math.min(topN, firstLayerCount);
-            PriorityTraceLogHelper.appendLine(detailBuilder, "第一层候选(同胎胚描述+同主花纹) TOP" + outputCount + ":");
-            appendSkuCandidateLines(detailBuilder, context, machine, priorityOneCandidates,
-                    outputCount, true);
-        }
-        // 输出第二层候选 TOP5（同规格）
-        if (!CollectionUtils.isEmpty(priorityTwoCandidates)) {
-            int outputCount = Math.min(topN, secondLayerCount);
-            PriorityTraceLogHelper.appendLine(detailBuilder, "第二层候选(同规格) TOP" + outputCount + ":");
-            appendSkuCandidateLines(detailBuilder, context, machine, priorityTwoCandidates,
-                    outputCount, false);
+        if (!CollectionUtils.isEmpty(candidates)) {
+            int outputCount = Math.min(topN, totalCandidates);
+            PriorityTraceLogHelper.appendLine(detailBuilder,
+                    "候选(同胎胚+同模具) TOP" + outputCount + ":");
+            appendSkuCandidateLines(detailBuilder, context, machine, candidates, outputCount);
         }
 
         // 最终选中
-        String selectReason = resolveTypeBlockSelectReason(context, machine, selectedSku,
-                priorityOneCandidates, priorityTwoCandidates);
+        String selectReason = resolveTypeBlockSelectReason(context, machine, selectedSku, candidates);
         PriorityTraceLogHelper.appendLine(detailBuilder,
                 PriorityTraceLogHelper.kv("命中层级", matchedLayer)
                         + ", " + PriorityTraceLogHelper.kv("选中SKU", selectedSku == null ? "-" : selectedSku.getMaterialCode())
@@ -1353,34 +1402,22 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
      * @param machine 机台
      * @param candidates 候选SKU列表
      * @param outputCount 输出数量
-     * @param isPriorityOne 是否为第一层候选
      */
     private void appendSkuCandidateLines(StringBuilder builder, LhScheduleContext context,
                                          MachineScheduleDTO machine,
                                          List<SkuScheduleDTO> candidates,
-                                         int outputCount, boolean isPriorityOne) {
+                                         int outputCount) {
         for (int i = 0; i < outputCount; i++) {
             SkuScheduleDTO sku = candidates.get(i);
-            boolean sameEmbryoDesc = isSameEmbryoDesc(context, machine, sku);
-            boolean sameMainPattern = isSameMainPatternStrict(context, machine, sku);
-            boolean sameSpec = isSameSpec(context, machine, sku);
-            boolean canChange = isTypeBlockCandidate(context, machine, sku);
+            boolean sameCarcass = isSameCarcass(context, machine, sku);
+            boolean sameMold = isSameMold(context, machine, sku);
+            boolean canChange = isTypeBlockCandidate(context, machine, sku, false);
             String skuEmbryoDesc = resolveSkuEmbryoDesc(context, sku);
-            String skuMainPattern = resolveSkuMainPatternStrict(context, sku);
 
-            String sortKey;
-            String hitLevel;
-            if (isPriorityOne) {
-                sortKey = PriorityTraceLogHelper.formatSortKey(Arrays.asList(
-                        "L1_同胎胚同花纹=" + (sameEmbryoDesc && sameMainPattern ? 0 : 1),
-                        "L2_物料编码兜底=" + PriorityTraceLogHelper.safeText(sku.getMaterialCode())));
-                hitLevel = sameEmbryoDesc && sameMainPattern ? "命中L1同胎胚描述+同主花纹" : "-";
-            } else {
-                sortKey = PriorityTraceLogHelper.formatSortKey(Arrays.asList(
-                        "L1_同规格=" + (sameSpec ? 0 : 1),
-                        "L2_物料编码兜底=" + PriorityTraceLogHelper.safeText(sku.getMaterialCode())));
-                hitLevel = sameSpec ? "命中L1同规格" : "-";
-            }
+            String sortKey = PriorityTraceLogHelper.formatSortKey(Arrays.asList(
+                    "L1_同胎胚同模具=" + (sameCarcass && sameMold ? 0 : 1),
+                    "L2_物料编码兜底=" + PriorityTraceLogHelper.safeText(sku.getMaterialCode())));
+            String hitLevel = sameCarcass && sameMold ? "命中L1同胎胚+同模具" : "-";
 
             PriorityTraceLogHelper.appendLine(builder,
                     (i + 1)
@@ -1391,11 +1428,9 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                             + ", " + PriorityTraceLogHelper.kv("月计划余量", sku.getSurplusQty())
                             + ", " + PriorityTraceLogHelper.kv("胎胚库存", sku.getEmbryoStock())
                             + ", " + PriorityTraceLogHelper.kv("胎胚描述", skuEmbryoDesc)
-                            + ", " + PriorityTraceLogHelper.kv("主花纹", skuMainPattern)
                             + ", " + PriorityTraceLogHelper.kv("规格", sku.getSpecCode())
-                            + ", " + PriorityTraceLogHelper.kv("同胎胚描述", PriorityTraceLogHelper.yesNo(sameEmbryoDesc))
-                            + ", " + PriorityTraceLogHelper.kv("同主花纹", PriorityTraceLogHelper.yesNo(sameMainPattern))
-                            + ", " + PriorityTraceLogHelper.kv("同规格", PriorityTraceLogHelper.yesNo(sameSpec))
+                            + ", " + PriorityTraceLogHelper.kv("同胎胚", PriorityTraceLogHelper.yesNo(sameCarcass))
+                            + ", " + PriorityTraceLogHelper.kv("同模具", PriorityTraceLogHelper.yesNo(sameMold))
                             + ", " + PriorityTraceLogHelper.kv("满足换活字块", PriorityTraceLogHelper.yesNo(canChange))
                             + ", " + PriorityTraceLogHelper.kv("SortKey", sortKey)
                             + ", " + PriorityTraceLogHelper.kv("HitLevel", hitLevel));
@@ -1408,34 +1443,26 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
      * @param context 排程上下文
      * @param machine 机台
      * @param selectedSku 选中SKU
-     * @param priorityOneCandidates 第一层候选
-     * @param priorityTwoCandidates 第二层候选
+     * @param candidates 候选SKU
      * @return 选中原因
      */
     private String resolveTypeBlockSelectReason(LhScheduleContext context, MachineScheduleDTO machine,
-                                                 SkuScheduleDTO selectedSku,
-                                                 List<SkuScheduleDTO> priorityOneCandidates,
-                                                 List<SkuScheduleDTO> priorityTwoCandidates) {
+                                                SkuScheduleDTO selectedSku,
+                                                List<SkuScheduleDTO> candidates) {
         if (selectedSku == null) {
             return "无候选SKU";
         }
         List<String> reasons = new ArrayList<>(4);
-        if (!CollectionUtils.isEmpty(priorityOneCandidates) && priorityOneCandidates.contains(selectedSku)) {
-            reasons.add("同胎胚描述+同主花纹");
+        if (!CollectionUtils.isEmpty(candidates) && candidates.contains(selectedSku)) {
+            reasons.add("同胎胚+同模具");
         }
-        if (!CollectionUtils.isEmpty(priorityTwoCandidates) && priorityTwoCandidates.contains(selectedSku)) {
-            reasons.add("同规格");
+        if (isSameCarcass(context, machine, selectedSku)) {
+            reasons.add("胎胚一致");
         }
-        if (isSameEmbryoDesc(context, machine, selectedSku)) {
-            reasons.add("胎胚描述一致");
+        if (isSameMold(context, machine, selectedSku)) {
+            reasons.add("模具一致");
         }
-        if (isSameMainPatternStrict(context, machine, selectedSku)) {
-            reasons.add("主花纹一致");
-        }
-        if (isSameSpec(context, machine, selectedSku)) {
-            reasons.add("规格一致");
-        }
-        if (isTypeBlockCandidate(context, machine, selectedSku)) {
+        if (isTypeBlockCandidate(context, machine, selectedSku, false)) {
             reasons.add("满足换活字块条件");
         }
         if (reasons.isEmpty()) {
@@ -2355,7 +2382,8 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                 continue;
             }
             String mouldCode = context.getSkuMouldRelMap().get(materialCode).stream()
-                    .map(MdmSkuMouldRel::getMouldCode)
+                .map(MdmSkuMouldRel::getMouldCode)
+                    .map(this::normalizeCompareToken)
                     .filter(StringUtils::isNotEmpty)
                     .distinct()
                     .collect(Collectors.joining(","));
@@ -2381,10 +2409,11 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
             return mouldCodeSet;
         }
         for (MdmSkuMouldRel mouldRel : context.getSkuMouldRelMap().get(materialCode)) {
-            if (mouldRel == null || StringUtils.isEmpty(mouldRel.getMouldCode())) {
+            String mouldCode = mouldRel == null ? null : normalizeCompareToken(mouldRel.getMouldCode());
+            if (StringUtils.isEmpty(mouldCode)) {
                 continue;
             }
-            mouldCodeSet.add(mouldRel.getMouldCode());
+            mouldCodeSet.add(mouldCode);
         }
         return mouldCodeSet;
     }

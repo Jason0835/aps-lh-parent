@@ -1735,6 +1735,127 @@ class NewSpecProductionStrategyRegressionTest {
     }
 
     @Test
+    void scheduleNewSpecs_shouldFillFormalSingleMachineToWindowEndWhenNoExtraMachineNeeded() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 1, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("3302003002");
+        sku.setMaterialDesc("正式单机台补满窗口");
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setLhTimeSeconds(3600);
+        sku.setShiftCapacity(16);
+        sku.setMouldQty(1);
+        sku.setPendingQty(14);
+        sku.setDailyPlanQty(14);
+        sku.setTargetScheduleQty(14);
+        sku.setWindowPlanQty(14);
+        sku.setSurplusQty(200);
+        sku.setEmbryoStock(-1);
+        sku.setDailyPlanQuotaMap(buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), sku.getMaterialCode(), 14, 0, 0));
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO k1105 = buildMachine("K1105", dateTime(2026, 5, 1, 6, 0));
+        MachineScheduleDTO k1110 = buildMachine("K1110", dateTime(2026, 5, 1, 6, 0));
+
+        strategy.scheduleNewSpecs(context, orderedMachineMatch(k1105, k1110),
+                defaultMouldChangeBalance(), defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "单机台可独立完成时不应扩到第二台机台");
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals("K1105", result.getLhMachineCode(), "应保持基础首选机台落机");
+        assertEquals(112, result.getDailyPlanQty().intValue(), "正式非收尾单机台应从开产点补满到窗口结束");
+        assertEquals(16, ShiftFieldUtil.getShiftPlanQty(result, 8).intValue(), "窗口最后一个班次也应保持整班产量");
+        assertEquals(0, context.getUnscheduledResultList().size(), "不应产生未排结果");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldFillMassTrialSingleMachineToWindowEndWhenNoExtraMachineNeeded() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 1, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("3302003003");
+        sku.setMaterialDesc("量试单机台补满窗口");
+        sku.setConstructionStage(ConstructionStageEnum.MASS_TRIAL.getCode());
+        sku.setLhTimeSeconds(3600);
+        sku.setShiftCapacity(16);
+        sku.setMouldQty(1);
+        sku.setPendingQty(14);
+        sku.setDailyPlanQty(14);
+        sku.setTargetScheduleQty(14);
+        sku.setWindowPlanQty(14);
+        sku.setSurplusQty(200);
+        sku.setEmbryoStock(-1);
+        sku.setDailyPlanQuotaMap(buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), sku.getMaterialCode(), 14, 0, 0));
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO k1105 = buildMachine("K1105", dateTime(2026, 5, 1, 6, 0));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(k1105),
+                defaultMouldChangeBalance(), defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "量试单机台应直接落单机结果");
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertEquals(112, result.getDailyPlanQty().intValue(), "量试非收尾单机台也应补满到窗口结束");
+        assertEquals(16, ShiftFieldUtil.getShiftPlanQty(result, 8).intValue(), "量试单机台应补满最后一个班次");
+        assertEquals(0, context.getUnscheduledResultList().size(), "不应产生未排结果");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldKeepTrialSingleMachineStrictTargetQty() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 1, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("3302003004");
+        sku.setMaterialDesc("试制单机台严格目标");
+        sku.setConstructionStage(ConstructionStageEnum.TRIAL.getCode());
+        sku.setLhTimeSeconds(3600);
+        sku.setShiftCapacity(16);
+        sku.setMouldQty(1);
+        sku.setPendingQty(14);
+        sku.setDailyPlanQty(14);
+        sku.setTargetScheduleQty(14);
+        sku.setWindowPlanQty(14);
+        sku.setSurplusQty(200);
+        sku.setEmbryoStock(-1);
+        sku.setDailyPlanQuotaMap(buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), sku.getMaterialCode(), 14, 0, 0));
+        context.getNewSpecSkuList().add(sku);
+
+        MachineScheduleDTO k1501 = buildMachine("K1501L", dateTime(2026, 5, 1, 6, 0));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(k1501),
+                defaultMouldChangeBalance(), defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(1, context.getScheduleResultList().size(), "试制单机台应正常生成结果");
+        LhScheduleResult result = context.getScheduleResultList().get(0);
+        assertTrue(result.getDailyPlanQty().intValue() <= 14, "试制单机台必须保持严格目标量，不允许补满整个窗口");
+        assertEquals(0, resolveShiftQty(result, 8), "试制单机台不应补满到窗口最后一个班次");
+    }
+
+    @Test
     void scheduleNewSpecs_shouldAllocateDocumentCaseByDailyCapacityAcrossMachines() throws Exception {
         NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
         injectDependencies(strategy, true);

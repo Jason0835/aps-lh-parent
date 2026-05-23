@@ -438,16 +438,24 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 MachineScheduleRole role = resolveMachineScheduleRole(quantityPolicy, totalScheduledQty,
                         maxQtyToWindowEnd, candidateTargetQty);
                 segment.setRole(role);
-                int machinePlanQty = resolveMachinePlanQty(context, sku, quantityPolicy, role, segment,
-                        candidateTargetQty, totalScheduledQty, maxQtyToWindowEnd, runtimeShiftCapacity);
-                machinePlanQty = resolveDynamicMachinePlanQtyByDailyCapacity(
-                        context, sku, candidates, excludedMachineCodes, quantityPolicy, segment,
-                        candidateTargetQty, totalScheduledQty, machinePlanQty);
+                boolean singleMachineWindowFill = shouldFillSingleMachineToWindowEnd(
+                        sku, isEnding, totalScheduledQty, candidateTargetQty, maxQtyToWindowEnd);
+                int machinePlanQty = singleMachineWindowFill
+                        ? maxQtyToWindowEnd
+                        : resolveMachinePlanQty(context, sku, quantityPolicy, role, segment,
+                                candidateTargetQty, totalScheduledQty, maxQtyToWindowEnd, runtimeShiftCapacity);
+                if (!singleMachineWindowFill) {
+                    machinePlanQty = resolveDynamicMachinePlanQtyByDailyCapacity(
+                            context, sku, candidates, excludedMachineCodes, quantityPolicy, segment,
+                            candidateTargetQty, totalScheduledQty, machinePlanQty);
+                }
                 log.info("新增SKU候选机台动态分配, materialCode: {}, 机台: {}, 角色: {}, 最大可排量: {}, "
                                 + "累计已排: {}, 窗口目标量: {}, 本机台计划量: {}, 换模班次: {}, 开产班次: {}",
                         sku.getMaterialCode(), machineCode, role, maxQtyToWindowEnd, totalScheduledQty,
                         candidateTargetQty, machinePlanQty, segment.getChangeoverShiftIndex(),
                         segment.getStartProductionShiftIndex());
+                logNewSpecMachinePlanDecision(sku, quantityPolicy, isEnding, singleMachineWindowFill,
+                        candidateTargetQty, maxQtyToWindowEnd, machinePlanQty, null);
                 if (machinePlanQty <= 0) {
                     log.debug("新增SKU动态分配后本机台计划量为0, materialCode: {}, 机台: {}, 目标量: {}, 换模开始: {}, 开产时间: {}",
                             sku.getMaterialCode(), machineCode, candidateTargetQty,
@@ -532,6 +540,8 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                         LhScheduleTimeUtil.formatDateTime(mouldChangeCompleteTime),
                         LhScheduleTimeUtil.formatDateTime(inspectionTime),
                         LhScheduleTimeUtil.formatDateTime(productionStartTime));
+                logNewSpecMachinePlanDecision(sku, quantityPolicy, isEnding, singleMachineWindowFill,
+                        dynamicTargetQty, maxQtyToWindowEnd, machinePlanQty, machineScheduledQty);
                 if (remainingQty <= 0 || !needMoreMachine(sku)) {
                     // 全部排完（总量满足 且 每日额度满足），移出待排队列
                     removeCurrentNewSpecSku(context, iterator, sku);
@@ -1161,6 +1171,34 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
     }
 
     /**
+     * 判断当前新增SKU是否允许按单机台补满到窗口结束。
+     * <p>仅新增规格主链生效：非收尾、非试制，且当前首个成功机台已能独立覆盖窗口目标量时，直接补满到窗口结束。</p>
+     *
+     * @param sku SKU
+     * @param isEnding 是否收尾
+     * @param totalScheduledQty 当前SKU已累计排产量
+     * @param candidateTargetQty 当前窗口目标量
+     * @param maxQtyToWindowEnd 当前机台最大可排量
+     * @return true-按单机台补满窗口处理
+     */
+    private boolean shouldFillSingleMachineToWindowEnd(SkuScheduleDTO sku,
+                                                       boolean isEnding,
+                                                       int totalScheduledQty,
+                                                       int candidateTargetQty,
+                                                       int maxQtyToWindowEnd) {
+        if (sku == null || isEnding || totalScheduledQty > 0) {
+            return false;
+        }
+        if (StringUtils.equals(ConstructionStageEnum.TRIAL.getCode(), sku.getConstructionStage())) {
+            return false;
+        }
+        if (candidateTargetQty <= 0 || maxQtyToWindowEnd < candidateTargetQty) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * 正规非收尾多机台场景下，若后续 dayN 账本仍有可借额度，
      * 尾机台应补满当前可生产段，避免只排部分班次。
      *
@@ -1266,6 +1304,38 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 sku.getMaterialCode(), segment.getMachineCode(), scheduledQty, targetQty, defaultPlanQty,
                 balancedPlanQty, availableMachineCount, requiredMachineCount, requiredMachineCountByDailyCapacity);
         return balancedPlanQty;
+    }
+
+    /**
+     * 记录新增SKU当前机台计划量的最终决策摘要，便于排查单机台补满窗口与严格目标量的差异。
+     *
+     * @param sku SKU
+     * @param policy 排产数量策略
+     * @param isEnding 是否收尾
+     * @param isSingleMachine 是否命中单机台补满窗口
+     * @param targetQty 当前窗口目标量
+     * @param maxQtyToWindowEnd 当前机台最大可排量
+     * @param finalPlanQty 当前机台最终计划量
+     * @param actualScheduledQty 当前机台实际落地量
+     */
+    private void logNewSpecMachinePlanDecision(SkuScheduleDTO sku,
+                                               ProductionQuantityPolicy policy,
+                                               boolean isEnding,
+                                               boolean isSingleMachine,
+                                               int targetQty,
+                                               int maxQtyToWindowEnd,
+                                               int finalPlanQty,
+                                               Integer actualScheduledQty) {
+        if (sku == null || policy == null) {
+            return;
+        }
+        log.info("新增SKU机台计划量决策, materialCode: {}, skuType: {}, isEnding: {}, isTrial: {}, "
+                        + "isSmallBatch: {}, isSingleMachine: {}, targetQty: {}, maxQtyToWindowEnd: {}, "
+                        + "finalPlanQty: {}, actualScheduledQty: {}, allowOverTarget: {}",
+                sku.getMaterialCode(), resolveNewSpecSkuType(sku), isEnding,
+                StringUtils.equals(ConstructionStageEnum.TRIAL.getCode(), sku.getConstructionStage()),
+                sku.isSmallBatchValidation(), isSingleMachine, targetQty, maxQtyToWindowEnd,
+                finalPlanQty, actualScheduledQty, policy.isAllowFillStartedShift());
     }
 
     /**

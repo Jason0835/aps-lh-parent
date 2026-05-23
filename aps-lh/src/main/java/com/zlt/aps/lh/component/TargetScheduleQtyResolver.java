@@ -16,6 +16,7 @@ import com.zlt.aps.lh.util.MachineCleaningOverlapUtil;
 import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.ShiftProductionControlUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
@@ -373,6 +374,13 @@ public class TargetScheduleQtyResolver {
             cursorStartTime = machineAvailableTime;
         } else {
             cursorStartTime = windowStartTime;
+        }
+        // 机台当前在产物料不同于待排SKU时，扣除换模时长估算净可用产能，使收尾判断规则2基于真实产能
+        if (!StringUtils.equals(machine.getPreviousMaterialCode(), sku.getMaterialCode())) {
+            int mouldChangeHours = LhScheduleTimeUtil.getMouldChangeTotalHours(context);
+            if (mouldChangeHours > 0) {
+                cursorStartTime = LhScheduleTimeUtil.addHours(cursorStartTime, mouldChangeHours);
+            }
         }
         int dryIceLossQty = context.getParamIntValue(
                 LhScheduleParamConstant.DRY_ICE_LOSS_QTY, LhScheduleConstant.DRY_ICE_LOSS_QTY);

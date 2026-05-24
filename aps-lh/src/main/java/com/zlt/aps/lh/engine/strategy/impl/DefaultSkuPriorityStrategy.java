@@ -175,7 +175,8 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
         if (compareResult != 0) {
             return compareResult;
         }
-        compareResult = compareNewSpecSkuTypeWithinLevel(left, right, hasSameDelayDays(left, right));
+        compareResult = compareNewSpecSkuTypeWithinLevel(left, right,
+                shouldApplyDelayDaysSkuTypeTieBreaker(left, right));
         if (compareResult != 0) {
             return compareResult;
         }
@@ -262,6 +263,11 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
                 && right != null
                 && left.getDelayDays() != null
                 && Objects.equals(left.getDelayDays(), right.getDelayDays());
+    }
+
+    private boolean shouldApplyDelayDaysSkuTypeTieBreaker(SkuScheduleDTO left, SkuScheduleDTO right) {
+        return hasSameDelayDays(left, right)
+                && !Objects.equals(Integer.valueOf(0), left.getDelayDays());
     }
 
     private int compareStructurePriority(Map<String, StructurePriorityMeta> structurePriorityMap,
@@ -767,7 +773,7 @@ public class DefaultSkuPriorityStrategy implements ISkuPriorityStrategy {
         if (left.isDeliveryLocked() && right.isDeliveryLocked()) {
             return "锁交期同层";
         }
-        if (hasSameDelayDays(left, right)) {
+        if (shouldApplyDelayDaysSkuTypeTieBreaker(left, right)) {
             return "延误天数同层";
         }
         if (shouldApplyStructureSkuTypeTieBreaker(structurePriorityMap, structureEndingDaysMap, left, right)) {

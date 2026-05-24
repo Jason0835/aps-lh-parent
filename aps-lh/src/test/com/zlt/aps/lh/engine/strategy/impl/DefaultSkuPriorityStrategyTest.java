@@ -105,6 +105,44 @@ class DefaultSkuPriorityStrategyTest {
     }
 
     @Test
+    void sortByPriority_shouldPreferLaterStructureEndingDayBeforeSkuTypeTieBreaker() {
+        SkuScheduleDTO trialSku = sku("3302002216");
+        trialSku.setConstructionStage(ConstructionStageEnum.TRIAL.getCode());
+        trialSku.setTrial(true);
+        trialSku.setStructureName("S1");
+        trialSku.setEndingDaysRemaining(1);
+        trialSku.setHighPriorityPendingQty(5);
+        trialSku.setDelayDays(0);
+
+        SkuScheduleDTO formalSku = sku("3302001724");
+        formalSku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        formalSku.setStructureName("S2");
+        formalSku.setEndingDaysRemaining(4);
+        formalSku.setHighPriorityPendingQty(158);
+        formalSku.setDelayDays(0);
+
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(trialSku))).thenReturn(true);
+        when(endingJudgmentStrategy.isEnding(any(LhScheduleContext.class), same(formalSku))).thenReturn(true);
+        when(endingJudgmentStrategy.calculateEndingDaysForStructurePriority(any(LhScheduleContext.class), same(trialSku)))
+                .thenReturn(1);
+        when(endingJudgmentStrategy.calculateEndingDaysForStructurePriority(any(LhScheduleContext.class), same(formalSku)))
+                .thenReturn(4);
+
+        LhScheduleContext context = contextWithNewSpec(trialSku, formalSku);
+        Map<String, List<SkuScheduleDTO>> structureSkuMap = new LinkedHashMap<>();
+        structureSkuMap.put("S1", Collections.singletonList(trialSku));
+        structureSkuMap.put("S2", Collections.singletonList(formalSku));
+        context.setStructureSkuMap(structureSkuMap);
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.STRUCTURE_ENDING_DAYS, "5")));
+
+        strategy.sortByPriority(context);
+
+        assertEquals("3302001724", context.getNewSpecSkuList().get(0).getMaterialCode());
+        assertEquals("3302002216", context.getNewSpecSkuList().get(1).getMaterialCode());
+    }
+
+    @Test
     void sortByPriority_shouldFallbackToSupplyChainWhenStructureContainsNonEndingSku() {
         SkuScheduleDTO sku2022 = sku("3302002022");
         sku2022.setStructureName("S1");

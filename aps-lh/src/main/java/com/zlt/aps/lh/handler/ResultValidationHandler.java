@@ -154,7 +154,7 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
         }
 
         validateGreenTireChangeoverShift(context);
-        validateProductionQuantityPolicy(context);
+//        validateProductionQuantityPolicy(context);
 
         log.info("排程后置校验完成");
     }

@@ -10,6 +10,7 @@ import com.zlt.aps.lh.api.domain.dto.MachineMaintenanceWindowDTO;
 import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
 import com.zlt.aps.lh.api.domain.dto.ShiftProductionControlDTO;
 import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
+import com.zlt.aps.lh.api.domain.dto.SkuDailyPlanQuotaDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
@@ -36,6 +37,7 @@ import com.zlt.aps.lh.util.ShiftCapacityResolverUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.lh.util.ShiftProductionControlUtil;
 import com.zlt.aps.lh.util.SingleMouldShiftQtyUtil;
+import com.zlt.aps.lh.util.SkuDailyPlanQuotaUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
@@ -46,6 +48,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -1018,6 +1022,17 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         result.setTdaySpecEndTime(actualCompletionTime);
         applyTypeBlockCleaningAnalysis(context, result, shifts);
 
+        // 换活字块结果按日计划账本回裁，收尾严格截断，避免超产
+        int quotaTrimmedQty = applyTypeBlockToDailyQuota(context, sku, result, shifts);
+        if (quotaTrimmedQty <= 0) {
+            log.info("换活字块日计划账本回裁后为0, 跳过落地, machineCode: {}, materialCode: {}",
+                    machine.getMachineCode(), sku.getMaterialCode());
+            sku.setTargetScheduleQty(originalTargetScheduleQty);
+            sku.setRemainingScheduleQty(originalRemainingScheduleQty);
+            sku.setStrictTargetQty(originalStrictTargetQty);
+            return false;
+        }
+
         context.getScheduleResultList().add(result);
         context.getScheduleResultSourceSkuMap().put(result, sku);
         registerMachineAssignment(context, machine.getMachineCode(), result);
@@ -1103,10 +1118,18 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
             getTargetScheduleQtyResolver().upsizeEndingTargetQty(context, sku);
             appliedRule = "单机台收尾MAX(余量,胎胚库存)";
         } else if (isSingleMachine && getTargetScheduleQtyResolver().isFullCapacityMode(context)) {
-            sku.setTargetScheduleQty(windowCapacityQty);
-            sku.setRemainingScheduleQty(windowCapacityQty);
+            // 满排目标量不超过硫化余量，避免超产
+            int surplusQty = Math.max(0, sku.getSurplusQty());
+            int cappedQty = windowCapacityQty;
+            boolean surplusCapped = false;
+            if (surplusQty > 0 && surplusQty < cappedQty) {
+                cappedQty = surplusQty;
+                surplusCapped = true;
+            }
+            sku.setTargetScheduleQty(cappedQty);
+            sku.setRemainingScheduleQty(cappedQty);
             sku.setStrictTargetQty(false);
-            appliedRule = "单机台非收尾满排窗口";
+            appliedRule = surplusCapped ? "单机台非收尾满排窗口(余量封顶)" : "单机台非收尾满排窗口";
         } else if (isEnding) {
             sku.setStrictTargetQty(true);
             appliedRule = isSingleMachine ? "单机台收尾严格原目标" : "多机台沿用原规则";
@@ -2649,5 +2672,83 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         return maintenanceScheduleService != null
                 ? maintenanceScheduleService
                 : new LhMaintenanceScheduleService();
+    }
+
+    /**
+     * 换活字块结果按日计划账本回裁。
+     * <p>收尾结果严格截断，非收尾超排记录为满班补齐。</p>
+     *
+     * @param context 排程上下文
+     * @param sku SKU排程DTO
+     * @param result 排程结果
+     * @param shifts 班次列表
+     * @return 回裁后的实际排产量
+     */
+    private int applyTypeBlockToDailyQuota(LhScheduleContext context,
+                                           SkuScheduleDTO sku,
+                                           LhScheduleResult result,
+                                           List<LhShiftConfigVO> shifts) {
+        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = sku.getDailyPlanQuotaMap();
+        if (quotaMap == null || quotaMap.isEmpty()) {
+            return result.getDailyPlanQty() != null ? result.getDailyPlanQty() : 0;
+        }
+        int totalShiftFillOverQty = 0;
+        for (LhShiftConfigVO shift : shifts) {
+            Integer planQty = ShiftFieldUtil.getShiftPlanQty(result, shift.getShiftIndex());
+            if (planQty == null || planQty <= 0) {
+                continue;
+            }
+            Date workDate = shift.getWorkDate();
+            if (workDate == null) {
+                continue;
+            }
+            LocalDate productionDate = workDate.toInstant()
+                    .atZone(ZoneId.systemDefault()).toLocalDate();
+            SkuDailyPlanQuotaDTO quota = quotaMap.get(productionDate);
+            if (quota == null) {
+                continue;
+            }
+            // 按历史欠产、当日计划、未来预占顺序消费同一SKU的日计划账本
+            int consumed = SkuDailyPlanQuotaUtil.consumeRollingQuota(quotaMap, productionDate, planQty);
+            int overQty = planQty - consumed;
+            if (overQty > 0) {
+                boolean endingResult = YES_FLAG.equals(result.getIsEnd());
+                // 收尾结果必须严格截断，不再记录满班补齐超排；
+                // 试制等严格目标量场景仍需回裁，但保留超排账本用于追踪被截掉的补满量。
+                if (endingResult || sku.isStrictTargetQty()) {
+                    trimTypeBlockShiftPlanQty(result, shift.getShiftIndex(), consumed);
+                    if (endingResult) {
+                        continue;
+                    }
+                }
+                // 无法冲抵的部分记录为满班补齐超排量
+                quota.setShiftFillOverQty(quota.getShiftFillOverQty() + overQty);
+                totalShiftFillOverQty += overQty;
+                log.debug("换活字块班次满班补齐超排, materialCode: {}, 日期: {}, 班次: {}, 排产量: {}, 超排: {}",
+                        sku.getMaterialCode(), productionDate, shift.getShiftIndex(), planQty, overQty);
+            }
+        }
+        if (totalShiftFillOverQty > 0) {
+            sku.setShiftFillOverQty(sku.getShiftFillOverQty() + totalShiftFillOverQty);
+            context.getSkuShiftFillOverQtyMap().merge(sku.getMaterialCode(), totalShiftFillOverQty, Integer::sum);
+        }
+        refreshResultSummary(context, result, shifts);
+        return result.getDailyPlanQty() != null ? result.getDailyPlanQty() : 0;
+    }
+
+    /**
+     * 回裁换活字块单个班次计划量，并清空失效的结束时刻。
+     *
+     * @param result 排程结果
+     * @param shiftIndex 班次索引
+     * @param trimmedQty 回裁后的计划量
+     */
+    private void trimTypeBlockShiftPlanQty(LhScheduleResult result, int shiftIndex, int trimmedQty) {
+        Date shiftStartTime = ShiftFieldUtil.getShiftStartTime(result, shiftIndex);
+        if (trimmedQty <= 0) {
+            setShiftPlanQty(result, shiftIndex, 0, null, null);
+            return;
+        }
+        setShiftPlanQty(result, shiftIndex, trimmedQty, shiftStartTime, null);
     }
 }

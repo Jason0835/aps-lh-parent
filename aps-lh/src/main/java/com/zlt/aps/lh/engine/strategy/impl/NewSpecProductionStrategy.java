@@ -370,8 +370,11 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
                 int switchDurationHours = maintenanceOverlapSwitch
                         ? LhScheduleTimeUtil.getMaintenanceOverlapSwitchHours(context)
                         : LhScheduleTimeUtil.getMouldChangeTotalHours(context);
-                mouldChangeStartTime = allocateGreenTireAwareMouldChange(
-                        context, sku, machineCode, switchReadyTime, switchDurationHours, mouldChangeBalance);
+//                // 分配同胎胚错峰后的换模时间
+//                mouldChangeStartTime = allocateGreenTireAwareMouldChange(
+//                        context, sku, machineCode, switchReadyTime, switchDurationHours, mouldChangeBalance);
+                mouldChangeStartTime = mouldChangeBalance.allocateMouldChange(
+                        context, machineCode, switchReadyTime, switchDurationHours);
                 if (mouldChangeStartTime == null) {
                     log.debug("新增SKU换模窗口分配失败, materialCode: {}, 机台: {}, 机台就绪: {}, 目标量: {}",
                             sku.getMaterialCode(), machineCode,

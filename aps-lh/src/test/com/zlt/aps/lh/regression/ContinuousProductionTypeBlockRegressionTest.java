@@ -185,7 +185,7 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
-    void scheduleTypeBlockChange_shouldExpandMachinesWhenSingleTypeBlockMachineCannotCoverDemand() {
+    void scheduleTypeBlockChange_shouldLeaveRemainingSkuForNewSpecWhenSingleTypeBlockMachineCannotCoverDemand() {
         LhScheduleContext context = newContext();
         MachineScheduleDTO machine1 = buildMachine("M1", "MAT-C1");
         MachineScheduleDTO machine2 = buildMachine("M2", "MAT-C2");
@@ -215,22 +215,59 @@ class ContinuousProductionTypeBlockRegressionTest {
         List<LhScheduleResult> typeBlockResults = context.getScheduleResultList().stream()
                 .filter(result -> "MAT-T1".equals(result.getMaterialCode()))
                 .collect(java.util.stream.Collectors.toList());
-        assertEquals(2, typeBlockResults.size(), "单台换活字块产能不足时应继续扩到第二台机台");
+        assertEquals(1, typeBlockResults.size(), "换活字块阶段只允许当前衔接机台承接，不应直接扩到第二台换活字块机台");
         assertEquals("03", typeBlockResults.get(0).getScheduleType());
         assertEquals("1", typeBlockResults.get(0).getIsTypeBlock());
-        assertEquals("03", typeBlockResults.get(1).getScheduleType());
-        assertEquals("1", typeBlockResults.get(1).getIsTypeBlock());
-        assertEquals(80, typeBlockResults.stream()
-                        .map(LhScheduleResult::getDailyPlanQty)
-                        .mapToInt(Integer::intValue)
-                        .sum(),
-                "多机台换活字块合计排产量不能超过同一SKU目标量");
+        assertTrue(typeBlockResults.get(0).getDailyPlanQty() > 0);
+        assertTrue(typeBlockResults.get(0).getDailyPlanQty() < 80, "单台不足时只能落当前换活字块机台可承接数量");
         assertTrue(context.getNewSpecSkuList().stream()
-                        .noneMatch(sku -> "MAT-T1".equals(sku.getMaterialCode())),
-                "多机台满足后 SKU 应从新增待排队列移除");
+                        .anyMatch(sku -> "MAT-T1".equals(sku.getMaterialCode())),
+                "剩余量应保留在新增待排队列，继续交给 S4.5 换模主链处理");
         assertTrue(context.getUnscheduledResultList().stream()
                         .noneMatch(result -> "MAT-T1".equals(result.getMaterialCode())),
-                "两台合计满足目标时不应提前生成未排结果");
+                "剩余量进入新增排产阶段前，不应在换活字块阶段提前生成未排结果");
+    }
+
+    @Test
+    void scheduleTypeBlockChange_shouldNotUseSpecifyMachineAfterSkuReturnedToNewSpec() {
+        LhScheduleContext context = newContext();
+        enableSpecifyMachineRule(context);
+        MachineScheduleDTO machine1 = buildMachine("M1", "MAT-C1");
+        MachineScheduleDTO machine2 = buildMachine("M2", "MAT-C2");
+        machine1.setEnding(true);
+        machine2.setEnding(true);
+        context.getMachineScheduleMap().put("M1", machine1);
+        context.getMachineScheduleMap().put("M2", machine2);
+        context.getContinuousSkuList().add(buildContinuousSku(
+                "MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getContinuousSkuList().add(buildContinuousSku(
+                "MAT-C2", "M2", "EMB-1", "STRUCT-A", "SPEC-B", "PAT-A", 1));
+        SkuScheduleDTO newSku = buildNewSku("MAT-T1", "EMB-1", "STRUCT-A", "SPEC-T", "PAT-A", 80);
+        newSku.setSurplusQty(80);
+        context.getNewSpecSkuList().add(newSku);
+        context.getSpecifyMachineMap().put("MAT-T1", Arrays.asList(
+                specifyMachine("MAT-T1", "M2", JobTypeEnum.RESTRICTED.getCode())));
+        putMaterialInfo(context, "MAT-C1", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-C2", "胎胚描述-A", "SPEC-B", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-T1", "胎胚描述-A", "SPEC-T", "PAT-A", "PAT-A");
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-C2", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2", "ORD-3");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
+
+        typeBlockProductionStrategy.scheduleTypeBlockChange(context);
+
+        List<LhScheduleResult> typeBlockResults = context.getScheduleResultList().stream()
+                .filter(result -> "MAT-T1".equals(result.getMaterialCode()))
+                .collect(java.util.stream.Collectors.toList());
+        assertEquals(1, typeBlockResults.size(),
+                "换活字块单机台不足回流后，即使命中另一台定点机台，也必须留给S4.5新增排产");
+        assertEquals("M1", typeBlockResults.get(0).getLhMachineCode());
+        assertTrue(context.getNewSpecSkuList().stream()
+                        .anyMatch(sku -> "MAT-T1".equals(sku.getMaterialCode())),
+                "剩余量仍应保留在新增待排队列");
     }
 
     @Test

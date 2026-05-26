@@ -13,7 +13,6 @@ import com.zlt.aps.lh.api.domain.dto.ShiftRuntimeState;
 import com.zlt.aps.lh.api.domain.dto.SkuDailyPlanQuotaDTO;
 import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
-import com.zlt.aps.lh.api.domain.entity.LhUnscheduledResult;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.enums.ScheduleTypeEnum;
 import com.zlt.aps.lh.component.OrderNoGenerator;
@@ -137,6 +136,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                 context.getNewSpecSkuList().size());
 
         Map<String, Boolean> completedMachineMap = new HashMap<>(Math.max(16, candidateMachines.size() * 2));
+        Set<String> returnedToNewSpecMaterialCodes = new LinkedHashSet<String>(16);
         int typeBlockScheduledCount = 0;
         while (!CollectionUtils.isEmpty(context.getNewSpecSkuList())) {
             List<MachineScheduleDTO> activeMachines = buildActiveMachineList(
@@ -161,15 +161,24 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                 }
                 SkuScheduleDTO specifySku = isTypeBlockCandidate(context, machine, limitSpecifySku)
                         ? limitSpecifySku : null;
+                if (specifySku != null && StringUtils.isNotEmpty(specifySku.getMaterialCode())
+                        && returnedToNewSpecMaterialCodes.contains(specifySku.getMaterialCode())) {
+                    completedMachineMap.put(machineCode, true);
+                    log.info("定点换活字块SKU已回流新增排产，跳过S4.4二次承接, machineCode: {}, materialCode: {}",
+                            machineCode, specifySku.getMaterialCode());
+                    continue;
+                }
                 if (specifySku != null && appendSpecifyTypeBlockResult(
                         context, machine, specifySku, shifts, completedMachineMap, activeMachines)) {
                     clearSpecifyReservation(context, machineCode, specifySku.getMaterialCode());
+                    collectReturnedToNewSpecMaterial(returnedToNewSpecMaterialCodes, context, specifySku);
                     scheduledInCurrentRound = true;
                     typeBlockScheduledCount++;
                     break;
                 }
 
-                List<SkuScheduleDTO> typeBlockCandidates = filterTypeBlockCandidates(context, machine);
+                List<SkuScheduleDTO> typeBlockCandidates = filterTypeBlockCandidates(
+                        context, machine, returnedToNewSpecMaterialCodes);
                 SkuScheduleDTO typeBlockSku = selectPreferredSkuFromCandidates(typeBlockCandidates);
                 String matchedLayer = !CollectionUtils.isEmpty(typeBlockCandidates) ? "同胎胚+同模具" : "未命中";
                 if (typeBlockSku == null) {
@@ -211,6 +220,7 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
                 }
                 scheduledInCurrentRound = true;
                 typeBlockScheduledCount++;
+                collectReturnedToNewSpecMaterial(returnedToNewSpecMaterialCodes, context, typeBlockSku);
                 if (!machine.isEnding()) {
                     completedMachineMap.put(machineCode, true);
                 }
@@ -460,14 +470,39 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
      * @param machine 机台
      * @return 候选SKU
      */
-    private List<SkuScheduleDTO> filterTypeBlockCandidates(LhScheduleContext context, MachineScheduleDTO machine) {
+    private List<SkuScheduleDTO> filterTypeBlockCandidates(LhScheduleContext context,
+                                                           MachineScheduleDTO machine,
+                                                           Set<String> returnedToNewSpecMaterialCodes) {
         List<SkuScheduleDTO> candidateList = new ArrayList<>(context.getNewSpecSkuList().size());
         for (SkuScheduleDTO sku : context.getNewSpecSkuList()) {
+            if (sku != null && !CollectionUtils.isEmpty(returnedToNewSpecMaterialCodes)
+                    && returnedToNewSpecMaterialCodes.contains(sku.getMaterialCode())) {
+                continue;
+            }
             if (isTypeBlockCandidate(context, machine, sku, false)) {
                 candidateList.add(sku);
             }
         }
         return candidateList;
+    }
+
+    /**
+     * 记录已由换活字块首台承接但仍需回流 S4.5 的物料，避免 S4.4 再次按换活字块扩机。
+     *
+     * @param returnedToNewSpecMaterialCodes 回流新增排产物料集合
+     * @param context 排程上下文
+     * @param sku 当前 SKU
+     */
+    private void collectReturnedToNewSpecMaterial(Set<String> returnedToNewSpecMaterialCodes,
+                                                  LhScheduleContext context,
+                                                  SkuScheduleDTO sku) {
+        if (returnedToNewSpecMaterialCodes == null
+                || context == null || sku == null || StringUtils.isEmpty(sku.getMaterialCode())) {
+            return;
+        }
+        if (context.getNewSpecSkuList().contains(sku) && sku.getRemainingScheduleQty() > 0) {
+            returnedToNewSpecMaterialCodes.add(sku.getMaterialCode());
+        }
     }
 
     /**
@@ -1045,40 +1080,19 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         updateMachineState(context, machine, sku, result);
         int scheduledQty = result.getDailyPlanQty() == null ? 0 : result.getDailyPlanQty();
         int remainingQty = Math.max(0, adoptedTargetQty - scheduledQty);
-        if (shouldContinueTypeBlockOnNextMachine(sku, remainingQty, isSingleMachine)) {
+        if (remainingQty > 0) {
             sku.setTargetScheduleQty(remainingQty);
             sku.setRemainingScheduleQty(remainingQty);
             sku.setStrictTargetQty(originalStrictTargetQty);
-            log.info("换活字块单台产能不足，继续尝试下一台, machineCode: {}, materialCode: {}, 已排: {}, 剩余: {}",
+            log.info("换活字块单台产能不足，剩余量回流新增排产, machineCode: {}, materialCode: {}, 已排: {}, "
+                            + "remainingQtyForNewSchedule: {}, 回流阶段: S4.5新增排产/换模",
                     machine.getMachineCode(), sku.getMaterialCode(), scheduledQty, remainingQty);
             return true;
         }
         context.getNewSpecSkuList().remove(sku);
-        // 换活字块候选机台耗尽后仍不足以覆盖目标量时，添加未排记录
-        if (remainingQty > 0) {
-            addTypeBlockUnscheduledResult(context, sku, remainingQty);
-        }
         log.debug("换活字块排产完成, 机台: {}, SKU: {}, 已排: {}, 剩余: {}",
                 machine.getMachineCode(), sku.getMaterialCode(), scheduledQty, remainingQty);
         return true;
-    }
-
-    /**
-     * 判断换活字块是否需要继续尝试下一台机台。
-     *
-     * @param sku SKU
-     * @param remainingQty 当前剩余目标量
-     * @param isSingleMachine 是否已是最后一个可用候选机台
-     * @return true-继续尝试下一台
-     */
-    private boolean shouldContinueTypeBlockOnNextMachine(SkuScheduleDTO sku,
-                                                         int remainingQty,
-                                                         boolean isSingleMachine) {
-        if (sku == null || remainingQty <= 0 || isSingleMachine) {
-            return false;
-        }
-        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = sku.getDailyPlanQuotaMap();
-        return CollectionUtils.isEmpty(quotaMap) || SkuDailyPlanQuotaUtil.sumRemainingQty(quotaMap) > 0;
     }
 
     /**
@@ -1104,29 +1118,6 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
             }
         }
         return false;
-    }
-
-    /**
-     * 记录换活字块最终未排结果。
-     *
-     * @param context 排程上下文
-     * @param sku SKU
-     * @param remainingQty 未排量
-     */
-    private void addTypeBlockUnscheduledResult(LhScheduleContext context,
-                                               SkuScheduleDTO sku,
-                                               int remainingQty) {
-        LhUnscheduledResult unscheduled = new LhUnscheduledResult();
-        unscheduled.setFactoryCode(context.getFactoryCode());
-        unscheduled.setBatchNo(context.getBatchNo());
-        unscheduled.setScheduleDate(context.getScheduleTargetDate());
-        unscheduled.setMaterialCode(sku.getMaterialCode());
-        unscheduled.setMaterialDesc(sku.getMaterialDesc());
-        unscheduled.setSpecCode(sku.getSpecCode());
-        unscheduled.setStructureName(sku.getStructureName());
-        unscheduled.setUnscheduledQty(remainingQty);
-        unscheduled.setUnscheduledReason("换活字块后机台产能不足，剩余" + remainingQty + "未排");
-        context.getUnscheduledResultList().add(unscheduled);
     }
 
     /**

@@ -7,8 +7,10 @@ import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
 import com.zlt.aps.lh.api.domain.vo.LhShiftConfigVO;
 import com.zlt.aps.lh.api.enums.ConstructionStageEnum;
 import com.zlt.aps.lh.api.enums.ShiftEnum;
+import com.zlt.aps.lh.api.constant.LhScheduleParamConstant;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.lh.component.TargetScheduleQtyResolver;
+import com.zlt.aps.lh.context.LhScheduleConfig;
 import com.zlt.aps.lh.context.LhScheduleContext;
 import com.zlt.aps.lh.engine.strategy.IEndingJudgmentStrategy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
@@ -781,10 +783,13 @@ public class ContinuousProductionStrategyTest {
         ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
         LhScheduleContext context = buildMultiDayContinuationContext(
                 ConstructionStageEnum.FORMAL.getCode(), 112, 64, 48, 10, 5, "K1405", "K1702");
+        context.setScheduleConfig(new LhScheduleConfig(Collections.singletonMap(
+                LhScheduleParamConstant.NEW_SPEC_SHORTAGE_LOOK_AHEAD_DAYS, "1")));
 
         strategy.scheduleReduceMould(context);
 
-        assertEquals(2, context.getScheduleResultList().size(), "第一天仍有排产量的下机机台结果不应被整条移除");
+        assertEquals(2, context.getScheduleResultList().size(),
+                "只允许向后追补1天且day2仍追不回时，第一天仍有排产量的下机机台结果不应被整条移除");
         LhScheduleResult retainedResult = findResultByMachineCode(context, "K1405");
         LhScheduleResult removedFromSecondDayResult = findResultByMachineCode(context, "K1702");
         assertEquals(80, retainedResult.getDailyPlanQty().intValue(),
@@ -799,6 +804,41 @@ public class ContinuousProductionStrategyTest {
         assertEquals(Integer.valueOf(0), ShiftFieldUtil.getShiftPlanQty(removedFromSecondDayResult, 6));
         assertEquals(112, sumScheduledQty(context),
                 "按 2/3/3 班窗口降模后，总量应收口为 day1 64 + day2 48");
+    }
+
+    @Test
+    public void scheduleReduceMould_shouldReduceFromFirstDayWhenLookAheadCanRecoverShortage() {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+        LhScheduleContext context = buildMultiDayContinuationContext(
+                ConstructionStageEnum.FORMAL.getCode(), 64, 48, 16, 10, 5, "K1405", "K1702");
+
+        strategy.scheduleReduceMould(context);
+
+        assertEquals(1, context.getScheduleResultList().size(),
+                "day1单台不足但day2可追回欠产时，应从day1开始降为单台续作");
+        LhScheduleResult retainedResult = context.getScheduleResultList().get(0);
+        assertEquals("K1405", retainedResult.getLhMachineCode(), "降模后应保留胶囊次数更多的机台");
+        assertEquals(Integer.valueOf(16), ShiftFieldUtil.getShiftPlanQty(retainedResult, 1));
+        assertEquals(Integer.valueOf(16), ShiftFieldUtil.getShiftPlanQty(retainedResult, 2));
+        assertEquals(Integer.valueOf(16), ShiftFieldUtil.getShiftPlanQty(retainedResult, 3));
+        assertEquals(Integer.valueOf(16), ShiftFieldUtil.getShiftPlanQty(retainedResult, 4));
+        assertEquals(Integer.valueOf(16), ShiftFieldUtil.getShiftPlanQty(retainedResult, 5));
+        assertEquals(80, sumScheduledQty(context),
+                "正规非收尾续作保留机台仍按可用班次补满，但不得继续占用第二台机台");
+    }
+
+    @Test
+    public void scheduleReduceMould_shouldNotReduceWhenFutureDayPlanDoesNotDrop() {
+        ContinuousProductionStrategy strategy = new ContinuousProductionStrategy();
+        LhScheduleContext context = buildMultiDayContinuationContext(
+                ConstructionStageEnum.FORMAL.getCode(), 96, 48, 48, 10, 5, "K1405", "K1702");
+
+        strategy.scheduleReduceMould(context);
+
+        assertEquals(2, context.getScheduleResultList().size(),
+                "未来dayN计划量未下降时，不应仅因单台追补窗口可满足就提前降模");
+        assertEquals(160, sumScheduledQty(context),
+                "正规非收尾保留两台时仍沿用原满班排产语义，本用例只锁定不降模");
     }
 
     @Test

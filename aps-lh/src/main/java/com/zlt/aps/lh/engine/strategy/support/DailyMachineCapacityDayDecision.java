@@ -19,6 +19,21 @@ public class DailyMachineCapacityDayDecision implements Serializable {
     /** 允许追补的截止日期 */
     private LocalDate lookAheadEndDate;
 
+    /** 当前 dayN 日计划量 */
+    private int todayPlanQty;
+
+    /** 进入当前日之前累计待追补量 */
+    private int carryShortageQty;
+
+    /** 当前日实际需求量：carryShortage + todayPlanQty */
+    private int todayRequiredQty;
+
+    /** 当前启用机台在当前日的有效产能 */
+    private int todayCapacityQty;
+
+    /** 当前日结束后仍需后续追补的欠产量 */
+    private int dayShortageQty;
+
     /** 当前日期到追补截止日的需求量 */
     private int demandQty;
 

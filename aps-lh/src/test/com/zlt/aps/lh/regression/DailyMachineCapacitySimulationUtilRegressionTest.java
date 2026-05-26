@@ -43,6 +43,63 @@ class DailyMachineCapacitySimulationUtilRegressionTest {
                 "day1 新增后的 activeMachines 应继续计入 day2/day3");
     }
 
+    @Test
+    void simulateExpansion_shouldCarryShortageAndAvoidImmediateMachineWhenLookAheadCanRecover() {
+        LocalDate day1 = LocalDate.of(2026, 5, 3);
+        LocalDate day2 = LocalDate.of(2026, 5, 4);
+        LocalDate day3 = LocalDate.of(2026, 5, 5);
+        DailyMachineCapacitySimulationRequest request = new DailyMachineCapacitySimulationRequest();
+        request.setMaterialCode("3302002177");
+        request.setDailyPlanQuotaMap(quotaMap(day1, day2, day3, 20, 20, 0));
+        request.setMachineDailyCapacityList(machineCapacityList(day1, day2, day3, 10, 30, 0, 2));
+        request.setInitialActiveMachines(1);
+        request.setShortageLookAheadDays(1);
+        request.setWindowEndDate(day3);
+        request.setSceneType("newSpec");
+
+        DailyMachineCapacitySimulationResult result =
+                DailyMachineCapacitySimulationUtil.simulateExpansion(request);
+
+        assertEquals(1, result.getFinalActiveMachines(), "day2 可追回 day1 欠产时不应立即新增机台");
+        assertEquals(0, result.getTotalAddedMachineCount());
+        assertEquals(0, result.getTotalUnmetQty());
+        assertEquals(20, result.getDayDecisionList().get(0).getTodayRequiredQty());
+        assertEquals(10, result.getDayDecisionList().get(0).getTodayCapacityQty());
+        assertEquals(10, result.getDayDecisionList().get(0).getDayShortageQty());
+        assertEquals(10, result.getDayDecisionList().get(1).getCarryShortageQty());
+        assertEquals(30, result.getDayDecisionList().get(1).getTodayRequiredQty());
+        assertEquals(0, result.getDayDecisionList().get(1).getDayShortageQty());
+    }
+
+    @Test
+    void simulateExpansion_shouldNotTreatLaterRemainingQtyAsHistoricalShortageAgain() {
+        LocalDate day1 = LocalDate.of(2026, 5, 3);
+        LocalDate day2 = LocalDate.of(2026, 5, 4);
+        LocalDate day3 = LocalDate.of(2026, 5, 5);
+        DailyMachineCapacitySimulationRequest request = new DailyMachineCapacitySimulationRequest();
+        request.setMaterialCode("3302002177");
+        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = quotaMap(day1, day2, day3, 20, 20, 0);
+        quotaMap.get(day1).setRemainingQty(30);
+        quotaMap.get(day2).setRemainingQty(30);
+        request.setDailyPlanQuotaMap(quotaMap);
+        request.setMachineDailyCapacityList(machineCapacityList(day1, day2, day3, 30, 20, 0, 2));
+        request.setInitialActiveMachines(1);
+        request.setShortageLookAheadDays(1);
+        request.setWindowEndDate(day3);
+        request.setSceneType("newSpec");
+
+        DailyMachineCapacitySimulationResult result =
+                DailyMachineCapacitySimulationUtil.simulateExpansion(request);
+
+        assertEquals(1, result.getFinalActiveMachines(), "非首日remaining含历史欠产时，不应重复触发新增机台");
+        assertEquals(0, result.getTotalAddedMachineCount());
+        assertEquals(10, result.getDayDecisionList().get(0).getCarryShortageQty(),
+                "首日只允许用remaining-dayPlan初始化历史欠产");
+        assertEquals(20, result.getDayDecisionList().get(1).getTodayPlanQty(),
+                "非首日目标量必须使用dayN计划量，不能再次使用remainingQty");
+        assertEquals(0, result.getTotalUnmetQty());
+    }
+
     private Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap(LocalDate day1,
                                                           LocalDate day2,
                                                           LocalDate day3,

@@ -32,6 +32,8 @@ public final class DailyMachineCapacitySimulationUtil {
         }
         int activeMachines = Math.max(1, request.getInitialActiveMachines());
         int maxMachineCount = request.getMachineDailyCapacityList().size();
+        int carryShortage = resolveInitialCarryShortage(request);
+        LocalDate firstProductionDate = resolveFirstProductionDate(request);
         for (Map.Entry<LocalDate, SkuDailyPlanQuotaDTO> entry : request.getDailyPlanQuotaMap().entrySet()) {
             LocalDate productionDate = entry.getKey();
             if (Objects.isNull(productionDate) || isAfterWindowEnd(productionDate, request.getWindowEndDate())) {
@@ -41,7 +43,7 @@ public final class DailyMachineCapacitySimulationUtil {
                     request.getDailyPlanQuotaMap(), productionDate,
                     request.getShortageLookAheadDays(), request.getWindowEndDate());
             DailyMachineCapacityDayDecision decision = buildDayDecision(
-                    request, productionDate, lookAheadEndDate, activeMachines);
+                    request, productionDate, lookAheadEndDate, activeMachines, carryShortage);
             while (decision.getUnmetQty() > 0 && activeMachines < maxMachineCount) {
                 activeMachines++;
                 decision.setAddedMachineCount(decision.getAddedMachineCount() + 1);
@@ -51,16 +53,15 @@ public final class DailyMachineCapacitySimulationUtil {
             decision.setChanged(decision.getAddedMachineCount() > 0);
             decision.setReason(resolveDecisionReason(decision));
             result.getDayDecisionList().add(decision);
+            carryShortage = decision.getDayShortageQty();
         }
         result.setFinalActiveMachines(activeMachines);
         int totalAdded = 0;
-        int totalUnmet = 0;
         for (DailyMachineCapacityDayDecision decision : result.getDayDecisionList()) {
             totalAdded += decision.getAddedMachineCount();
-            totalUnmet += Math.max(0, decision.getUnmetQty());
         }
         result.setTotalAddedMachineCount(totalAdded);
-        result.setTotalUnmetQty(totalUnmet);
+        result.setTotalUnmetQty(Math.max(0, carryShortage));
         return result;
     }
 
@@ -68,10 +69,13 @@ public final class DailyMachineCapacitySimulationUtil {
             DailyMachineCapacitySimulationRequest request,
             LocalDate productionDate,
             LocalDate lookAheadEndDate,
-            int activeMachines) {
+            int activeMachines,
+            int carryShortage) {
         DailyMachineCapacityDayDecision decision = new DailyMachineCapacityDayDecision();
         decision.setProductionDate(productionDate);
         decision.setLookAheadEndDate(lookAheadEndDate);
+        decision.setCarryShortageQty(Math.max(0, carryShortage));
+        decision.setTodayPlanQty(resolveTodayPlanQty(request.getDailyPlanQuotaMap().get(productionDate)));
         return refreshDayDecision(request, decision, activeMachines);
     }
 
@@ -79,28 +83,65 @@ public final class DailyMachineCapacitySimulationUtil {
             DailyMachineCapacitySimulationRequest request,
             DailyMachineCapacityDayDecision decision,
             int activeMachines) {
-        int demandQty = sumDemandQty(request.getDailyPlanQuotaMap(),
+        int todayRequiredQty = decision.getCarryShortageQty() + decision.getTodayPlanQty();
+        int todayCapacityQty = sumCapacityQty(request, decision.getProductionDate(),
+                decision.getProductionDate(), activeMachines);
+        int demandQty = todayRequiredQty + sumFutureDemandQty(request.getDailyPlanQuotaMap(),
                 decision.getProductionDate(), decision.getLookAheadEndDate());
         int capacityQty = sumCapacityQty(request, decision.getProductionDate(),
                 decision.getLookAheadEndDate(), activeMachines);
+        decision.setTodayRequiredQty(todayRequiredQty);
+        decision.setTodayCapacityQty(todayCapacityQty);
+        decision.setDayShortageQty(Math.max(0, todayRequiredQty - todayCapacityQty));
         decision.setDemandQty(demandQty);
         decision.setCapacityQty(capacityQty);
         decision.setUnmetQty(Math.max(0, demandQty - capacityQty));
         return decision;
     }
 
-    private static int sumDemandQty(Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap,
-                                    LocalDate productionDate,
-                                    LocalDate lookAheadEndDate) {
+    private static int sumFutureDemandQty(Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap,
+                                          LocalDate productionDate,
+                                          LocalDate lookAheadEndDate) {
         int demandQty = 0;
         for (Map.Entry<LocalDate, SkuDailyPlanQuotaDTO> entry : quotaMap.entrySet()) {
-            if (entry.getKey().isBefore(productionDate) || entry.getKey().isAfter(lookAheadEndDate)) {
+            if (!entry.getKey().isAfter(productionDate) || entry.getKey().isAfter(lookAheadEndDate)) {
                 continue;
             }
             SkuDailyPlanQuotaDTO quota = entry.getValue();
-            demandQty += Objects.isNull(quota) ? 0 : Math.max(0, quota.getRemainingQty());
+            demandQty += resolveTodayPlanQty(quota);
         }
         return demandQty;
+    }
+
+    private static int resolveInitialCarryShortage(DailyMachineCapacitySimulationRequest request) {
+        LocalDate firstProductionDate = resolveFirstProductionDate(request);
+        if (Objects.isNull(firstProductionDate)) {
+            return 0;
+        }
+        SkuDailyPlanQuotaDTO quota = request.getDailyPlanQuotaMap().get(firstProductionDate);
+        if (Objects.isNull(quota)) {
+            return 0;
+        }
+        return Math.max(0, quota.getRemainingQty() - Math.max(0, quota.getDayPlanQty()));
+    }
+
+    private static LocalDate resolveFirstProductionDate(DailyMachineCapacitySimulationRequest request) {
+        if (request == null || CollectionUtils.isEmpty(request.getDailyPlanQuotaMap())) {
+            return null;
+        }
+        for (LocalDate productionDate : request.getDailyPlanQuotaMap().keySet()) {
+            if (Objects.nonNull(productionDate) && !isAfterWindowEnd(productionDate, request.getWindowEndDate())) {
+                return productionDate;
+            }
+        }
+        return null;
+    }
+
+    private static int resolveTodayPlanQty(SkuDailyPlanQuotaDTO quota) {
+        if (Objects.isNull(quota)) {
+            return 0;
+        }
+        return Math.max(0, quota.getDayPlanQty());
     }
 
     private static int sumCapacityQty(DailyMachineCapacitySimulationRequest request,

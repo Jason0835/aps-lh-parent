@@ -1552,12 +1552,14 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
             SkuDailyPlanQuotaDTO quota = new SkuDailyPlanQuotaDTO();
             quota.setMaterialCode(sourceQuota.getMaterialCode());
             quota.setProductionDate(sourceQuota.getProductionDate());
-            quota.setDayPlanQty(sourceQuota.getDayPlanQty());
             int remainingQty = Math.max(0, sourceQuota.getRemainingQty());
+            int dayPlanQty = Math.max(0, sourceQuota.getDayPlanQty());
             if (hasTargetLimit) {
                 remainingQty = Math.min(remainingQty, remainingLimitQty);
+                dayPlanQty = Math.min(dayPlanQty, remainingQty);
                 remainingLimitQty -= remainingQty;
             }
+            quota.setDayPlanQty(dayPlanQty);
             quota.setRemainingQty(remainingQty);
             simulationQuotaMap.put(entry.getKey(), quota);
         }
@@ -1714,9 +1716,13 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         }
         for (DailyMachineCapacityDayDecision decision : simulationResult.getDayDecisionList()) {
             log.info("新增SKU dayN机台模拟, materialCode: {}, 当前机台: {}, 日期: {}, 追补截止: {}, "
-                            + "需求: {}, 产能: {}, 启用机台: {}, 新增机台: {}, 未满足: {}, 原因: {}",
+                            + "dayN计划: {}, carryShortage: {}, 当日需求: {}, 当日产能: {}, "
+                            + "当日欠产: {}, 累计需求: {}, 累计产能: {}, 启用机台: {}, 新增机台: {}, "
+                            + "未满足: {}, 原因: {}",
                     sku.getMaterialCode(), segment.getMachineCode(), decision.getProductionDate(),
-                    decision.getLookAheadEndDate(), decision.getDemandQty(), decision.getCapacityQty(),
+                    decision.getLookAheadEndDate(), decision.getTodayPlanQty(), decision.getCarryShortageQty(),
+                    decision.getTodayRequiredQty(), decision.getTodayCapacityQty(), decision.getDayShortageQty(),
+                    decision.getDemandQty(), decision.getCapacityQty(),
                     decision.getActiveMachineCount(), decision.getAddedMachineCount(),
                     decision.getUnmetQty(), decision.getReason());
         }

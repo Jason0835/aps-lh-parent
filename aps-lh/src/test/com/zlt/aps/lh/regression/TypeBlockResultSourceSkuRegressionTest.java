@@ -129,7 +129,8 @@ class TypeBlockResultSourceSkuRegressionTest {
         sku.setMonthPlanQty(pendingQty);
         sku.setWindowPlanQty(pendingQty);
         sku.setPendingQty(pendingQty);
-        sku.setEmbryoStock(1000);
+        sku.setSurplusQty(pendingQty);
+        sku.setEmbryoStock(pendingQty);
         sku.setShiftCapacity(8);
         sku.setLhTimeSeconds(3600);
         sku.setScheduleType("01");
@@ -153,7 +154,8 @@ class TypeBlockResultSourceSkuRegressionTest {
         sku.setMonthPlanQty(pendingQty);
         sku.setWindowPlanQty(pendingQty);
         sku.setPendingQty(pendingQty);
-        sku.setEmbryoStock(1000);
+        sku.setSurplusQty(pendingQty);
+        sku.setEmbryoStock(pendingQty);
         sku.setShiftCapacity(8);
         sku.setLhTimeSeconds(3600);
         sku.setScheduleType("02");

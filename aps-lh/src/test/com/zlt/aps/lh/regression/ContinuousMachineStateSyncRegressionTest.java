@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
@@ -68,7 +69,7 @@ class ContinuousMachineStateSyncRegressionTest {
         context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
 
         Date typeBlockEndTime = dateTime(2026, 4, 23, 18, 48);
-        context.getScheduleResultList().add(buildResult(
+        registerExistingResult(context, buildResult(
                 "M1", "MAT-TB", "03", "1", 120, typeBlockEndTime));
 
         continuousProductionStrategy.scheduleReduceMould(context);
@@ -83,7 +84,7 @@ class ContinuousMachineStateSyncRegressionTest {
         MachineScheduleDTO machine = buildMachine("M1", "MAT-OLD", dateTime(2026, 4, 21, 6, 0));
         context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
         Date typeBlockEndTime = dateTime(2026, 4, 23, 6, 0);
-        context.getScheduleResultList().add(buildResult(
+        registerExistingResult(context, buildResult(
                 "M1", "MAT-TB", "03", "1", 120, typeBlockEndTime));
         continuousProductionStrategy.scheduleReduceMould(context);
 
@@ -110,7 +111,7 @@ class ContinuousMachineStateSyncRegressionTest {
                 });
         when(capacityCalculateStrategy.calculateStartTime(any(), anyString(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
-        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), anyString(), any()))
+        when(mouldChangeBalanceStrategy.allocateMouldChange(any(), anyString(), any(), anyInt()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
         when(inspectionBalanceStrategy.allocateInspection(any(), anyString(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(2));
@@ -132,7 +133,7 @@ class ContinuousMachineStateSyncRegressionTest {
         MachineScheduleDTO machine = buildMachine("M1", "MAT-OLD", dateTime(2026, 4, 21, 6, 0));
         context.getMachineScheduleMap().put(machine.getMachineCode(), machine);
         Date continuousEndTime = dateTime(2026, 4, 23, 20, 0);
-        context.getScheduleResultList().add(buildResult(
+        registerExistingResult(context, buildResult(
                 "M1", "MAT-C1", "01", "0", 100, continuousEndTime));
 
         continuousProductionStrategy.scheduleReduceMould(context);
@@ -183,6 +184,25 @@ class ContinuousMachineStateSyncRegressionTest {
         result.setSpecEndTime(specEndTime);
         result.setTdaySpecEndTime(specEndTime);
         return result;
+    }
+
+    private void registerExistingResult(LhScheduleContext context, LhScheduleResult result) {
+        context.getScheduleResultList().add(result);
+        context.getScheduleResultSourceSkuMap().put(result, buildSourceSku(result.getMaterialCode(), result.getDailyPlanQty()));
+    }
+
+    private SkuScheduleDTO buildSourceSku(String materialCode, int targetQty) {
+        SkuScheduleDTO dto = new SkuScheduleDTO();
+        dto.setMaterialCode(materialCode);
+        dto.setMaterialDesc(materialCode + "-DESC");
+        dto.setPendingQty(targetQty);
+        dto.setSurplusQty(targetQty);
+        dto.setEmbryoStock(targetQty);
+        dto.setTargetScheduleQty(targetQty);
+        dto.setLhTimeSeconds(3600);
+        dto.setShiftCapacity(20);
+        dto.setMouldQty(1);
+        return dto;
     }
 
     private SkuScheduleDTO buildNewSku(String materialCode, String specCode, String proSize) {

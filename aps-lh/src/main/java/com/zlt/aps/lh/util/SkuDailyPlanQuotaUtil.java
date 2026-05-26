@@ -86,12 +86,30 @@ public final class SkuDailyPlanQuotaUtil {
     public static int consumeRollingQuota(Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap,
                                           LocalDate productionDate,
                                           int planQty) {
+        return consumeRollingQuota(quotaMap, productionDate, planQty, null);
+    }
+
+    /**
+     * 按滚动补欠产顺序消费日计划额度，并限制可预占的未来日期。
+     * <p>先消费当前日期及之前未完成额度，再允许预占不晚于追补截止日的后续 dayN 计划量。</p>
+     *
+     * @param quotaMap 日计划额度账本
+     * @param productionDate 实际生产日期
+     * @param planQty 本次计划排产量
+     * @param lookAheadEndDate 允许提前借用的最晚生产日期，null 表示沿用原公共语义
+     * @return 实际消费的额度
+     */
+    public static int consumeRollingQuota(Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap,
+                                          LocalDate productionDate,
+                                          int planQty,
+                                          LocalDate lookAheadEndDate) {
         if (CollectionUtils.isEmpty(quotaMap) || Objects.isNull(productionDate) || planQty <= 0) {
             return 0;
         }
         int consumedQty = consumeQuotaBeforeOrOnDate(quotaMap, productionDate, planQty);
         if (consumedQty < planQty) {
-            consumedQty += consumeQuotaAfterDate(quotaMap, productionDate, planQty - consumedQty);
+            consumedQty += consumeQuotaAfterDate(
+                    quotaMap, productionDate, planQty - consumedQty, lookAheadEndDate);
         }
         SkuDailyPlanQuotaDTO productionQuota = quotaMap.get(productionDate);
         if (Objects.nonNull(productionQuota) && consumedQty > 0) {
@@ -99,6 +117,34 @@ public final class SkuDailyPlanQuotaUtil {
         }
         refreshRollingFields(quotaMap);
         return consumedQty;
+    }
+
+    /**
+     * 解析允许提前借用日计划额度的截止日期。
+     * <p>截止日受追补天数、排程窗口结束日和账本最后日期共同限制。</p>
+     *
+     * @param quotaMap 日计划额度账本
+     * @param productionDate 实际生产日期
+     * @param lookAheadDays 向后观察天数，不含当天
+     * @param windowEndDate 排程窗口结束日期
+     * @return 允许借用的最晚日期
+     */
+    public static LocalDate resolveLookAheadEndDate(Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap,
+                                                    LocalDate productionDate,
+                                                    int lookAheadDays,
+                                                    LocalDate windowEndDate) {
+        if (Objects.isNull(productionDate)) {
+            return null;
+        }
+        LocalDate endDate = productionDate.plusDays(Math.max(0, lookAheadDays));
+        if (Objects.nonNull(windowEndDate) && windowEndDate.isBefore(endDate)) {
+            endDate = windowEndDate;
+        }
+        LocalDate lastQuotaDate = resolveLastQuotaDate(quotaMap);
+        if (Objects.nonNull(lastQuotaDate) && lastQuotaDate.isBefore(endDate)) {
+            endDate = lastQuotaDate;
+        }
+        return endDate;
     }
 
     /**
@@ -151,11 +197,15 @@ public final class SkuDailyPlanQuotaUtil {
 
     private static int consumeQuotaAfterDate(Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap,
                                              LocalDate productionDate,
-                                             int planQty) {
+                                             int planQty,
+                                             LocalDate lookAheadEndDate) {
         int consumedQty = 0;
         SkuDailyPlanQuotaDTO productionQuota = quotaMap.get(productionDate);
         for (Map.Entry<LocalDate, SkuDailyPlanQuotaDTO> entry : quotaMap.entrySet()) {
             if (!entry.getKey().isAfter(productionDate)) {
+                continue;
+            }
+            if (Objects.nonNull(lookAheadEndDate) && entry.getKey().isAfter(lookAheadEndDate)) {
                 continue;
             }
             int consumeQty = consumeSingleQuota(entry.getValue(), planQty - consumedQty);
@@ -168,6 +218,22 @@ public final class SkuDailyPlanQuotaUtil {
             }
         }
         return consumedQty;
+    }
+
+    private static LocalDate resolveLastQuotaDate(Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap) {
+        if (CollectionUtils.isEmpty(quotaMap)) {
+            return null;
+        }
+        LocalDate lastQuotaDate = null;
+        for (LocalDate quotaDate : quotaMap.keySet()) {
+            if (Objects.isNull(quotaDate)) {
+                continue;
+            }
+            if (Objects.isNull(lastQuotaDate) || quotaDate.isAfter(lastQuotaDate)) {
+                lastQuotaDate = quotaDate;
+            }
+        }
+        return lastQuotaDate;
     }
 
     private static int consumeSingleQuota(SkuDailyPlanQuotaDTO quota, int planQty) {

@@ -26,6 +26,7 @@ import com.zlt.aps.lh.engine.strategy.impl.DefaultMachineMatchStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.DefaultMouldChangeBalanceStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.LocalSearchMachineAllocatorStrategy;
 import com.zlt.aps.lh.engine.strategy.impl.NewSpecProductionStrategy;
+import com.zlt.aps.lh.engine.strategy.support.ProductionQuantityPolicy;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
 import com.zlt.aps.lh.util.ShiftFieldUtil;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
@@ -1226,10 +1227,10 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals(1, context.getScheduleResultList().size());
         assertEquals(1, context.getScheduleLogList().size());
         LhScheduleProcessLog processLog = context.getScheduleLogList().get(0);
-        assertEquals("新增排产机台决策", processLog.getTitle());
+        assertEquals("SKU选机台TOP5候选列表", processLog.getTitle());
         assertTrue(processLog.getLogDetail().contains("MAT-1"));
         assertTrue(processLog.getLogDetail().contains("M-TRACE"));
-        assertTrue(processLog.getLogDetail().contains("决策结果=成功"));
+        assertTrue(processLog.getLogDetail().contains("决策结果: 成功"));
     }
 
     @Test
@@ -1751,10 +1752,10 @@ class NewSpecProductionStrategyRegressionTest {
         int candidateTraceLogCount = 0;
         int decisionTraceLogCount = 0;
         for (LhScheduleProcessLog processLog : context.getScheduleLogList()) {
-            if ("新增排产候选机台排序明细".equals(processLog.getTitle())) {
+            if ("机台排序优先级汇总【新增排产选机台】".equals(processLog.getTitle())) {
                 candidateTraceLogCount++;
             }
-            if ("新增排产机台决策".equals(processLog.getTitle())) {
+            if ("SKU选机台TOP5候选列表".equals(processLog.getTitle())) {
                 decisionTraceLogCount++;
             }
         }
@@ -2047,6 +2048,124 @@ class NewSpecProductionStrategyRegressionTest {
         assertEquals(112, result.getDailyPlanQty().intValue(), "正式非收尾单机台应从开产点补满到窗口结束");
         assertEquals(16, ShiftFieldUtil.getShiftPlanQty(result, 8).intValue(), "窗口最后一个班次也应保持整班产量");
         assertEquals(0, context.getUnscheduledResultList().size(), "不应产生未排结果");
+    }
+
+    @Test
+    void scheduleNewSpecs_shouldNotFillEntireWindowForFirstSkuWhenMoreNewSpecsRemain() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 1, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(scheduleDate);
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO firstSku = buildSku();
+        firstSku.setMaterialCode("3302003005");
+        firstSku.setMaterialDesc("多SKU队列首个物料");
+        firstSku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        firstSku.setLhTimeSeconds(3600);
+        firstSku.setShiftCapacity(16);
+        firstSku.setMouldQty(1);
+        firstSku.setPendingQty(14);
+        firstSku.setDailyPlanQty(14);
+        firstSku.setTargetScheduleQty(14);
+        firstSku.setWindowPlanQty(14);
+        firstSku.setSurplusQty(200);
+        firstSku.setEmbryoStock(-1);
+        firstSku.setDailyPlanQuotaMap(buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), firstSku.getMaterialCode(), 14, 0, 0));
+
+        SkuScheduleDTO secondSku = buildSku();
+        secondSku.setMaterialCode("3302003006");
+        secondSku.setMaterialDesc("多SKU队列后续物料");
+        secondSku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        secondSku.setLhTimeSeconds(3600);
+        secondSku.setShiftCapacity(16);
+        secondSku.setMouldQty(1);
+        secondSku.setPendingQty(16);
+        secondSku.setDailyPlanQty(16);
+        secondSku.setTargetScheduleQty(16);
+        secondSku.setWindowPlanQty(16);
+        secondSku.setSurplusQty(200);
+        secondSku.setEmbryoStock(-1);
+        secondSku.setDailyPlanQuotaMap(buildSingleDayQuotaMap(
+                context.getScheduleWindowShifts().get(0), secondSku.getMaterialCode(), 16));
+
+        context.getNewSpecSkuList().add(firstSku);
+        context.getNewSpecSkuList().add(secondSku);
+
+        MachineScheduleDTO k1105 = buildMachine("K1105", dateTime(2026, 5, 1, 6, 0));
+
+        strategy.scheduleNewSpecs(context, singletonMachineMatch(k1105),
+                defaultMouldChangeBalance(), defaultInspectionBalance(), defaultCapacityCalculate());
+
+        assertEquals(2, context.getScheduleResultList().size(), "多SKU队列下，首个SKU不应补满整窗挤掉后续SKU");
+        assertEquals(0, context.getUnscheduledResultList().size(), "同一机台后续班次应继续承接第二个SKU");
+        assertEquals(16, findResultByMaterialCode(context.getScheduleResultList(), "3302003005")
+                .getDailyPlanQty().intValue(), "首个SKU只应补满已开班次，不应直接吃满整个窗口");
+        assertEquals(16, findResultByMaterialCode(context.getScheduleResultList(), "3302003006")
+                .getDailyPlanQty().intValue(), "后续SKU应保留窗口产能并正常落机");
+    }
+
+    @Test
+    void buildSimulationCandidateCapacityMap_shouldRespectCandidateReadyTimeDifference() throws Exception {
+        NewSpecProductionStrategy strategy = new NewSpecProductionStrategy();
+        injectDependencies(strategy, false);
+
+        LhScheduleContext context = buildContext();
+        Date scheduleDate = dateTime(2026, 5, 1, 0, 0);
+        context.setScheduleDate(scheduleDate);
+        context.setScheduleTargetDate(dateTime(2026, 5, 3, 0, 0));
+        context.setScheduleWindowShifts(LhScheduleTimeUtil.buildDefaultScheduleShifts(context, scheduleDate));
+
+        SkuScheduleDTO sku = buildSku();
+        sku.setMaterialCode("3302003007");
+        sku.setMaterialDesc("异构候选机台dayN模拟");
+        sku.setConstructionStage(ConstructionStageEnum.FORMAL.getCode());
+        sku.setLhTimeSeconds(3600);
+        sku.setShiftCapacity(17);
+        sku.setMouldQty(1);
+        sku.setPendingQty(180);
+        sku.setDailyPlanQty(180);
+        sku.setTargetScheduleQty(180);
+        sku.setWindowPlanQty(180);
+        sku.setWindowRemainingPlanQty(180);
+        sku.setSurplusQty(300);
+        sku.setEmbryoStock(-1);
+        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = buildThreeDayQuotaMap(
+                context.getScheduleWindowShifts(), sku.getMaterialCode(), 60, 60, 60);
+
+        MachineScheduleDTO earlyMachine = buildMachine("M-EARLY", dateTime(2026, 5, 1, 6, 0));
+        MachineScheduleDTO lateMachine = buildMachine("M-LATE", dateTime(2026, 5, 2, 22, 0));
+
+        Method method = NewSpecProductionStrategy.class.getDeclaredMethod(
+                "buildSimulationCandidateCapacityMap",
+                LhScheduleContext.class,
+                SkuScheduleDTO.class,
+                MachineScheduleDTO.class,
+                ProductionQuantityPolicy.class,
+                List.class,
+                ICapacityCalculateStrategy.class,
+                Map.class);
+        method.setAccessible(true);
+
+        @SuppressWarnings("unchecked")
+        Map<LocalDate, Integer> earlyCapacityMap = (Map<LocalDate, Integer>) method.invoke(
+                strategy, context, sku, earlyMachine, ProductionQuantityPolicy.from(sku, false),
+                context.getScheduleWindowShifts(), defaultCapacityCalculate(), quotaMap);
+        @SuppressWarnings("unchecked")
+        Map<LocalDate, Integer> lateCapacityMap = (Map<LocalDate, Integer>) method.invoke(
+                strategy, context, sku, lateMachine, ProductionQuantityPolicy.from(sku, false),
+                context.getScheduleWindowShifts(), defaultCapacityCalculate(), quotaMap);
+
+        LocalDate firstDay = toLocalDate(context.getScheduleWindowShifts().get(0));
+        assertFalse(earlyCapacityMap.equals(lateCapacityMap), "不同机台就绪时间不应复用同一份dayN产能图");
+        assertTrue(earlyCapacityMap.get(firstDay) > lateCapacityMap.get(firstDay),
+                "早开机台在首日的可排产能应高于晚开机台");
+        assertTrue(sumCapacityMap(earlyCapacityMap) > sumCapacityMap(lateCapacityMap),
+                "早开机台在整个窗口内的累计产能应高于晚开机台");
     }
 
     @Test
@@ -2886,6 +3005,14 @@ class NewSpecProductionStrategyRegressionTest {
         return quota;
     }
 
+    private int sumCapacityMap(Map<LocalDate, Integer> capacityMap) {
+        int totalQty = 0;
+        for (Integer qty : capacityMap.values()) {
+            totalQty += qty == null ? 0 : qty;
+        }
+        return totalQty;
+    }
+
     private LocalDate toLocalDate(LhShiftConfigVO shift) {
         return shift.getWorkDate().toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate();
     }
@@ -2944,6 +3071,8 @@ class NewSpecProductionStrategyRegressionTest {
         sku.setPendingQty(1);
         sku.setDailyPlanQty(1);
         sku.setTargetScheduleQty(1);
+        sku.setSurplusQty(1);
+        sku.setEmbryoStock(1);
         sku.setScheduleOrder(scheduleOrder);
         return sku;
     }

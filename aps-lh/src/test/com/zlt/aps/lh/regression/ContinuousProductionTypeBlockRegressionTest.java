@@ -185,6 +185,55 @@ class ContinuousProductionTypeBlockRegressionTest {
     }
 
     @Test
+    void scheduleTypeBlockChange_shouldExpandMachinesWhenSingleTypeBlockMachineCannotCoverDemand() {
+        LhScheduleContext context = newContext();
+        MachineScheduleDTO machine1 = buildMachine("M1", "MAT-C1");
+        MachineScheduleDTO machine2 = buildMachine("M2", "MAT-C2");
+        machine1.setEnding(true);
+        machine2.setEnding(true);
+        context.getMachineScheduleMap().put("M1", machine1);
+        context.getMachineScheduleMap().put("M2", machine2);
+        context.getContinuousSkuList().add(buildContinuousSku(
+                "MAT-C1", "M1", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
+        context.getContinuousSkuList().add(buildContinuousSku(
+                "MAT-C2", "M2", "EMB-1", "STRUCT-A", "SPEC-B", "PAT-A", 1));
+        SkuScheduleDTO newSku = buildNewSku("MAT-T1", "EMB-1", "STRUCT-A", "SPEC-T", "PAT-A", 80);
+        newSku.setSurplusQty(80);
+        context.getNewSpecSkuList().add(newSku);
+        putMaterialInfo(context, "MAT-C1", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-C2", "胎胚描述-A", "SPEC-B", "PAT-A", "PAT-A");
+        putMaterialInfo(context, "MAT-T1", "胎胚描述-A", "SPEC-T", "PAT-A", "PAT-A");
+        putMouldRel(context, "MAT-C1", "MOULD-1");
+        putMouldRel(context, "MAT-C2", "MOULD-1");
+        putMouldRel(context, "MAT-T1", "MOULD-1");
+
+        when(orderNoGenerator.generateOrderNo(any())).thenReturn("ORD-1", "ORD-2", "ORD-3");
+        when(endingJudgmentStrategy.isEnding(any(), any())).thenReturn(false);
+
+        typeBlockProductionStrategy.scheduleTypeBlockChange(context);
+
+        List<LhScheduleResult> typeBlockResults = context.getScheduleResultList().stream()
+                .filter(result -> "MAT-T1".equals(result.getMaterialCode()))
+                .collect(java.util.stream.Collectors.toList());
+        assertEquals(2, typeBlockResults.size(), "单台换活字块产能不足时应继续扩到第二台机台");
+        assertEquals("03", typeBlockResults.get(0).getScheduleType());
+        assertEquals("1", typeBlockResults.get(0).getIsTypeBlock());
+        assertEquals("03", typeBlockResults.get(1).getScheduleType());
+        assertEquals("1", typeBlockResults.get(1).getIsTypeBlock());
+        assertEquals(80, typeBlockResults.stream()
+                        .map(LhScheduleResult::getDailyPlanQty)
+                        .mapToInt(Integer::intValue)
+                        .sum(),
+                "多机台换活字块合计排产量不能超过同一SKU目标量");
+        assertTrue(context.getNewSpecSkuList().stream()
+                        .noneMatch(sku -> "MAT-T1".equals(sku.getMaterialCode())),
+                "多机台满足后 SKU 应从新增待排队列移除");
+        assertTrue(context.getUnscheduledResultList().stream()
+                        .noneMatch(result -> "MAT-T1".equals(result.getMaterialCode())),
+                "两台合计满足目标时不应提前生成未排结果");
+    }
+
+    @Test
     void scheduleTypeBlockChange_shouldContinueSameMachineChainWhenStillEnding() {
         LhScheduleContext context = newContext();
         context.setScheduleDate(date(2026, 4, 24));
@@ -388,9 +437,9 @@ class ContinuousProductionTypeBlockRegressionTest {
         context.getMachineScheduleMap().put("K1105", buildMachine("K1105", "3302001585"));
         context.getContinuousSkuList().add(buildContinuousSku(
                 "3302001585", "K1105", "EMB-1", "STRUCT-A", "SPEC-A", "PAT-A", 1));
-        context.getNewSpecSkuList().add(buildNewSku("3302002654", "EMB-1", "STRUCT-B", "SPEC-A", "PAT-B", 4));
+        context.getNewSpecSkuList().add(buildNewSku("3302002654", "EMB-1", "STRUCT-B", "SPEC-B", "PAT-B", 4));
         putMaterialInfo(context, "3302001585", "胎胚描述-A", "SPEC-A", "PAT-A", "PAT-A");
-        putMaterialInfo(context, "3302002654", "胎胚描述-B", "SPEC-A", "PAT-B", "PAT-B");
+        putMaterialInfo(context, "3302002654", "胎胚描述-B", "SPEC-B", "PAT-B", "PAT-B");
         putMouldRel(context, "3302001585", "MOULD-OLD");
         putMouldRel(context, "3302002654", "MOULD-NEW");
 
@@ -1612,6 +1661,8 @@ class ContinuousProductionTypeBlockRegressionTest {
         sku.setMonthPlanQty(pendingQty);
         sku.setWindowPlanQty(pendingQty);
         sku.setPendingQty(pendingQty);
+        sku.setSurplusQty(pendingQty);
+        sku.setEmbryoStock(pendingQty);
         sku.setShiftCapacity(8);
         sku.setLhTimeSeconds(3600);
         sku.setScheduleType("01");
@@ -1635,6 +1686,8 @@ class ContinuousProductionTypeBlockRegressionTest {
         sku.setMonthPlanQty(pendingQty);
         sku.setWindowPlanQty(pendingQty);
         sku.setPendingQty(pendingQty);
+        sku.setSurplusQty(pendingQty);
+        sku.setEmbryoStock(pendingQty);
         sku.setShiftCapacity(8);
         sku.setLhTimeSeconds(3600);
         sku.setScheduleType("02");

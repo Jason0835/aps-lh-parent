@@ -71,6 +71,26 @@ class SkuDailyPlanQuotaUtilRegressionTest {
         assertEquals(0, quotaMap.get(day2).getRemainingQty());
     }
 
+    @Test
+    void consumeRollingQuota_shouldNotBorrowBeyondLookAheadEndDate() {
+        LocalDate day1 = LocalDate.of(2026, 5, 3);
+        LocalDate day2 = LocalDate.of(2026, 5, 4);
+        LocalDate day3 = LocalDate.of(2026, 5, 5);
+        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = new LinkedHashMap<>(4);
+        quotaMap.put(day1, quota("3302001724", day1, 20));
+        quotaMap.put(day2, quota("3302001724", day2, 20));
+        quotaMap.put(day3, quota("3302001724", day3, 20));
+
+        int consumedQty = SkuDailyPlanQuotaUtil.consumeRollingQuota(quotaMap, day1, 50, day2);
+
+        assertEquals(40, consumedQty, "受限消费只能消耗 day1 和追补截止日 day2 以内的额度");
+        assertEquals(20, quotaMap.get(day1).getScheduledQty());
+        assertEquals(20, quotaMap.get(day1).getFutureBorrowQty());
+        assertEquals(20, quotaMap.get(day2).getScheduledQty());
+        assertEquals(20, quotaMap.get(day3).getRemainingQty(), "day3 超出追补截止日，不允许被提前借用");
+        assertEquals(20, quotaMap.get(day3).getFinalLossQty());
+    }
+
     private SkuDailyPlanQuotaDTO quota(String materialCode, LocalDate productionDate, int dayPlanQty) {
         SkuDailyPlanQuotaDTO quota = new SkuDailyPlanQuotaDTO();
         quota.setMaterialCode(materialCode);

@@ -1,0 +1,86 @@
+package com.zlt.aps.lh.regression;
+
+import com.zlt.aps.lh.api.domain.dto.SkuDailyPlanQuotaDTO;
+import com.zlt.aps.lh.engine.strategy.support.DailyMachineCapacitySimulationRequest;
+import com.zlt.aps.lh.engine.strategy.support.DailyMachineCapacitySimulationResult;
+import com.zlt.aps.lh.engine.strategy.support.DailyMachineCapacitySimulationUtil;
+import org.junit.jupiter.api.Test;
+
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+/**
+ * dayN 机台产能模拟回归。
+ */
+class DailyMachineCapacitySimulationUtilRegressionTest {
+
+    @Test
+    void simulateExpansion_shouldAddMachineByMinimumIncrementAndKeepActiveMachines() {
+        LocalDate day1 = LocalDate.of(2026, 5, 3);
+        LocalDate day2 = LocalDate.of(2026, 5, 4);
+        LocalDate day3 = LocalDate.of(2026, 5, 5);
+        DailyMachineCapacitySimulationRequest request = new DailyMachineCapacitySimulationRequest();
+        request.setMaterialCode("3302002177");
+        request.setDailyPlanQuotaMap(quotaMap(day1, day2, day3, 20, 20, 20));
+        request.setMachineDailyCapacityList(machineCapacityList(day1, day2, day3, 10, 10, 10, 3));
+        request.setInitialActiveMachines(1);
+        request.setShortageLookAheadDays(2);
+        request.setWindowEndDate(day3);
+        request.setSceneType("newSpec");
+
+        DailyMachineCapacitySimulationResult result =
+                DailyMachineCapacitySimulationUtil.simulateExpansion(request);
+
+        assertEquals(2, result.getFinalActiveMachines(), "day1-day3 一台追不回时只应新增一台");
+        assertEquals(1, result.getTotalAddedMachineCount());
+        assertEquals(0, result.getTotalUnmetQty());
+        assertEquals(2, result.getDayDecisionList().get(1).getActiveMachineCount(),
+                "day1 新增后的 activeMachines 应继续计入 day2/day3");
+    }
+
+    private Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap(LocalDate day1,
+                                                          LocalDate day2,
+                                                          LocalDate day3,
+                                                          int day1Qty,
+                                                          int day2Qty,
+                                                          int day3Qty) {
+        Map<LocalDate, SkuDailyPlanQuotaDTO> quotaMap = new LinkedHashMap<LocalDate, SkuDailyPlanQuotaDTO>(4);
+        quotaMap.put(day1, quota(day1, day1Qty));
+        quotaMap.put(day2, quota(day2, day2Qty));
+        quotaMap.put(day3, quota(day3, day3Qty));
+        return quotaMap;
+    }
+
+    private SkuDailyPlanQuotaDTO quota(LocalDate productionDate, int dayPlanQty) {
+        SkuDailyPlanQuotaDTO quota = new SkuDailyPlanQuotaDTO();
+        quota.setMaterialCode("3302002177");
+        quota.setProductionDate(productionDate);
+        quota.setDayPlanQty(dayPlanQty);
+        quota.setRemainingQty(dayPlanQty);
+        return quota;
+    }
+
+    private List<Map<LocalDate, Integer>> machineCapacityList(LocalDate day1,
+                                                              LocalDate day2,
+                                                              LocalDate day3,
+                                                              int day1Capacity,
+                                                              int day2Capacity,
+                                                              int day3Capacity,
+                                                              int machineCount) {
+        List<Map<LocalDate, Integer>> capacityList =
+                new ArrayList<Map<LocalDate, Integer>>(machineCount);
+        for (int index = 0; index < machineCount; index++) {
+            Map<LocalDate, Integer> capacityMap = new LinkedHashMap<LocalDate, Integer>(4);
+            capacityMap.put(day1, day1Capacity);
+            capacityMap.put(day2, day2Capacity);
+            capacityMap.put(day3, day3Capacity);
+            capacityList.add(capacityMap);
+        }
+        return capacityList;
+    }
+}

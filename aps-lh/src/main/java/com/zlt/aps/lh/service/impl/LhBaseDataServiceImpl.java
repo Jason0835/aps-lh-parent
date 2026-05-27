@@ -1248,6 +1248,7 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                         .eq(MdmSkuConstructionRef::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
         Map<String, MdmSkuConstructionRef> refMap = new HashMap<>(256);
         Map<String, MdmSkuConstructionRef> compositeKeyMap = new HashMap<>(256);
+        Map<String, String> lhNoTrialStatusMap = new HashMap<>(256);
         if (refList != null) {
             for (MdmSkuConstructionRef ref : refList) {
                 if (StringUtils.isNotEmpty(ref.getMaterialCode())) {
@@ -1255,12 +1256,18 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                     refMap.put(ref.getMaterialCode(), ref);
                     // 按物料编码 + 产品状态（复合key，完整保留所有记录），供校验器精确查找
                     compositeKeyMap.put(ref.getMaterialCode() + "::" + ref.getTrialStatus(), ref);
+                    // 按物料编码 + 硫化示方书号（复合key），供排程结果设置产品状态
+                    if (StringUtils.isNotEmpty(ref.getLhNo())) {
+                        lhNoTrialStatusMap.put(ref.getMaterialCode() + "::" + ref.getLhNo(), ref.getTrialStatus());
+                    }
                 }
             }
         }
         context.setSkuConstructionRefMap(refMap);
         context.setSkuConstructionRefCompositeKeyMap(compositeKeyMap);
-        log.debug("SKU与示方书关系加载完成, 数量: {}, 复合Key数量: {}", refMap.size(), compositeKeyMap.size());
+        context.setSkuLhNoTrialStatusMap(lhNoTrialStatusMap);
+        log.debug("SKU与示方书关系加载完成, 数量: {}, 复合Key数量: {}, lhNo复合Key数量: {}",
+                refMap.size(), compositeKeyMap.size(), lhNoTrialStatusMap.size());
     }
 
     /**

@@ -2921,9 +2921,13 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setIsChangeMould("1");
         result.setIsTypeBlock("0");
         result.setConstructionStage(sku.getConstructionStage());
-        // 设置产品状态（取自月计划productStatus）
-        result.setTrialStatus(sku.getProductStatus());
-        result.setChangedTrialStatus(sku.getProductStatus());
+        // 设置产品状态（通过物料编码+硫化示方书号查询SKU与示方书关系）
+        String trialStatus = null;
+        if (StringUtils.isNotEmpty(sku.getLhNo())) {
+            trialStatus = context.getSkuLhNoTrialStatusMap().get(sku.getMaterialCode() + "::" + sku.getLhNo());
+        }
+        result.setTrialStatus(trialStatus);
+        result.setChangedTrialStatus(trialStatus);
         result.setEmbryoNo(sku.getEmbryoNo());
         result.setTextNo(sku.getTextNo());
         result.setLhNo(sku.getLhNo());

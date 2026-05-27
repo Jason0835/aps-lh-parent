@@ -2037,9 +2037,13 @@ public class TypeBlockProductionStrategy implements ITypeBlockProductionStrategy
         result.setScheduleType(ScheduleTypeEnum.TYPE_BLOCK.getCode());
         result.setIsTypeBlock(YES_FLAG);
         result.setConstructionStage(sku.getConstructionStage());
-        // 设置产品状态（取自月计划productStatus）
-        result.setTrialStatus(sku.getProductStatus());
-        result.setChangedTrialStatus(sku.getProductStatus());
+        // 设置产品状态（通过物料编码+硫化示方书号查询SKU与示方书关系）
+        String trialStatus = null;
+        if (StringUtils.isNotEmpty(sku.getLhNo())) {
+            trialStatus = context.getSkuLhNoTrialStatusMap().get(sku.getMaterialCode() + "::" + sku.getLhNo());
+        }
+        result.setTrialStatus(trialStatus);
+        result.setChangedTrialStatus(trialStatus);
         result.setEmbryoNo(sku.getEmbryoNo());
         result.setTextNo(sku.getTextNo());
         result.setLhNo(sku.getLhNo());

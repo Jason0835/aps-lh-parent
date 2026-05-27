@@ -146,9 +146,6 @@ public class SkuScheduleDTO {
     /** 硫化示方书号 */
     private String lhNo;
 
-    /** 产品状态（取自月计划），X-试验/T-量试/S-正规 */
-    private String productStatus;
-
     /**
      * 解析本轮排产目标量。
      * <p>主流程优先使用显式写入的新口径，旧测试/旧构造场景未赋值时回退到待排量口径。</p>

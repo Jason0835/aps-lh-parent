@@ -15,6 +15,7 @@ import com.zlt.aps.lh.api.enums.ConstructionStageEnum;
 import com.zlt.aps.lh.api.enums.LhSpecialMaterialCategoryEnum;
 import com.zlt.aps.lh.engine.strategy.IMachineMatchStrategy;
 import com.zlt.aps.lh.util.LhMachineHardMatchUtil;
+import com.zlt.aps.lh.util.ShiftProductionControlUtil;
 import com.zlt.aps.lh.util.LhSingleControlMachineUtil;
 import com.zlt.aps.lh.util.LhSpecialMaterialUtil;
 import com.zlt.aps.lh.util.LhSpecifyMachineUtil;
@@ -25,6 +26,7 @@ import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmModelInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmSkuMouldRel;
+import com.zlt.aps.lh.api.domain.dto.ShiftProductionControlDTO;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
@@ -34,6 +36,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -687,6 +690,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
     private Comparator<MachineScheduleDTO> buildMachineComparator(LhScheduleContext context,
                                                                   SkuScheduleDTO sku,
                                                                   SpecialMaterialMatchResult matchResult) {
+        Map<String, CandidateWindowProfile> profileCache = new HashMap<>(16);
         return (left, right) -> {
             int compareResult = compareLimitSpecifyPriority(context, sku, left, right);
             if (compareResult != 0) {
@@ -694,6 +698,34 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
             }
 
             compareResult = compareSingleControlPriority(context, sku, left, right);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+
+            CandidateWindowProfile leftProfile = resolveCandidateWindowProfile(context, sku, left, profileCache);
+            CandidateWindowProfile rightProfile = resolveCandidateWindowProfile(context, sku, right, profileCache);
+
+            compareResult = compareOtherSkuOccupancy(leftProfile, rightProfile);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+
+            compareResult = compareEarliestProductionShift(leftProfile, rightProfile);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+
+            compareResult = compareContinuousSchedulableShifts(leftProfile, rightProfile);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+
+            compareResult = compareTotalSchedulableShifts(leftProfile, rightProfile);
+            if (compareResult != 0) {
+                return compareResult;
+            }
+
+            compareResult = compareTailFragmentPriority(leftProfile, rightProfile);
             if (compareResult != 0) {
                 return compareResult;
             }
@@ -945,6 +977,46 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
     }
 
     /**
+     * 优先选择未被其他SKU占用的机台。
+     */
+    private int compareOtherSkuOccupancy(CandidateWindowProfile leftProfile, CandidateWindowProfile rightProfile) {
+        return Integer.compare(leftProfile.getOtherSkuOccupiedScore(), rightProfile.getOtherSkuOccupiedScore());
+    }
+
+    /**
+     * 优先选择更早进入可开产班次的机台。
+     */
+    private int compareEarliestProductionShift(CandidateWindowProfile leftProfile, CandidateWindowProfile rightProfile) {
+        return Integer.compare(leftProfile.getFirstProductionShiftIndex(), rightProfile.getFirstProductionShiftIndex());
+    }
+
+    /**
+     * 优先选择连续可生产班次数更多的机台。
+     */
+    private int compareContinuousSchedulableShifts(CandidateWindowProfile leftProfile,
+                                                   CandidateWindowProfile rightProfile) {
+        return Integer.compare(rightProfile.getContinuousSchedulableShiftCount(),
+                leftProfile.getContinuousSchedulableShiftCount());
+    }
+
+    /**
+     * 优先选择窗口内总可生产班次数更多的机台。
+     */
+    private int compareTotalSchedulableShifts(CandidateWindowProfile leftProfile,
+                                              CandidateWindowProfile rightProfile) {
+        return Integer.compare(rightProfile.getTotalSchedulableShiftCount(),
+                leftProfile.getTotalSchedulableShiftCount());
+    }
+
+    /**
+     * 优先选择不是尾部零散产能的机台。
+     */
+    private int compareTailFragmentPriority(CandidateWindowProfile leftProfile,
+                                            CandidateWindowProfile rightProfile) {
+        return Integer.compare(leftProfile.getTailFragmentScore(), rightProfile.getTailFragmentScore());
+    }
+
+    /**
      * 解析规格完全一致得分。
      *
      * @param sku 待排SKU
@@ -1054,6 +1126,150 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
     }
 
     /**
+     * 解析候选机台的真实生产窗口画像，用于多机台扩机排序与日志。
+     */
+    private CandidateWindowProfile resolveCandidateWindowProfile(LhScheduleContext context,
+                                                                 SkuScheduleDTO sku,
+                                                                 MachineScheduleDTO machine,
+                                                                 Map<String, CandidateWindowProfile> profileCache) {
+        if (machine == null || StringUtils.isEmpty(machine.getMachineCode())) {
+            return CandidateWindowProfile.empty();
+        }
+        CandidateWindowProfile cachedProfile = profileCache.get(machine.getMachineCode());
+        if (cachedProfile != null) {
+            return cachedProfile;
+        }
+        CandidateWindowProfile profile = new CandidateWindowProfile();
+        Date referenceTime = resolveCandidateReferenceTime(context, machine);
+        profile.setReferenceTime(referenceTime);
+        boolean hitNoMouldChange = referenceTime != null
+                && LhScheduleTimeUtil.isNoMouldChangeTime(context, referenceTime);
+        profile.setHitNoMouldChange(hitNoMouldChange);
+        Date switchStartTime = resolveCandidateSwitchStartTime(context, referenceTime);
+        profile.setSwitchStartTime(switchStartTime);
+        profile.setProductionStartTime(resolveCandidateProductionStartTime(context, switchStartTime));
+        profile.setOtherSkuOccupiedScore(resolveOtherSkuOccupiedScore(context, sku, machine));
+        fillSchedulableShiftMetrics(context, sku, profile);
+        profileCache.put(machine.getMachineCode(), profile);
+        return profile;
+    }
+
+    /**
+     * 解析候选机台可发起换模的最早时间。
+     */
+    private Date resolveCandidateSwitchStartTime(LhScheduleContext context, Date referenceTime) {
+        if (referenceTime == null) {
+            return null;
+        }
+        if (LhScheduleTimeUtil.isNoMouldChangeTime(context, referenceTime)) {
+            return LhScheduleTimeUtil.resolveNextMorningAfterNoMouldChangeWindow(context, referenceTime);
+        }
+        return referenceTime;
+    }
+
+    /**
+     * 解析候选机台的最早开产时间。
+     */
+    private Date resolveCandidateProductionStartTime(LhScheduleContext context, Date switchStartTime) {
+        if (switchStartTime == null) {
+            return null;
+        }
+        return LhScheduleTimeUtil.addHours(switchStartTime, LhScheduleTimeUtil.getMouldChangeTotalHours(context));
+    }
+
+    /**
+     * 计算候选机台的可生产班次画像。
+     */
+    private void fillSchedulableShiftMetrics(LhScheduleContext context,
+                                             SkuScheduleDTO sku,
+                                             CandidateWindowProfile profile) {
+        if (context == null || profile == null || profile.getProductionStartTime() == null
+                || CollectionUtils.isEmpty(context.getScheduleWindowShifts())) {
+            profile.setFirstProductionShiftIndex(LhScheduleConstant.MAX_SHIFT_SLOT_COUNT + 1);
+            return;
+        }
+        int firstShiftIndex = LhScheduleConstant.MAX_SHIFT_SLOT_COUNT + 1;
+        int continuousShiftCount = 0;
+        int totalShiftCount = 0;
+        Integer previousShiftIndex = null;
+        boolean continuousBroken = false;
+        for (LhShiftConfigVO shift : context.getScheduleWindowShifts()) {
+            if (shift == null || shift.getShiftIndex() == null
+                    || shift.getShiftEndDateTime() == null
+                    || !profile.getProductionStartTime().before(shift.getShiftEndDateTime())) {
+                continue;
+            }
+            ShiftProductionControlDTO control = ShiftProductionControlUtil.resolveEffectiveControl(
+                    context, shift, profile.getProductionStartTime());
+            if (control == null || !control.isCanSchedule()) {
+                if (previousShiftIndex != null) {
+                    continuousBroken = true;
+                }
+                continue;
+            }
+            totalShiftCount++;
+            if (firstShiftIndex > LhScheduleConstant.MAX_SHIFT_SLOT_COUNT) {
+                firstShiftIndex = shift.getShiftIndex();
+                continuousShiftCount = 1;
+                previousShiftIndex = shift.getShiftIndex();
+                continue;
+            }
+            if (!continuousBroken && previousShiftIndex != null
+                    && shift.getShiftIndex() == previousShiftIndex + 1) {
+                continuousShiftCount++;
+                previousShiftIndex = shift.getShiftIndex();
+                continue;
+            }
+            continuousBroken = true;
+            previousShiftIndex = shift.getShiftIndex();
+        }
+        profile.setFirstProductionShiftIndex(firstShiftIndex);
+        profile.setContinuousSchedulableShiftCount(continuousShiftCount);
+        profile.setTotalSchedulableShiftCount(totalShiftCount);
+        int shiftCapacity = sku != null && sku.getShiftCapacity() > 0 ? sku.getShiftCapacity() : 1;
+        profile.setAvailableCapacityQty(totalShiftCount * shiftCapacity);
+        profile.setTailFragmentScore(isTailFragmentProfile(profile) ? 1 : 0);
+    }
+
+    /**
+     * 判断候选机台是否只剩尾部零散产能。
+     */
+    private boolean isTailFragmentProfile(CandidateWindowProfile profile) {
+        if (profile == null || profile.getTotalSchedulableShiftCount() <= 0) {
+            return true;
+        }
+        return profile.getTotalSchedulableShiftCount() <= 2
+                || profile.getFirstProductionShiftIndex() >= LhScheduleConstant.MAX_SHIFT_SLOT_COUNT - 2;
+    }
+
+    /**
+     * 解析机台是否已经被其他SKU占用。
+     */
+    private int resolveOtherSkuOccupiedScore(LhScheduleContext context,
+                                             SkuScheduleDTO sku,
+                                             MachineScheduleDTO machine) {
+        if (context == null || machine == null || CollectionUtils.isEmpty(context.getMachineAssignmentMap())) {
+            return 0;
+        }
+        List<LhScheduleResult> assignedResults = context.getMachineAssignmentMap().get(machine.getMachineCode());
+        if (CollectionUtils.isEmpty(assignedResults)) {
+            return 0;
+        }
+        for (LhScheduleResult assignedResult : assignedResults) {
+            if (assignedResult == null) {
+                return 1;
+            }
+            if (sku == null || StringUtils.isEmpty(sku.getMaterialCode())) {
+                return 1;
+            }
+            if (!StringUtils.equals(sku.getMaterialCode(), assignedResult.getMaterialCode())) {
+                return 1;
+            }
+        }
+        return 0;
+    }
+
+    /**
      * 统一清洗文本字段，兼容空格和脏数据。
      *
      * @param value 原始值
@@ -1117,6 +1333,7 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         if (!PriorityTraceLogHelper.isEnabled(context)) {
             return;
         }
+        Map<String, CandidateWindowProfile> profileCache = new HashMap<>(Math.max(4, PriorityTraceLogHelper.sizeOf(candidates) * 2));
         String title = "机台排序优先级汇总【新增排产选机台】";
         StringBuilder detailBuilder = new StringBuilder(1024);
         PriorityTraceLogHelper.appendTitleHeader(detailBuilder, title);
@@ -1159,10 +1376,12 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         int topCount = Math.min(topN, PriorityTraceLogHelper.sizeOf(candidates));
         PriorityTraceLogHelper.appendLine(detailBuilder, "TOP" + topCount + "候选排序:");
         List<String> levelNames = java.util.Arrays.asList(
-                "L1_定点机台", "L2_单控拆分", "L3_普通机台优先", "L4_特殊支持能力数量", "L5_收尾时间",
-                "L6_同规格", "L7_同英寸", "L8_英寸接近度", "L9_胶囊共用", "L10_胎胚共用");
+                "L1_定点机台", "L2_单控拆分", "L3_其他SKU占用", "L4_最早可开产班次", "L5_连续可生产班次",
+                "L6_可用总产能", "L7_尾部零散产能", "L8_普通机台优先", "L9_特殊支持能力数量", "L10_收尾时间",
+                "L11_同规格", "L12_同英寸", "L13_英寸接近度", "L14_胶囊共用", "L15_胎胚共用");
         for (int i = 0; i < topCount; i++) {
             MachineScheduleDTO machine = candidates.get(i);
+            CandidateWindowProfile profile = resolveCandidateWindowProfile(context, sku, machine, profileCache);
             int specifyScore = resolveLimitSpecifyScore(context, sku, machine);
             int singleCtrlScore = resolveSingleControlScore(context, sku, machine);
             int normalMachineScore = resolveNormalMachinePriorityValue(matchResult, machine);
@@ -1182,17 +1401,27 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
             List<String> sortKeyLevels = java.util.Arrays.asList(
                     "L1_定点机台=" + (specifyScore == 0 ? 1 : 0),
                     "L2_单控拆分=" + (isSingleControlMachine(context, machine.getMachineCode()) ? 1 : 0),
-                    "L3_普通机台优先=" + (normalMachineScore == 0 ? 1 : 0),
-                    "L4_特殊支持能力数量=" + specialSupportCapabilityCount,
-                    "L5_收尾时间=" + PriorityTraceLogHelper.formatDateTime(machine.getEstimatedEndTime()),
-                    "L6_同规格=" + (specMatchScore == 0 ? 1 : 0),
-                    "L7_同英寸=" + (proSizeMatchScore == 0 ? 1 : 0),
-                    "L8_英寸接近度=" + formatInchDistance(inchDistance),
-                    "L9_胶囊共用=" + (capsuleScore == 0 ? 1 : 0),
-                    "L10_胎胚共用=" + embryoShareCount);
+                    "L3_其他SKU占用=" + profile.getOtherSkuOccupiedScore(),
+                    "L4_最早可开产班次=" + profile.getFirstProductionShiftIndex(),
+                    "L5_连续可生产班次=" + profile.getContinuousSchedulableShiftCount(),
+                    "L6_可用总产能=" + profile.getAvailableCapacityQty(),
+                    "L7_尾部零散产能=" + profile.getTailFragmentScore(),
+                    "L8_普通机台优先=" + (normalMachineScore == 0 ? 1 : 0),
+                    "L9_特殊支持能力数量=" + specialSupportCapabilityCount,
+                    "L10_收尾时间=" + PriorityTraceLogHelper.formatDateTime(machine.getEstimatedEndTime()),
+                    "L11_同规格=" + (specMatchScore == 0 ? 1 : 0),
+                    "L12_同英寸=" + (proSizeMatchScore == 0 ? 1 : 0),
+                    "L13_英寸接近度=" + formatInchDistance(inchDistance),
+                    "L14_胶囊共用=" + (capsuleScore == 0 ? 1 : 0),
+                    "L15_胎胚共用=" + embryoShareCount);
             List<Integer> scores = java.util.Arrays.asList(
                     specifyScore,
                     singleCtrlScore,
+                    profile.getOtherSkuOccupiedScore(),
+                    profile.getFirstProductionShiftIndex(),
+                    profile.getContinuousSchedulableShiftCount(),
+                    profile.getAvailableCapacityQty(),
+                    profile.getTailFragmentScore(),
                     normalMachineScore,
                     specialSupportCapabilityCount,
                     resolveEndingTimeScore(machine),
@@ -1201,7 +1430,8 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                     safeInchDistanceScore(inchDistance),
                     capsuleScore,
                     embryoShareCount);
-            List<Integer> defaultScores = java.util.Arrays.asList(1, 1, 0, 0, 0, 1, 1, 0, 1, 0);
+            List<Integer> defaultScores = java.util.Arrays.asList(1, 1, 0, 0, 0,
+                    LhScheduleConstant.MAX_SHIFT_SLOT_COUNT + 1, 0, 0, 1, 0, 1, 1, 0, 1, 0);
             String sortKey = PriorityTraceLogHelper.formatSortKey(sortKeyLevels);
             String hitLevel = PriorityTraceLogHelper.resolveHitLevel(levelNames, scores, defaultScores);
 
@@ -1230,6 +1460,15 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
                             + ", " + PriorityTraceLogHelper.kv("机台适用模套型号", machine.getShellStandard())
                             + ", " + PriorityTraceLogHelper.kv("特殊材料匹配", PriorityTraceLogHelper.oneZero(specialMatched))
                             + ", " + PriorityTraceLogHelper.kv("当前在机", machine.getPreviousMaterialCode())
+                            + ", " + PriorityTraceLogHelper.kv("最早换模时间", PriorityTraceLogHelper.formatDateTime(profile.getSwitchStartTime()))
+                            + ", " + PriorityTraceLogHelper.kv("最早可开产时间", PriorityTraceLogHelper.formatDateTime(profile.getProductionStartTime()))
+                            + ", " + PriorityTraceLogHelper.kv("最早可开产班次", profile.getFirstProductionShiftIndex())
+                            + ", " + PriorityTraceLogHelper.kv("连续可生产班次数", profile.getContinuousSchedulableShiftCount())
+                            + ", " + PriorityTraceLogHelper.kv("可用总产能", profile.getAvailableCapacityQty())
+                            + ", " + PriorityTraceLogHelper.kv("被其他SKU占用", PriorityTraceLogHelper.oneZero(profile.getOtherSkuOccupiedScore() > 0))
+                            + ", " + PriorityTraceLogHelper.kv("尾部零散产能", PriorityTraceLogHelper.oneZero(profile.getTailFragmentScore() > 0))
+                            + ", " + PriorityTraceLogHelper.kv("需要换模", "1")
+                            + ", " + PriorityTraceLogHelper.kv("命中晚班不能换模", PriorityTraceLogHelper.oneZero(profile.isHitNoMouldChange()))
                             + ", " + PriorityTraceLogHelper.kv("收尾时间", PriorityTraceLogHelper.formatDateTime(machine.getEstimatedEndTime()))
                             + ", " + PriorityTraceLogHelper.kv("同规格", PriorityTraceLogHelper.oneZero(specMatchScore == 0))
                             + ", " + PriorityTraceLogHelper.kv("同英寸", PriorityTraceLogHelper.oneZero(proSizeMatchScore == 0))
@@ -1269,6 +1508,8 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
     private String resolveMachineSelectReason(LhScheduleContext context, SkuScheduleDTO sku,
                                               SpecialMaterialMatchResult matchResult,
                                               MachineScheduleDTO machine) {
+        CandidateWindowProfile profile = resolveCandidateWindowProfile(
+                context, sku, machine, new HashMap<String, CandidateWindowProfile>(4));
         List<String> reasons = new ArrayList<>(4);
         if (resolveLimitSpecifyScore(context, sku, machine) == 0) {
             reasons.add("定点机台优先");
@@ -1285,6 +1526,18 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
         }
         if (resolveCapsuleAffinityScore(context, sku, machine) == 0) {
             reasons.add("胶囊共用");
+        }
+        if (profile.getOtherSkuOccupiedScore() == 0) {
+            reasons.add("未被其他SKU占用");
+        }
+        if (profile.getContinuousSchedulableShiftCount() > 0) {
+            reasons.add("连续可生产班次更多");
+        }
+        if (profile.getTailFragmentScore() == 0) {
+            reasons.add("非尾部零散产能");
+        }
+        if (profile.isHitNoMouldChange()) {
+            reasons.add("规避晚班不能换模窗口");
         }
         if (Objects.nonNull(matchResult) && !matchResult.isSpecial()
                 && !LhMachineHardMatchUtil.isNormalMachine(machine)) {
@@ -1402,6 +1655,116 @@ public class DefaultMachineMatchStrategy implements IMachineMatchStrategy {
      */
     private static int resolveEndingTimeScore(MachineScheduleDTO machine) {
         return machine != null && machine.getEstimatedEndTime() != null ? 1 : 0;
+    }
+
+    /**
+     * 候选机台生产窗口画像。
+     */
+    private static class CandidateWindowProfile {
+        /** 参考收尾时间 */
+        private Date referenceTime;
+        /** 最早可换模时间 */
+        private Date switchStartTime;
+        /** 最早可开产时间 */
+        private Date productionStartTime;
+        /** 最早可开产班次 */
+        private int firstProductionShiftIndex = LhScheduleConstant.MAX_SHIFT_SLOT_COUNT + 1;
+        /** 连续可生产班次数 */
+        private int continuousSchedulableShiftCount;
+        /** 总可生产班次数 */
+        private int totalSchedulableShiftCount;
+        /** 可用总产能 */
+        private int availableCapacityQty;
+        /** 被其他SKU占用得分，0=未占用，1=已占用 */
+        private int otherSkuOccupiedScore;
+        /** 尾部零散产能得分，0=否，1=是 */
+        private int tailFragmentScore;
+        /** 是否命中晚班不能换模 */
+        private boolean hitNoMouldChange;
+
+        private static CandidateWindowProfile empty() {
+            return new CandidateWindowProfile();
+        }
+
+        private Date getReferenceTime() {
+            return referenceTime;
+        }
+
+        private void setReferenceTime(Date referenceTime) {
+            this.referenceTime = referenceTime;
+        }
+
+        private Date getSwitchStartTime() {
+            return switchStartTime;
+        }
+
+        private void setSwitchStartTime(Date switchStartTime) {
+            this.switchStartTime = switchStartTime;
+        }
+
+        private Date getProductionStartTime() {
+            return productionStartTime;
+        }
+
+        private void setProductionStartTime(Date productionStartTime) {
+            this.productionStartTime = productionStartTime;
+        }
+
+        private int getFirstProductionShiftIndex() {
+            return firstProductionShiftIndex;
+        }
+
+        private void setFirstProductionShiftIndex(int firstProductionShiftIndex) {
+            this.firstProductionShiftIndex = firstProductionShiftIndex;
+        }
+
+        private int getContinuousSchedulableShiftCount() {
+            return continuousSchedulableShiftCount;
+        }
+
+        private void setContinuousSchedulableShiftCount(int continuousSchedulableShiftCount) {
+            this.continuousSchedulableShiftCount = continuousSchedulableShiftCount;
+        }
+
+        private int getTotalSchedulableShiftCount() {
+            return totalSchedulableShiftCount;
+        }
+
+        private void setTotalSchedulableShiftCount(int totalSchedulableShiftCount) {
+            this.totalSchedulableShiftCount = totalSchedulableShiftCount;
+        }
+
+        private int getAvailableCapacityQty() {
+            return availableCapacityQty;
+        }
+
+        private void setAvailableCapacityQty(int availableCapacityQty) {
+            this.availableCapacityQty = availableCapacityQty;
+        }
+
+        private int getOtherSkuOccupiedScore() {
+            return otherSkuOccupiedScore;
+        }
+
+        private void setOtherSkuOccupiedScore(int otherSkuOccupiedScore) {
+            this.otherSkuOccupiedScore = otherSkuOccupiedScore;
+        }
+
+        private int getTailFragmentScore() {
+            return tailFragmentScore;
+        }
+
+        private void setTailFragmentScore(int tailFragmentScore) {
+            this.tailFragmentScore = tailFragmentScore;
+        }
+
+        private boolean isHitNoMouldChange() {
+            return hitNoMouldChange;
+        }
+
+        private void setHitNoMouldChange(boolean hitNoMouldChange) {
+            this.hitNoMouldChange = hitNoMouldChange;
+        }
     }
 
     /**

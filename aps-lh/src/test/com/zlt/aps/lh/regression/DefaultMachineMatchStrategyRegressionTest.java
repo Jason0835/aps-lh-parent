@@ -543,6 +543,68 @@ class DefaultMachineMatchStrategyRegressionTest {
     }
 
     @Test
+    void matchMachines_shouldPreferMachineThatCanStartBeforeNoMouldChangeWindowBoundary() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO nextDayMachine = machine("A-NEXT-DAY", dateTime(2026, 4, 21, 20, 5),
+                "SPEC-A", "22.5", "MAT-NEXT");
+        MachineScheduleDTO sameDayMachine = machine("Z-SAME-DAY", dateTime(2026, 4, 21, 19, 50),
+                "SPEC-A", "22.5", "MAT-SAME");
+        context.getMachineScheduleMap().put(nextDayMachine.getMachineCode(), nextDayMachine);
+        context.getMachineScheduleMap().put(sameDayMachine.getMachineCode(), sameDayMachine);
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku("MAT-1", "SPEC-A", "22.5"));
+
+        assertEquals(2, candidates.size());
+        assertEquals("Z-SAME-DAY", candidates.get(0).getMachineCode(),
+                "20:00 禁换模边界内应优先仍可当天开产、连续班次更多的机台，而不是被容差掩盖后顺序回退");
+    }
+
+    @Test
+    void matchMachines_shouldPreferUnusedMachineOverOtherSkuOccupiedMachine() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO occupiedMachine = machine("A-OCCUPIED", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-OCC");
+        MachineScheduleDTO cleanMachine = machine("Z-CLEAN", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-CLEAN");
+        context.getMachineScheduleMap().put(occupiedMachine.getMachineCode(), occupiedMachine);
+        context.getMachineScheduleMap().put(cleanMachine.getMachineCode(), cleanMachine);
+        context.getMachineAssignmentMap().put("A-OCCUPIED", Collections.singletonList(
+                new com.zlt.aps.lh.api.domain.entity.LhScheduleResult()));
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku("MAT-1", "SPEC-A", "22.5"));
+
+        assertEquals(2, candidates.size());
+        assertEquals("Z-CLEAN", candidates.get(0).getMachineCode(),
+                "多机台扩机时应优先未被其他SKU占用的机台，其他SKU排剩的尾部机台只能兜底");
+    }
+
+    @Test
+    void matchMachines_shouldPreferUnusedEarlySpecialMachineOverOccupiedTailNormalMachine() {
+        DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
+        LhScheduleContext context = buildContext();
+
+        MachineScheduleDTO occupiedTailNormalMachine = machine("A-NORMAL-TAIL", dateTime(2026, 4, 21, 20, 5),
+                "SPEC-A", "22.5", "MAT-OCC");
+        MachineScheduleDTO cleanEarlySpecialMachine = machine("Z-SPECIAL-EARLY", dateTime(2026, 4, 21, 8, 0),
+                "SPEC-A", "22.5", "MAT-CLEAN");
+        cleanEarlySpecialMachine.setSupport195WideBase("1");
+        context.getMachineScheduleMap().put(occupiedTailNormalMachine.getMachineCode(), occupiedTailNormalMachine);
+        context.getMachineScheduleMap().put(cleanEarlySpecialMachine.getMachineCode(), cleanEarlySpecialMachine);
+        context.getMachineAssignmentMap().put("A-NORMAL-TAIL", Collections.singletonList(
+                new com.zlt.aps.lh.api.domain.entity.LhScheduleResult()));
+
+        List<MachineScheduleDTO> candidates = strategy.matchMachines(context, sku("MAT-1", "SPEC-A", "22.5"));
+
+        assertEquals(2, candidates.size());
+        assertEquals("Z-SPECIAL-EARLY", candidates.get(0).getMachineCode(),
+                "普通机台只剩尾部零散产能且被其他SKU占用时，应让未占用且更早可开产的特殊机台前置");
+    }
+
+    @Test
     void matchMachines_shouldPreferSpecMatchWhenEndingTimeWithinTolerance() {
         DefaultMachineMatchStrategy strategy = new DefaultMachineMatchStrategy();
         LhScheduleContext context = buildContext();

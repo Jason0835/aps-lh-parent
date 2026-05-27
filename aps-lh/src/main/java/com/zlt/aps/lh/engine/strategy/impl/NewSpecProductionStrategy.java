@@ -55,7 +55,6 @@ import com.zlt.aps.lh.util.SkuDailyPlanQuotaUtil;
 import com.zlt.aps.lh.util.MachineStatusUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
-import com.zlt.aps.mdm.api.domain.entity.MdmSkuConstructionRef;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
@@ -1403,8 +1402,16 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         boolean needAddMachineByDailyCapacity = requiredMachineCountByDailyCapacity > 1;
         if (!needAddMachineByTotal && !needAddMachineByDailyCapacity) {
             if (policy.isAllowFillStartedShift()) {
+                log.info("新增SKU尾机台进入非收尾补满判定, materialCode: {}, machineCode: {}, "
+                                + "remainingTargetQty: {}, defaultPlanQty: {}, maxQtyToWindowEnd: {}, role: {}",
+                        sku.getMaterialCode(), segment.getMachineCode(), remainingTargetQty,
+                        defaultPlanQty, segment.getMaxQtyToWindowEnd(), segment.getRole());
                 return resolveSettledTailMachinePlanQty(segment, remainingTargetQty, defaultPlanQty);
             }
+            log.info("新增SKU当前班次因严格目标量达标停止扩量, materialCode: {}, machineCode: {}, "
+                            + "remainingTargetQty: {}, maxQtyToWindowEnd: {}, role: {}",
+                    sku.getMaterialCode(), segment.getMachineCode(), remainingTargetQty,
+                    segment.getMaxQtyToWindowEnd(), segment.getRole());
             return Math.min(remainingTargetQty, segment.getMaxQtyToWindowEnd());
         }
         if (availableMachineCount <= 1) {
@@ -1444,6 +1451,13 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         }
         int roundedRemainingQty = roundUpToShiftCapacity(remainingTargetQty, segment.getShiftCapacity());
         if (roundedRemainingQty <= 0 || roundedRemainingQty >= defaultPlanQty) {
+            return defaultPlanQty;
+        }
+        if (defaultPlanQty >= segment.getMaxQtyToWindowEnd()) {
+            log.info("新增SKU尾机台保持整段补满, materialCode: {}, machineCode: {}, "
+                            + "remainingTargetQty: {}, roundedRemainingQty: {}, defaultPlanQty: {}, maxQtyToWindowEnd: {}",
+                    segment.getMaterialCode(), segment.getMachineCode(), remainingTargetQty,
+                    roundedRemainingQty, defaultPlanQty, segment.getMaxQtyToWindowEnd());
             return defaultPlanQty;
         }
         return Math.min(roundedRemainingQty, segment.getMaxQtyToWindowEnd());
@@ -2906,10 +2920,9 @@ public class NewSpecProductionStrategy implements IProductionStrategy {
         result.setIsChangeMould("1");
         result.setIsTypeBlock("0");
         result.setConstructionStage(sku.getConstructionStage());
-        // 设置产品状态（取自SKU与示方书关系的硫化示方书类型）
-        MdmSkuConstructionRef constructionRef = context.getSkuConstructionRefMap().get(sku.getMaterialCode());
-        result.setTrialStatus(constructionRef != null ? constructionRef.getLhType() : null);
-        result.setChangedTrialStatus(constructionRef != null ? constructionRef.getLhType() : null);
+        // 设置产品状态（取自月计划productStatus）
+        result.setTrialStatus(sku.getProductStatus());
+        result.setChangedTrialStatus(sku.getProductStatus());
         result.setEmbryoNo(sku.getEmbryoNo());
         result.setTextNo(sku.getTextNo());
         result.setLhNo(sku.getLhNo());

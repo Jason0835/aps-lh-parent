@@ -44,6 +44,7 @@ import com.zlt.aps.lh.util.SkuDailyPlanQuotaUtil;
 import com.zlt.aps.lh.component.OrderNoGenerator;
 import com.zlt.aps.mdm.api.domain.entity.MdmMaterialInfo;
 import com.zlt.aps.mdm.api.domain.entity.MdmDevicePlanShut;
+import com.zlt.aps.mdm.api.domain.entity.MdmSkuConstructionRef;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
@@ -2268,16 +2269,42 @@ public class ContinuousProductionStrategy implements IProductionStrategy {
         result.setScheduleType(sku.getScheduleType() != null ? sku.getScheduleType() : "01");
         result.setIsTypeBlock("0");
         result.setConstructionStage(sku.getConstructionStage());
-        // 设置产品状态（通过物料编码+硫化示方书号查询SKU与示方书关系）
-        String trialStatus = null;
-        if (StringUtils.isNotEmpty(sku.getLhNo())) {
-            trialStatus = context.getSkuLhNoTrialStatusMap().get(sku.getMaterialCode() + "::" + sku.getLhNo());
+        // 产品状态从月计划获取
+        result.setProductStatus(sku.getProductStatus());
+
+        // 通过物料编码+产品状态查询SKU与示方书关系获取硫化示方类型和硫化示方书号
+        String lhNo = null;
+        String lhType = null;
+        if (StringUtils.isNotEmpty(sku.getProductStatus())) {
+            MdmSkuConstructionRef constructionRef = context.getSkuConstructionRefCompositeKeyMap()
+                    .get(sku.getMaterialCode() + "::" + sku.getProductStatus());
+            if (constructionRef != null) {
+                lhNo = constructionRef.getLhNo();
+                lhType = constructionRef.getLhType();
+            }
         }
-        result.setTrialStatus(trialStatus);
-        result.setChangedTrialStatus(trialStatus);
+        // 设置1-8班硫化示方书号和硫化示方书类型
+        result.setClass1LhNo(lhNo);
+        result.setClass1LhType(lhType);
+        result.setClass2LhNo(lhNo);
+        result.setClass2LhType(lhType);
+        result.setClass3LhNo(lhNo);
+        result.setClass3LhType(lhType);
+        result.setClass4LhNo(lhNo);
+        result.setClass4LhType(lhType);
+        result.setClass5LhNo(lhNo);
+        result.setClass5LhType(lhType);
+        result.setClass6LhNo(lhNo);
+        result.setClass6LhType(lhType);
+        result.setClass7LhNo(lhNo);
+        result.setClass7LhType(lhType);
+        result.setClass8LhNo(lhNo);
+        result.setClass8LhType(lhType);
+        // 硫化示方书号回写
+        result.setLhNo(lhNo != null ? lhNo : sku.getLhNo());
+        result.setChangedTrialStatus(lhType);
         result.setEmbryoNo(sku.getEmbryoNo());
         result.setTextNo(sku.getTextNo());
-        result.setLhNo(sku.getLhNo());
         result.setMonthPlanVersion(sku.getMonthPlanVersion());
         result.setProductionVersion(sku.getProductionVersion());
         result.setIsTrial(sku.isTrial() ? "1" : "0");

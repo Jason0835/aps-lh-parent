@@ -20,6 +20,10 @@ import java.util.Objects;
 @Slf4j
 public final class ShiftFieldUtil {
 
+    private static final int SHIFT_END_NORMAL = 0;
+
+    private static final int SHIFT_END_MARK = 1;
+
     private ShiftFieldUtil() {
     }
 
@@ -139,6 +143,106 @@ public final class ShiftFieldUtil {
     }
 
     /**
+     * 设置班次收尾标记。
+     *
+     * @param result 排程结果
+     * @param shiftIndex 班次索引
+     * @param isEnd 是否收尾，1-收尾，其他按0处理
+     */
+    public static void setShiftIsEnd(LhScheduleResult result, int shiftIndex, Integer isEnd) {
+        if (Objects.isNull(result)) {
+            return;
+        }
+        if (!isValidIndex(shiftIndex)) {
+            log.warn("未知班次索引: {}", shiftIndex);
+            return;
+        }
+        BeanUtil.setProperty(result, propertyPrefix(shiftIndex) + "IsEnd", normalizeShiftEndFlag(isEnd));
+    }
+
+    /**
+     * 获取班次收尾标记。
+     *
+     * @param result 排程结果
+     * @param shiftIndex 班次索引
+     * @return 1-收尾，其他返回0，越界返回 null
+     */
+    public static Integer getShiftIsEnd(LhScheduleResult result, int shiftIndex) {
+        if (Objects.isNull(result) || !isValidIndex(shiftIndex)) {
+            return null;
+        }
+        return normalizeShiftEndFlag(toInteger(BeanUtil.getProperty(result, propertyPrefix(shiftIndex) + "IsEnd")));
+    }
+
+    /**
+     * 重置全部班次收尾标记为正常。
+     *
+     * @param result 排程结果
+     */
+    public static void resetShiftIsEndFields(LhScheduleResult result) {
+        if (Objects.isNull(result)) {
+            return;
+        }
+        for (int shiftIndex = 1; shiftIndex <= LhScheduleConstant.MAX_SHIFT_SLOT_COUNT; shiftIndex++) {
+            setShiftIsEnd(result, shiftIndex, SHIFT_END_NORMAL);
+        }
+    }
+
+    /**
+     * 根据结果行最后一个有计划量的班次设置收尾标记。
+     *
+     * @param result 排程结果
+     * @param endMachine 是否收尾机台
+     * @return 最后有计划量的班次索引，未找到返回 -1
+     */
+    public static int applyLastPlannedShiftEndMark(LhScheduleResult result, boolean endMachine) {
+        resetShiftIsEndFields(result);
+        int lastPlannedShiftIndex = resolveLastPlannedShiftIndex(result);
+        if (endMachine && lastPlannedShiftIndex > 0) {
+            setShiftIsEnd(result, lastPlannedShiftIndex, SHIFT_END_MARK);
+        }
+        return lastPlannedShiftIndex;
+    }
+
+    /**
+     * 获取最后一个有计划量的班次索引。
+     *
+     * @param result 排程结果
+     * @return 班次索引，未找到返回 -1
+     */
+    public static int resolveLastPlannedShiftIndex(LhScheduleResult result) {
+        if (Objects.isNull(result)) {
+            return -1;
+        }
+        for (int shiftIndex = LhScheduleConstant.MAX_SHIFT_SLOT_COUNT; shiftIndex >= 1; shiftIndex--) {
+            Integer planQty = getShiftPlanQty(result, shiftIndex);
+            if (Objects.nonNull(planQty) && planQty > 0) {
+                return shiftIndex;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 格式化1-8班收尾标记，便于日志核对。
+     *
+     * @param result 排程结果
+     * @return class1IsEnd~class8IsEnd摘要
+     */
+    public static String buildShiftIsEndSummary(LhScheduleResult result) {
+        StringBuilder builder = new StringBuilder(128);
+        for (int shiftIndex = 1; shiftIndex <= LhScheduleConstant.MAX_SHIFT_SLOT_COUNT; shiftIndex++) {
+            if (shiftIndex > 1) {
+                builder.append(",");
+            }
+            Integer shiftIsEnd = getShiftIsEnd(result, shiftIndex);
+            builder.append("class").append(shiftIndex).append("IsEnd=")
+                    .append(Objects.isNull(shiftIsEnd) ? SHIFT_END_NORMAL : shiftIsEnd);
+        }
+        return builder.toString();
+    }
+
+    /**
      * 设置班次原因分析。
      *
      * @param result 排程结果
@@ -179,6 +283,10 @@ public final class ShiftFieldUtil {
             return ((Number) v).intValue();
         }
         return null;
+    }
+
+    private static int normalizeShiftEndFlag(Integer isEnd) {
+        return Objects.nonNull(isEnd) && SHIFT_END_MARK == isEnd ? SHIFT_END_MARK : SHIFT_END_NORMAL;
     }
 
     /**

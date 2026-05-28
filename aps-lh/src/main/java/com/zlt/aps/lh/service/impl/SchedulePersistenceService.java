@@ -1,6 +1,9 @@
 package com.zlt.aps.lh.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.zlt.aps.lh.api.constant.LhScheduleConstant;
+import com.zlt.aps.lh.api.domain.dto.MachineScheduleDTO;
+import com.zlt.aps.lh.api.domain.dto.SkuScheduleDTO;
 import com.zlt.aps.lh.api.domain.entity.LhMouldChangePlan;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleProcessLog;
 import com.zlt.aps.lh.api.domain.entity.LhScheduleResult;
@@ -16,15 +19,22 @@ import com.zlt.aps.lh.mapper.LhScheduleResultMapper;
 import com.zlt.aps.lh.mapper.LhUnscheduledResultMapper;
 import com.zlt.aps.lh.service.ILhScheduleResultService;
 import com.zlt.aps.lh.util.LhScheduleTimeUtil;
+import com.zlt.aps.lh.util.ShiftFieldUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.CollectionUtils;
 
 import javax.annotation.Resource;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Date;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -41,6 +51,12 @@ import java.util.stream.Collectors;
 public class SchedulePersistenceService {
 
     private static final String DEFAULT_OPERATOR = "system";
+
+    private static final String YES_FLAG = "1";
+
+    private static final String NO_FLAG = "0";
+
+    private static final String CONTINUOUS_SCHEDULE_TYPE = "01";
 
     @Resource
     private LhScheduleResultMapper scheduleResultMapper;
@@ -112,8 +128,9 @@ public class SchedulePersistenceService {
         }
 
         if (!context.getScheduleResultList().isEmpty()) {
-            // 为排程结果补齐审计字段
+            // 为排程结果补齐审计字段和班次收尾标记
             fillScheduleResultAuditInfo(context, context.getScheduleResultList());
+            fillClassEndFlags(context, context.getScheduleResultList());
             scheduleResultMapper.insertBatch(context.getScheduleResultList());
         }
         if (!context.getUnscheduledResultList().isEmpty()) {
@@ -156,6 +173,260 @@ public class SchedulePersistenceService {
                 scheduleResult.setUpdateBy(operator);
             }
         }
+    }
+
+    /**
+     * 保存前统一计算1-8班收尾标记。
+     *
+     * @param context 排程上下文
+     * @param scheduleResults 排程结果列表
+     */
+    private void fillClassEndFlags(LhScheduleContext context, List<LhScheduleResult> scheduleResults) {
+        if (CollectionUtils.isEmpty(scheduleResults)) {
+            return;
+        }
+        List<List<LhScheduleResult>> resultGroups = buildClassEndResultGroups(context, scheduleResults);
+        for (List<LhScheduleResult> resultGroup : resultGroups) {
+            fillClassEndFlagsForGroup(context, resultGroup);
+        }
+    }
+
+    /**
+     * 构建班次收尾标记分组。
+     * <p>优先使用运行态来源SKU映射，保证同物料不同账本结果不串组；缺少来源SKU时按排程类型和物料编码分组。</p>
+     *
+     * @param context 排程上下文
+     * @param scheduleResults 排程结果列表
+     * @return 分组后的排程结果
+     */
+    private List<List<LhScheduleResult>> buildClassEndResultGroups(LhScheduleContext context,
+                                                                   List<LhScheduleResult> scheduleResults) {
+        List<List<LhScheduleResult>> resultGroups = new ArrayList<>(scheduleResults.size());
+        Map<String, IdentityHashMap<SkuScheduleDTO, List<LhScheduleResult>>> sourceSkuGroupMap =
+                new LinkedHashMap<>(8);
+        Map<String, List<LhScheduleResult>> resultFieldGroupMap = new LinkedHashMap<>(16);
+        Map<LhScheduleResult, SkuScheduleDTO> sourceSkuMap = Objects.nonNull(context)
+                ? context.getScheduleResultSourceSkuMap() : null;
+        for (LhScheduleResult result : scheduleResults) {
+            if (Objects.isNull(result)) {
+                continue;
+            }
+            SkuScheduleDTO sourceSku = Objects.nonNull(sourceSkuMap) ? sourceSkuMap.get(result) : null;
+            if (Objects.nonNull(sourceSku)) {
+                String phaseKey = buildClassEndPhaseKey(result);
+                IdentityHashMap<SkuScheduleDTO, List<LhScheduleResult>> phaseGroupMap =
+                        sourceSkuGroupMap.computeIfAbsent(phaseKey, key -> new IdentityHashMap<SkuScheduleDTO, List<LhScheduleResult>>(8));
+                List<LhScheduleResult> group = phaseGroupMap.get(sourceSku);
+                if (Objects.isNull(group)) {
+                    group = new ArrayList<>(2);
+                    phaseGroupMap.put(sourceSku, group);
+                }
+                group.add(result);
+                continue;
+            }
+            if (StringUtils.isEmpty(result.getMaterialCode())) {
+                List<LhScheduleResult> singleResultGroup = new ArrayList<>(1);
+                singleResultGroup.add(result);
+                resultGroups.add(singleResultGroup);
+                continue;
+            }
+            String resultFieldKey = buildClassEndPhaseKey(result) + "#" + result.getMaterialCode();
+            resultFieldGroupMap.computeIfAbsent(resultFieldKey, key -> new ArrayList<LhScheduleResult>(2))
+                    .add(result);
+        }
+        for (IdentityHashMap<SkuScheduleDTO, List<LhScheduleResult>> phaseGroupMap : sourceSkuGroupMap.values()) {
+            resultGroups.addAll(phaseGroupMap.values());
+        }
+        resultGroups.addAll(resultFieldGroupMap.values());
+        return resultGroups;
+    }
+
+    /**
+     * 按同SKU结果分组计算班次收尾标记。
+     *
+     * @param resultGroup 同SKU结果分组
+     */
+    private void fillClassEndFlagsForGroup(LhScheduleContext context, List<LhScheduleResult> resultGroup) {
+        if (CollectionUtils.isEmpty(resultGroup)) {
+            return;
+        }
+        List<LhScheduleResult> plannedResults = resolvePlannedResults(resultGroup);
+        boolean multiMachine = countDistinctMachine(plannedResults) > 1;
+        boolean skuEnding = containsSkuEnding(plannedResults);
+        LhScheduleResult primaryResult = multiMachine ? resolvePrimaryResult(context, plannedResults) : null;
+        for (LhScheduleResult result : resultGroup) {
+            if (Objects.isNull(result)) {
+                continue;
+            }
+            boolean hasPlanQty = ShiftFieldUtil.resolveScheduledQty(result) > 0;
+            boolean auxiliaryMachine = hasPlanQty && multiMachine && Objects.nonNull(primaryResult)
+                    && !StringUtils.equals(result.getLhMachineCode(), primaryResult.getLhMachineCode());
+            boolean endingMachine = hasPlanQty && (skuEnding || auxiliaryMachine);
+            int lastPlannedShift = ShiftFieldUtil.applyLastPlannedShiftEndMark(result, endingMachine);
+            log.info("排程结果班次收尾标记, SKU: {}, 机台: {}, 是否多机台: {}, SKU是否收尾: {}, "
+                            + "是否收尾机台: {}, 是否辅助机台: {}, 最后有计划量班次: {}, {}",
+                    result.getMaterialCode(), result.getLhMachineCode(), oneZero(multiMachine), oneZero(skuEnding),
+                    oneZero(endingMachine), oneZero(auxiliaryMachine),
+                    lastPlannedShift > 0 ? lastPlannedShift : 0, ShiftFieldUtil.buildShiftIsEndSummary(result));
+        }
+    }
+
+    /**
+     * 获取有计划量的结果。
+     *
+     * @param resultGroup 同SKU结果分组
+     * @return 有计划量的结果
+     */
+    private List<LhScheduleResult> resolvePlannedResults(List<LhScheduleResult> resultGroup) {
+        List<LhScheduleResult> plannedResults = new ArrayList<>(resultGroup.size());
+        for (LhScheduleResult result : resultGroup) {
+            if (Objects.nonNull(result) && ShiftFieldUtil.resolveScheduledQty(result) > 0) {
+                plannedResults.add(result);
+            }
+        }
+        return plannedResults;
+    }
+
+    /**
+     * 统计参与排产的机台数量。
+     *
+     * @param plannedResults 有计划量的结果
+     * @return 机台数量
+     */
+    private int countDistinctMachine(List<LhScheduleResult> plannedResults) {
+        if (CollectionUtils.isEmpty(plannedResults)) {
+            return 0;
+        }
+        Set<String> machineCodes = new LinkedHashSet<>(plannedResults.size());
+        for (LhScheduleResult result : plannedResults) {
+            if (Objects.nonNull(result) && StringUtils.isNotEmpty(result.getLhMachineCode())) {
+                machineCodes.add(result.getLhMachineCode());
+            }
+        }
+        return machineCodes.size();
+    }
+
+    /**
+     * 判断当前SKU是否已按既有逻辑标记收尾。
+     *
+     * @param plannedResults 有计划量的结果
+     * @return true-收尾；false-非收尾
+     */
+    private boolean containsSkuEnding(List<LhScheduleResult> plannedResults) {
+        if (CollectionUtils.isEmpty(plannedResults)) {
+            return false;
+        }
+        for (LhScheduleResult result : plannedResults) {
+            if (Objects.nonNull(result) && StringUtils.equals(YES_FLAG, result.getIsEnd())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 解析同SKU多机台主机台。
+     * <p>口径与新增同SKU多机台收口一致：优先更早开产，其次排产量更大，最后按机台号稳定排序。</p>
+     *
+     * @param plannedResults 有计划量的结果
+     * @return 主机台结果
+     */
+    private LhScheduleResult resolvePrimaryResult(LhScheduleContext context, List<LhScheduleResult> plannedResults) {
+        if (CollectionUtils.isEmpty(plannedResults)) {
+            return null;
+        }
+        List<LhScheduleResult> sortedResults = new ArrayList<>(plannedResults);
+        if (isContinuousResultGroup(plannedResults)) {
+            sortedResults.sort(Comparator
+                    .comparingInt((LhScheduleResult result) -> -resolveCapsuleUsageCount(context, result))
+                    .thenComparing(result -> StringUtils.defaultString(result.getLhMachineCode())));
+            return sortedResults.get(0);
+        }
+        sortedResults.sort(Comparator
+                .comparingInt((LhScheduleResult result) -> {
+                    int firstShiftIndex = resolveFirstPlannedShiftIndex(result);
+                    return firstShiftIndex > 0 ? firstShiftIndex : Integer.MAX_VALUE;
+                })
+                .thenComparing((LhScheduleResult left, LhScheduleResult right) ->
+                        Integer.compare(ShiftFieldUtil.resolveScheduledQty(right),
+                                ShiftFieldUtil.resolveScheduledQty(left)))
+                .thenComparing(result -> StringUtils.defaultString(result.getLhMachineCode())));
+        return sortedResults.get(0);
+    }
+
+    /**
+     * 判断是否为续作结果分组。
+     *
+     * @param plannedResults 有计划量的结果
+     * @return true-续作结果；false-非续作结果
+     */
+    private boolean isContinuousResultGroup(List<LhScheduleResult> plannedResults) {
+        if (CollectionUtils.isEmpty(plannedResults)) {
+            return false;
+        }
+        for (LhScheduleResult result : plannedResults) {
+            if (Objects.isNull(result) || !StringUtils.equals(CONTINUOUS_SCHEDULE_TYPE, result.getScheduleType())
+                    || StringUtils.equals(YES_FLAG, result.getIsTypeBlock())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 解析机台胶囊使用次数。
+     *
+     * @param context 排程上下文
+     * @param result 排程结果
+     * @return 胶囊使用次数
+     */
+    private int resolveCapsuleUsageCount(LhScheduleContext context, LhScheduleResult result) {
+        if (Objects.isNull(context) || Objects.isNull(result) || StringUtils.isEmpty(result.getLhMachineCode())
+                || CollectionUtils.isEmpty(context.getMachineScheduleMap())) {
+            return 0;
+        }
+        MachineScheduleDTO machine = context.getMachineScheduleMap().get(result.getLhMachineCode());
+        return Objects.nonNull(machine) ? machine.getCapsuleUsageCount() : 0;
+    }
+
+    /**
+     * 获取首个有计划量的班次索引。
+     *
+     * @param result 排程结果
+     * @return 班次索引，未找到返回 -1
+     */
+    private int resolveFirstPlannedShiftIndex(LhScheduleResult result) {
+        if (Objects.isNull(result)) {
+            return -1;
+        }
+        for (int shiftIndex = 1; shiftIndex <= LhScheduleConstant.MAX_SHIFT_SLOT_COUNT; shiftIndex++) {
+            Integer planQty = ShiftFieldUtil.getShiftPlanQty(result, shiftIndex);
+            if (Objects.nonNull(planQty) && planQty > 0) {
+                return shiftIndex;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * 构建班次收尾分组的排产阶段键。
+     *
+     * @param result 排程结果
+     * @return 排产阶段键
+     */
+    private String buildClassEndPhaseKey(LhScheduleResult result) {
+        return StringUtils.defaultString(result.getScheduleType()) + "#"
+                + StringUtils.defaultString(result.getIsTypeBlock());
+    }
+
+    /**
+     * 格式化布尔值为业务标识。
+     *
+     * @param value 布尔值
+     * @return 1-是，0-否
+     */
+    private String oneZero(boolean value) {
+        return value ? YES_FLAG : NO_FLAG;
     }
 
     /**

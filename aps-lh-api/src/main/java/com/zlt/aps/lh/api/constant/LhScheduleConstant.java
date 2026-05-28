@@ -324,6 +324,9 @@ public final class LhScheduleConstant {
     /** 新增排产欠产追补判断天数默认值（当前天发生欠产后，额外向后观察2天） */
     public static final int NEW_SPEC_SHORTAGE_LOOK_AHEAD_DAYS = 2;
 
+    /** 硫化示方历史保护开关默认值（0-关闭，1-开启） */
+    public static final int ENABLE_CURE_FORMULA_HISTORY_PROTECT = 0;
+
     // ======================== 排序跟踪日志输出控制 ========================
 
     /** SKU排序汇总日志默认输出前N名 */

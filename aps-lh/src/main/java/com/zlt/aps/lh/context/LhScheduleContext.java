@@ -150,6 +150,8 @@ public class LhScheduleContext {
 
     /** 前日排程结果列表(修正后) */
     private List<LhScheduleResult> previousScheduleResultList = new ArrayList<>();
+    /** 当前排程目标日上一轮排程结果（用于硫化示方历史保护） */
+    private List<LhScheduleResult> previousCureFormulaResultList = new ArrayList<>();
     /** 前日模具交替计划列表，供滚动衔接继承到本批次 */
     private List<LhMouldChangePlan> previousMouldChangePlanList = new ArrayList<>();
     /** 滚动排程继承结果列表，仅存放本批次继承的排程结果 */

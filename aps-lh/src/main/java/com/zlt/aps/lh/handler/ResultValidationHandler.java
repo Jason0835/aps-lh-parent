@@ -36,6 +36,7 @@ import org.springframework.util.CollectionUtils;
 import javax.annotation.Resource;
 import java.text.SimpleDateFormat;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -94,6 +95,9 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
 
             // S4.6.5.1 按SKU+日期汇总校验日计划完成情况
             addDailyPlanSummaryLog(context);
+
+            // S4.6.5.2 硫化示方历史保护：逐班次判断是否保留历史值
+            applyCureFormulaHistoryProtection(context);
 
             // S4.6.6 保存排程结果到数据库
             schedulePersistenceService.replaceScheduleAtomically(context);
@@ -1344,5 +1348,194 @@ public class ResultValidationHandler extends AbsScheduleStepHandler {
         public void setEstimatedEndTime(Date estimatedEndTime) {
             this.estimatedEndTime = estimatedEndTime;
         }
+    }
+
+    /**
+     * 硫化示方历史保护：对 1-8 班硫化示方号、硫化示方类型共 16 个字段，
+     * 按班次逐班判断是否属于历史班次，属于历史班次则保留历史排程结果的值。
+     * <p>核心逻辑：</p>
+     * <ol>
+     *   <li>检查 ENABLE_CURE_FORMULA_HISTORY_PROTECT 开关</li>
+     *   <li>从 context 读取 S4.2 已加载的上一轮排程结果</li>
+     *   <li>反推窗口开始日期 T = scheduleTargetDate - 2 天</li>
+     *   <li>获取当前精确时间 LocalDateTime.now()，判断当前所属班次 currentWindowShiftNo</li>
+     *   <li>逐机台逐班次判断是否历史班次：班次日期 &lt; 当前日期，或等于当前日期且班次编号 &lt; 当前班次</li>
+     *   <li>历史班次从历史结果复制 16 个字段，非历史班次保留本次排程值</li>
+     * </ol>
+     *
+     * @param context 排程上下文
+     */
+    private void applyCureFormulaHistoryProtection(LhScheduleContext context) {
+        // ===== 1. 检查开关：ENABLE_CURE_FORMULA_HISTORY_PROTECT = 1 时才启用 =====
+        if (!context.getScheduleConfig().isCureFormulaHistoryProtectEnabled()) {
+            return;
+        }
+
+        // ===== 2. 获取历史结果：S4.2 阶段已按 factoryCode + scheduleTargetDate 查询并放入 context =====
+        List<LhScheduleResult> historyList = context.getPreviousCureFormulaResultList();
+        if (CollectionUtils.isEmpty(historyList)) {
+            log.info("硫化示方历史保护: 不存在历史排程结果, 全部使用本次值");
+            return;
+        }
+
+        // ===== 3. 按机台编码建立历史结果 Map，用于后续快速匹配 =====
+        // key = lhMachineCode，同一目标日期下每个机台最多一条记录
+        Map<String, LhScheduleResult> historyMap = new HashMap<>();
+        for (LhScheduleResult hr : historyList) {
+            historyMap.put(hr.getLhMachineCode(), hr);
+        }
+
+        // ===== 4. 反推窗口开始日期 T = scheduleTargetDate - 2 天 =====
+        // 排程日期 scheduleDate 是 T+2（当前传入的排程目标日）
+        // 窗口开始日期 T = scheduleDate - 2 天
+        // 1-8 班次与日期映射：1-2班 -> T，3-5班 -> T+1，6-8班 -> T+2
+        Date targetDate = context.getScheduleTargetDate();
+        LocalDate scheduleLocalDate = targetDate.toInstant()
+                .atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate windowStartDate = scheduleLocalDate.minusDays(2);
+
+        // ===== 5. 获取当前精确时间，精确到年月日时分秒 =====
+        // 必须使用 LocalDateTime.now()，不能只取 LocalDate，否则无法判断当前落班次
+        LocalDateTime currentDateTime = LocalDateTime.now();
+        LocalDate currentDate = currentDateTime.toLocalDate();
+        Date currentTimeDate = Date.from(currentDateTime.atZone(ZoneId.systemDefault()).toInstant());
+
+        // ===== 6. 基于 T 日构建 1-8 班次列表 =====
+        // 通过 LhScheduleTimeUtil.getScheduleShifts 获取班次信息，每个班次包含 workDate（业务日）
+        Date windowStartDateTime = Date.from(
+                windowStartDate.atStartOfDay(ZoneId.systemDefault()).toInstant());
+        List<LhShiftConfigVO> shifts = LhScheduleTimeUtil.getScheduleShifts(context, windowStartDateTime);
+
+        // ===== 7. 判断当前时间所属的窗口班次编号（1-8） =====
+        // 用于后续"班次日期 = 当前日期"时比较班次大小
+        // 返回值 = -1 表示当前时间不在任意班次内
+        int currentWindowShiftNo = LhScheduleTimeUtil.getShiftIndex(
+                context, windowStartDateTime, currentTimeDate);
+
+        // ===== 8. 日志记录关键参数用于排查 =====
+        log.info("硫化示方历史保护: scheduleDate={}, windowStartDate={}, currentDateTime={}, "
+                        + "currentWindowShiftNo={}, historyResultCount={}",
+                scheduleLocalDate, windowStartDate, currentDateTime,
+                currentWindowShiftNo, historyList.size());
+
+        // 记录哪些班次命中了历史保护
+        List<Integer> protectedShifts = new ArrayList<>();
+
+        // ===== 9. 逐排程结果逐班次判断是否属于历史班次 =====
+        for (LhScheduleResult currentResult : context.getScheduleResultList()) {
+            String machineCode = currentResult.getLhMachineCode();
+            LhScheduleResult historyResult = historyMap.get(machineCode);
+            // 当前机台在历史结果中不存在，跳过保护
+            if (historyResult == null) {
+                continue;
+            }
+
+            // 逐班次处理 1-8 班
+            for (int shift = 1; shift <= 8; shift++) {
+                // 获取班次配置（含 workDate 等）
+                LhShiftConfigVO shiftConfig = findShiftByIndex(shifts, shift);
+                if (shiftConfig == null) {
+                    continue;
+                }
+
+                // 获取班次对应的实际生产日期
+                Date workDate = shiftConfig.getWorkDate();
+                if (workDate == null) {
+                    continue;
+                }
+
+                // 将班次日期转为 LocalDate 用于比较
+                LocalDate shiftDate = workDate.toInstant()
+                        .atZone(ZoneId.systemDefault()).toLocalDate();
+
+                // ===== 历史班次判断规则 =====
+                // 规则 1：shiftDate < currentDate → 历史班次
+                // 规则 2：shiftDate = currentDate 且 shift < currentWindowShiftNo → 历史班次
+                // 规则 3：shiftDate = currentDate 且 shift >= currentWindowShiftNo → 非历史（当前班次本身用本次值）
+                // 规则 4：shiftDate > currentDate → 非历史
+                boolean historyShift;
+                if (shiftDate.isBefore(currentDate)) {
+                    historyShift = true;
+                } else if (shiftDate.isEqual(currentDate)) {
+                    historyShift = currentWindowShiftNo > 0 && shift < currentWindowShiftNo;
+                } else {
+                    historyShift = false;
+                }
+
+                // ===== 10. 属于历史班次则复制硫化示方号 + 硫化示方类型 =====
+                if (historyShift) {
+                    protectedShifts.add(shift);
+                    copyCureFormulaFields(currentResult, historyResult, shift);
+                }
+                // 非历史班次保留本次排程值（不做任何修改）
+            }
+        }
+
+        // ===== 11. 日志输出保护结果 =====
+        log.info("硫化示方历史保护完成, 保留历史值班次: {}, 使用本次值班次: 除去保留班次的其余班次",
+                protectedShifts);
+    }
+
+    /**
+     * 将指定班次的硫化示方号、硫化示方类型从历史结果复制到当前结果。
+     * 历史值为空时也保留为空。
+     *
+     * @param target 当前排程结果
+     * @param source 历史排程结果
+     * @param shift  班次索引（1-8）
+     */
+    private void copyCureFormulaFields(LhScheduleResult target, LhScheduleResult source, int shift) {
+        switch (shift) {
+            case 1:
+                target.setClass1LhNo(source.getClass1LhNo());
+                target.setClass1LhType(source.getClass1LhType());
+                break;
+            case 2:
+                target.setClass2LhNo(source.getClass2LhNo());
+                target.setClass2LhType(source.getClass2LhType());
+                break;
+            case 3:
+                target.setClass3LhNo(source.getClass3LhNo());
+                target.setClass3LhType(source.getClass3LhType());
+                break;
+            case 4:
+                target.setClass4LhNo(source.getClass4LhNo());
+                target.setClass4LhType(source.getClass4LhType());
+                break;
+            case 5:
+                target.setClass5LhNo(source.getClass5LhNo());
+                target.setClass5LhType(source.getClass5LhType());
+                break;
+            case 6:
+                target.setClass6LhNo(source.getClass6LhNo());
+                target.setClass6LhType(source.getClass6LhType());
+                break;
+            case 7:
+                target.setClass7LhNo(source.getClass7LhNo());
+                target.setClass7LhType(source.getClass7LhType());
+                break;
+            case 8:
+                target.setClass8LhNo(source.getClass8LhNo());
+                target.setClass8LhType(source.getClass8LhType());
+                break;
+            default:
+                break;
+        }
+    }
+
+    /**
+     * 按班次索引从班次列表中查找对应班次。
+     *
+     * @param shifts     班次列表
+     * @param shiftIndex 班次索引（1-8）
+     * @return 班次视图，未找到返回 null
+     */
+    private LhShiftConfigVO findShiftByIndex(List<LhShiftConfigVO> shifts, int shiftIndex) {
+        for (LhShiftConfigVO shift : shifts) {
+            if (shift.getShiftIndex() != null && shift.getShiftIndex() == shiftIndex) {
+                return shift;
+            }
+        }
+        return null;
     }
 }

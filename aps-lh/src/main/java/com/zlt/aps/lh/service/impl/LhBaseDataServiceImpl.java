@@ -266,8 +266,34 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         // 23. 加载SKU与示方书关系
         loadSkuConstructionRef(context, factoryCode);
 
+        // 24. 加载当前目标日上一轮排程结果（用于硫化示方历史保护）
+        loadHistoryCureFormulaResults(context, factoryCode, targetDate);
+
         log.info("基础数据加载完成, 工厂: {}, 目标日: {}, T日: {}",
                 factoryCode, LhScheduleTimeUtil.formatDate(targetDate), LhScheduleTimeUtil.formatDate(scheduleDate));
+    }
+
+    /**
+     * 加载当前排程目标日的上一轮排程结果（用于硫化示方历史保护）。
+     * 仅当 ENABLE_CURE_FORMULA_HISTORY_PROTECT = 1 时加载，结果放入
+     * context.previousCureFormulaResultList，供 S4.6 保护逻辑使用。
+     *
+     * @param context     排程上下文
+     * @param factoryCode 分厂编号
+     * @param targetDate  排程目标日
+     */
+    private void loadHistoryCureFormulaResults(LhScheduleContext context, String factoryCode, Date targetDate) {
+        if (!context.getScheduleConfig().isCureFormulaHistoryProtectEnabled()) {
+            return;
+        }
+        List<LhScheduleResult> list = lhScheduleResultMapper.selectList(new LambdaQueryWrapper<LhScheduleResult>()
+                .eq(LhScheduleResult::getFactoryCode, factoryCode)
+                .eq(LhScheduleResult::getScheduleDate, targetDate)
+                .eq(LhScheduleResult::getIsDelete, DeleteFlagEnum.NORMAL.getCode()));
+        context.setPreviousCureFormulaResultList(list != null ? list : new ArrayList<>());
+        log.info("硫化示方历史排程结果加载完成, 数量: {}, 日期: {}",
+                context.getPreviousCureFormulaResultList().size(),
+                LhScheduleTimeUtil.formatDate(targetDate));
     }
 
     /**

@@ -468,4 +468,14 @@ public class LhScheduleConfig {
         return Math.max(1, getParamIntValue(LhScheduleParamConstant.NEW_SPEC_SHORTAGE_LOOK_AHEAD_DAYS,
                 LhScheduleConstant.NEW_SPEC_SHORTAGE_LOOK_AHEAD_DAYS));
     }
+
+    /**
+     * 判断是否启用硫化示方历史保护。
+     *
+     * @return true-启用；false-关闭
+     */
+    public boolean isCureFormulaHistoryProtectEnabled() {
+        return getParamIntValue(LhScheduleParamConstant.ENABLE_CURE_FORMULA_HISTORY_PROTECT,
+                LhScheduleConstant.ENABLE_CURE_FORMULA_HISTORY_PROTECT) == 1;
+    }
 }

@@ -200,7 +200,8 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
         int year = cal.get(Calendar.YEAR);
         int month = cal.get(Calendar.MONTH) + 1;
 
-        // 1. 定稿排产版本是月计划、周程滚动调整等任务的前置条件，先单独完成。
+        // 1. 定稿排产版本是月计划、周程滚动调整等任务的前置条件，先单独同步完成。
+        //    （若不先同步获取 productionVersion，后续月计划查询会因缺少版本号导致加载不准确。）
         waitForDataInitTasks(runDataInitTaskAsync("月生产计划版本",
                 () -> loadFinalProductionVersion(context, factoryCode, year, month),
                 () -> StringUtils.isNotEmpty(context.getProductionVersion()) ? 1 : 0));
@@ -215,6 +216,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                 LhScheduleParamConstant.MACHINE_ONLINE_LOOKBACK_DAYS,
                 LhScheduleConstant.MACHINE_ONLINE_LOOKBACK_DAYS);
 
+        // 2. 创建异步任务并建立任务间的依赖关系：
+        //    - 月生产计划（monthPlanFuture）是特殊物料清单和胎胚库存的前置依赖，后者通过 thenCompose 串联。
+        //    - 硫化机台信息（machineInfoFuture）是模具清洗计划的前置依赖，清洗计划需要根据已加载的机台列表过滤查询条件。
+        //    - 机台信息与月计划无依赖关系，两者可并发加载。
         CompletableFuture<Void> monthPlanFuture = runDataInitTaskAsync("月生产计划",
                 () -> loadMonthPlan(context, factoryCode, year, month),
                 () -> sizeOf(context.getMonthPlanList()));
@@ -231,6 +236,11 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
                 () -> loadCleaningPlan(context, factoryCode, startDate, endDate),
                 () -> sizeOf(context.getCleaningPlanList()));
 
+        // 3. 等待所有无依赖的并行任务完成（含已通过 thenCompose 串联的依赖链）。
+        //    使用 CompletableFuture.allOf().join() 实现屏障同步：
+        //    - 任一任务抛出异常，join() 会透传 CompletionException，由 waitForDataInitTasks 统一解包。
+        //    - 任务间的依赖通过 runAfterDataInitTask（thenCompose）保证执行顺序，
+        //      因此此处只需等待顶层 Future 完成即可（底层依赖链会自动传递完成状态）。
         waitForDataInitTasks(
                 monthPlanFuture,
                 specialMaterialBomFuture,
@@ -306,6 +316,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /**
      * 异步执行基础数据初始化任务。
+     * <p>使用 CompletableFuture.runAsync 将任务提交到 lhDataInitExecutor 线程池执行，
+     * 实现多个数据源并行加载，缩短总初始化耗时。
+     * 任务名 + 数据量统计 Supplier 用于日志监控，便于排查初始化瓶颈。</p>
      *
      * @param taskName      任务名称
      * @param task          初始化逻辑
@@ -318,6 +331,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /**
      * 在依赖任务完成后异步执行后续初始化任务。
+     * <p>使用 thenCompose 实现异步任务的链式编排：当 dependency 正常完成后，
+     * 自动提交后续 task 到同一线程池执行，保证 B 依赖 A 的执行顺序。
+     * 注意：dependency 失败时后续任务不会执行，异常会沿 Future 链传播到 waitForDataInitTasks。</p>
      *
      * @param dependency    前置任务
      * @param taskName      任务名称
@@ -332,6 +348,10 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /**
      * 执行单个基础数据初始化任务并打印耗时。
+     * <p>该方法在 lhDataInitExecutor 线程池的 worker 线程中执行（由 CompletableFuture.runAsync 调度），
+     * 因此 Thread.currentThread().getName() 可用于监控线程池资源使用情况。
+     * 任何运行时异常都会从 submit 的 Runnable 中透出，被 CompletableFuture 捕获并包装为 CompletionException，
+     * 最终由 waitForDataInitTasks 统一处理。</p>
      *
      * @param taskName      任务名称
      * @param task          初始化逻辑
@@ -362,6 +382,11 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /**
      * 等待基础数据初始化任务完成并透传真实异常。
+     * <p>使用 CompletableFuture.allOf 聚合所有并行任务，join() 同步阻塞等待：
+     * - 所有 Future 都正常完成则返回。
+     * - 任一 Future 抛出异常，join() 抛出 CompletionException，通过 unwrapCompletionException 递归解包，
+     * 透传业务异常（RuntimeException / Error），避免线程池包装异常被吞掉。
+     * - 主线程在此阻塞，确保 loadAllBaseData 返回时所有基础数据已就绪。</p>
      *
      * @param futures 初始化任务集合
      */
@@ -395,6 +420,9 @@ public class LhBaseDataServiceImpl implements ILhBaseDataService {
 
     /**
      * 解包 CompletableFuture 包装异常。
+     * <p>CompletableFuture.allOf().join() 抛出的 CompletionException 可能嵌套多层，
+     * 需要递归解包直到找到真实的业务异常根因（如 SQLException、IllegalArgumentException 等），
+     * 避免在日志中只看到 CompletionException 代理类而丢失原始错误信息。</p>
      *
      * @param throwable 异常
      * @return 根因异常
